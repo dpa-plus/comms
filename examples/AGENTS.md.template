@@ -1,0 +1,32 @@
+<!-- COMMS PROTOCOL — READ FIRST -->
+
+This repo uses `comms` (github.com/dpa-plus/comms) for multi-agent coordination.
+
+**On every session start, before any other work:**
+```bash
+comms hello && comms status
+```
+
+**Before any file edit:**
+```bash
+comms claim "src/path/to/file.ts" --intent "what you're changing"
+```
+If exit code 1: read stderr, surface the conflict to the user, ask whether the prior session is alive. If user authorizes, use `--steal <id> --reason "..."`.
+
+**When done with a claim:**
+```bash
+comms release --result "PR #123 merged"
+```
+
+**Record findings:**
+```bash
+comms find fix "..." --ref path:src/foo.ts --ref commit:abc1234     # problem resolved
+comms find bug "..." --ref path:src/bar.ts                          # open problem
+comms find decision "..." --ref doc:slug                            # architecture choice
+comms find gotcha "..." --ref path:src/auth.ts                      # persistent trap
+comms find ship "..." --ref pr:#123                                 # released
+```
+
+**FAILURE TO RUN `comms hello` BEFORE FIRST EDIT IS A PROTOCOL VIOLATION.**
+
+<!-- END COMMS PROTOCOL -->
