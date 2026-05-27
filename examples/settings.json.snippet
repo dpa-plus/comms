@@ -1,0 +1,20 @@
+{
+  "_comment": "Merge this `hooks` block into your existing ~/.claude/settings.json.",
+  "_comment_actor": "$COMMS_ACTOR must be set BEFORE Claude Code launches. Use the `cc` shell wrapper in your ~/.zshrc (see INSTALL.md).",
+
+  "hooks": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "comms hello && comms status --since 24h"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "type": "command",
+        "command": "comms check --stdin-json"
+      }
+    ]
+  }
+}
