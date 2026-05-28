@@ -50,6 +50,7 @@ type Claim struct {
 // Session is the most-recent hello per actor.
 type Session struct {
 	Actor    string
+	Label    string
 	TS       time.Time
 	BaseName string
 	Hostname string
@@ -136,6 +137,7 @@ func Fold(events []event.Event) *State {
 		case event.TypeHello:
 			s.Sessions[ev.Actor] = &Session{
 				Actor:    ev.Actor,
+				Label:    stringOf(ev.Data, "label"),
 				TS:       ev.TS,
 				BaseName: stringOf(ev.Data, "base_name"),
 				Hostname: stringOf(ev.Data, "hostname"),
@@ -160,6 +162,17 @@ func Fold(events []event.Event) *State {
 			refs := refList(ev.Data, "refs")
 			for _, ref := range refs {
 				delete(s.Claims, ref)
+			}
+			if boolOf(ev.Data, "session_retire") {
+				delete(s.Sessions, stringOf(ev.Data, "retired_actor"))
+			}
+			if boolOf(ev.Data, "leader_transfer") {
+				for _, sess := range s.Sessions {
+					sess.Leader = false
+				}
+				if sess := s.Sessions[stringOf(ev.Data, "leader_actor")]; sess != nil {
+					sess.Leader = true
+				}
 			}
 			if boolOf(ev.Data, "comms_session_end") {
 				reason := stringOf(ev.Data, "reason")

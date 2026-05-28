@@ -15,6 +15,7 @@ import (
 // NewHelloCmd announces a session in the log and prints the active actor
 // prominently (first line of output) so misconfiguration is visible.
 func NewHelloCmd() *cobra.Command {
+	var label string
 	cmd := &cobra.Command{
 		Use:   "hello [<name>]",
 		Short: "Announce this session in the log",
@@ -25,18 +26,20 @@ Without an argument, $COMMS_ACTOR must be set (or this is a read-only
 "who am I" lookup).`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runHello(args)
+			return runHello(args, label)
 		},
 	}
+	cmd.Flags().StringVar(&label, "label", "", "friendly display label for this actor in status/UI")
 	return cmd
 }
 
-func runHello(args []string) error {
+func runHello(args []string, label string) error {
 	// If an explicit name is given, that becomes the actor for this call.
 	// We still validate it against the same rules COMMS_ACTOR would face.
 	if len(args) == 1 {
 		os.Setenv(actor.EnvVar, args[0])
 	}
+	label = strings.TrimSpace(label)
 	rt, err := Open(OpenOpts{Mutating: true})
 	if err != nil {
 		return err
@@ -62,6 +65,9 @@ func runHello(args []string) error {
 			"leader":    isLeader,
 		},
 	}
+	if label != "" {
+		ev.Data["label"] = label
+	}
 	if err := rt.Append(ev); err != nil {
 		return err
 	}
@@ -80,6 +86,9 @@ func runHello(args []string) error {
 
 	// FIRST LINE: actor name. Visible even when output scrolls.
 	fmt.Printf("@%s registered.\n", rt.Actor)
+	if label != "" {
+		fmt.Printf("  Label:   %s\n", label)
+	}
 	if isLeader {
 		fmt.Println("  Role:    leader (can post priority notes/findings)")
 	}
@@ -94,6 +103,7 @@ func runHello(args []string) error {
 	}
 	fmt.Println()
 	fmt.Println("If this is the wrong actor name, set $COMMS_ACTOR and re-run `comms hello`.")
+	fmt.Println("Use `comms hello --label \"Claude Dev\"` to change only the UI display name.")
 	return nil
 }
 

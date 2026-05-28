@@ -12,33 +12,55 @@ This drops `comms` into `$GOBIN` (typically `~/go/bin/` or `~/.local/bin/`). Mak
 
 ## 2. Manual / desktop-app use
 
-`comms` requires `$COMMS_ACTOR` to be a **per-session** name (e.g. `claude-3a1f`, `codex-9b2c`, `human-eli`). A generic name shared across all your sessions (just `eli` or `claude`) is rejected by default because it breaks the conflict model — `comms check` would treat every other live agent's claim as "held by same actor" and wave through edits.
+`comms` requires `$COMMS_ACTOR` to be a concrete actor name. For desktop-app
+work, prefer stable readable actors per live assistant role, such as
+`claude-dev`, `codex-dev`, and `human-eli`. A generic name shared across all
+your sessions (just `eli` or `claude`) is rejected by default because it breaks
+the conflict model — `comms check` would treat every other live agent's claim
+as "held by same actor" and wave through edits.
 
 If you use Claude or Codex from desktop apps and want opt-in coordination,
 do not install hooks and do not edit shell startup files. Instead, invoke the
 `using-comms` skill explicitly and prefix every command:
 
 ```bash
-COMMS_ACTOR=claude-20260527-a comms hello
-COMMS_ACTOR=claude-20260527-a comms status
-COMMS_ACTOR=claude-20260527-a comms claim "src/foo.ts" --intent "fix bug"
-COMMS_ACTOR=claude-20260527-a comms release --latest --result "done"
+COMMS_ACTOR=claude-dev comms hello --label "Claude Dev"
+COMMS_ACTOR=claude-dev comms status
+COMMS_ACTOR=claude-dev comms claim "src/foo.ts" --intent "fix bug"
+COMMS_ACTOR=claude-dev comms release --latest --result "done"
 ```
 
 Pick one actor per assistant conversation and reuse it until that conversation
 ends.
+
+If an agent accidentally registers a throwaway actor name, do not edit the
+JSONL log. Append an audit event that retires it from the active roster:
+
+```bash
+COMMS_ACTOR=claude-dev comms session retire claude-7e4c --reason "renamed to claude-dev"
+```
+
+Retiring an actor removes it from **Active Sessions** and releases any active
+claims it still held. The old historical rows remain in the append-only log and
+in archived session analysis.
 
 The first active session is shown as the **leader** in the UI. This is not a
 manager role and does not add protocol steps. It only lets that actor post
 high-priority messages:
 
 ```bash
-COMMS_ACTOR=claude-20260527-a comms note --priority "Everyone should know: stop touching aggregation until claim clears."
-COMMS_ACTOR=claude-20260527-a comms find --priority decision "tracker overlay is the source of truth"
+COMMS_ACTOR=claude-dev comms note --priority "Everyone should know: stop touching aggregation until claim clears."
+COMMS_ACTOR=claude-dev comms find --priority decision "tracker overlay is the source of truth"
 ```
 
 Priority notes/findings are pinned above normal notes/findings in status and
 the dashboard.
+
+To make a different active actor the leader:
+
+```bash
+COMMS_ACTOR=human-eli comms session lead claude-dev --reason "user asked Claude Dev to lead"
+```
 
 To watch the repo state in a browser:
 

@@ -14,11 +14,13 @@ event log.
 
 ## Actor Identity
 
-In desktop app sessions, prefix every command with a concrete actor:
+In desktop app sessions, prefix every command with a concrete actor. Prefer
+stable readable actors for the current role, plus a UI label on hello:
 
 ```bash
-COMMS_ACTOR=claude-20260527-a comms status
-COMMS_ACTOR=codex-20260527-a comms status
+COMMS_ACTOR=claude-dev comms hello --label "Claude Dev"
+COMMS_ACTOR=codex-dev comms hello --label "Codex Dev"
+COMMS_ACTOR=claude-dev comms status
 ```
 
 Pick one actor name when this skill starts and reuse it for the conversation.
@@ -27,8 +29,8 @@ Do not use generic names like `eli`, `claude`, `codex`, `agent`, or `user`.
 ## Session Start
 
 ```bash
-COMMS_ACTOR=claude-20260527-a comms hello
-COMMS_ACTOR=claude-20260527-a comms status
+COMMS_ACTOR=claude-dev comms hello --label "Claude Dev"
+COMMS_ACTOR=claude-dev comms status
 ```
 
 Mention the chosen actor in your reply so the user can see it.
@@ -52,36 +54,57 @@ The backend advertises `actions`, `current_session.events`, and
 `comms_sessions[].events`; those are filtered views over the append-only JSONL
 log.
 
+## Session Roster Admin
+
+If the user asks you to remove an old/accidental actor from active sessions,
+retire it. This appends an audit event, releases that actor's active claims,
+and removes it from the live roster without deleting history:
+
+```bash
+COMMS_ACTOR=claude-dev comms session retire claude-7e4c --reason "renamed to claude-dev"
+```
+
+If the user asks you to become or assign the leader, transfer leadership:
+
+```bash
+COMMS_ACTOR=claude-dev comms session lead --reason "user asked Claude Dev to lead"
+COMMS_ACTOR=human-eli comms session lead claude-dev --reason "user asked Claude Dev to lead"
+```
+
+The leader's only extra privilege is posting priority notes/findings. Do not
+say "I can't delete old actors"; say that `session retire` removes them from
+active view while preserving the append-only audit log.
+
 ## Claim Before Edits
 
 Before editing a file in a coordinated project:
 
 ```bash
-COMMS_ACTOR=claude-20260527-a comms claim "frontend/src/lib/aggregate.ts" --intent "fix lead double-counting"
+COMMS_ACTOR=claude-dev comms claim "frontend/src/lib/aggregate.ts" --intent "fix lead double-counting"
 ```
 
 Use narrower anchors when practical:
 
 ```bash
-COMMS_ACTOR=claude-20260527-a comms claim "frontend/src/lib/aggregate.ts#L40-90" --intent "rewrite aggregation loop"
-COMMS_ACTOR=claude-20260527-a comms claim "src/auth.ts#validateToken" --intent "tighten JWT expiry check"
+COMMS_ACTOR=claude-dev comms claim "frontend/src/lib/aggregate.ts#L40-90" --intent "rewrite aggregation loop"
+COMMS_ACTOR=claude-dev comms claim "src/auth.ts#validateToken" --intent "tighten JWT expiry check"
 ```
 
 ## Release
 
 ```bash
-COMMS_ACTOR=claude-20260527-a comms release --latest --result "PR #321 merged"
-COMMS_ACTOR=claude-20260527-a comms release --all-mine --result "switching tasks"
+COMMS_ACTOR=claude-dev comms release --latest --result "PR #321 merged"
+COMMS_ACTOR=claude-dev comms release --all-mine --result "switching tasks"
 ```
 
 ## Findings
 
 ```bash
-COMMS_ACTOR=claude-20260527-a comms find fix "leads sourced only from tracker overlay" --ref path:frontend/src/lib/aggregate.ts
-COMMS_ACTOR=claude-20260527-a comms find decision "tracker is source of truth for leads" --ref doc:lead-counting
-COMMS_ACTOR=claude-20260527-a comms find gotcha "META_TOKEN_ENC_KEY is immutable after first deploy" --ref path:src/crypto.ts
-COMMS_ACTOR=claude-20260527-a comms find bug "tracker rows duplicated when Meta sync runs more than once per hour"
-COMMS_ACTOR=claude-20260527-a comms find ship "v1.4 deployed to develop" --ref pr:#321
+COMMS_ACTOR=claude-dev comms find fix "leads sourced only from tracker overlay" --ref path:frontend/src/lib/aggregate.ts
+COMMS_ACTOR=claude-dev comms find decision "tracker is source of truth for leads" --ref doc:lead-counting
+COMMS_ACTOR=claude-dev comms find gotcha "META_TOKEN_ENC_KEY is immutable after first deploy" --ref path:src/crypto.ts
+COMMS_ACTOR=claude-dev comms find bug "tracker rows duplicated when Meta sync runs more than once per hour"
+COMMS_ACTOR=claude-dev comms find ship "v1.4 deployed to develop" --ref pr:#321
 ```
 
 Category cheat sheet:
@@ -95,15 +118,15 @@ Category cheat sheet:
 Use `comms note` for short FYIs that are not persistent decisions:
 
 ```bash
-COMMS_ACTOR=claude-20260527-a comms note "FYI Prisma schema migration coming next session"
+COMMS_ACTOR=claude-dev comms note "FYI Prisma schema migration coming next session"
 ```
 
 ## Docs
 
 ```bash
-COMMS_ACTOR=claude-20260527-a comms doc --list
-COMMS_ACTOR=claude-20260527-a comms doc tracker-architecture
-COMMS_ACTOR=claude-20260527-a comms doc tracker-architecture --edit
+COMMS_ACTOR=claude-dev comms doc --list
+COMMS_ACTOR=claude-dev comms doc tracker-architecture
+COMMS_ACTOR=claude-dev comms doc tracker-architecture --edit
 ```
 
 ## Global Lessons
@@ -120,7 +143,7 @@ Only add or edit a lesson when the user explicitly asks or approves a proposed
 lesson:
 
 ```bash
-COMMS_ACTOR=claude-20260527-a comms lesson verify-data-before-ui --edit
+COMMS_ACTOR=claude-dev comms lesson verify-data-before-ui --edit
 ```
 
 ## Conflict Handling
@@ -131,13 +154,13 @@ Do not run `--steal` unless the user confirms the prior session is dead.
 If the user confirms takeover:
 
 ```bash
-COMMS_ACTOR=claude-20260527-a comms claim "src/foo.ts" --intent "<your intent>" --steal <claim-id> --reason "user verified prior session ended"
+COMMS_ACTOR=claude-dev comms claim "src/foo.ts" --intent "<your intent>" --steal <claim-id> --reason "user verified prior session ended"
 ```
 
 If the session is still active, choose another scope or leave a note:
 
 ```bash
-COMMS_ACTOR=claude-20260527-a comms note "@claude-3a1f can I take src/foo.ts when you're done?"
+COMMS_ACTOR=claude-dev comms note "@claude-3a1f can I take src/foo.ts when you're done?"
 ```
 
 ## Failure Modes
