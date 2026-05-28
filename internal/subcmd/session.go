@@ -99,13 +99,13 @@ func appendSessionRetire(rt *Runtime, target, reason string) (int, error) {
 	if target == "" {
 		return 0, fmt.Errorf("session retire: actor is required")
 	}
-	if rt.State.Sessions[target] == nil {
-		return 0, fmt.Errorf("session retire: @%s is not active", target)
+	claims := rt.State.ActiveClaimsByActor(target)
+	if rt.State.Sessions[target] == nil && len(claims) == 0 {
+		return 0, fmt.Errorf("session retire: @%s has no active session or claims", target)
 	}
 	if reason = strings.TrimSpace(reason); reason == "" {
 		reason = "retired from active sessions"
 	}
-	claims := rt.State.ActiveClaimsByActor(target)
 	refs := make([]interface{}, 0, len(claims))
 	for _, c := range claims {
 		refs = append(refs, c.ID)

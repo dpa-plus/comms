@@ -857,6 +857,11 @@ button.danger {
   border-color: var(--red);
   color: var(--red);
 }
+button.small {
+  height: 28px;
+  padding: 0 9px;
+  font-size: 12px;
+}
 button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
@@ -1060,6 +1065,7 @@ th {
   .claims td:nth-child(2)::before { content: "Scope"; }
   .claims td:nth-child(3)::before { content: "Intent"; }
   .claims td:nth-child(4)::before { content: "Age"; }
+  .claims td:nth-child(5)::before { content: "Action"; }
   .events td:nth-child(1)::before { content: "When"; }
   .events td:nth-child(2)::before { content: "Type"; }
   .events td:nth-child(3)::before { content: "Actor"; }
@@ -1172,6 +1178,7 @@ async function load() {
   latestData = data;
   const startAction = actionByID(data, 'start_comms_session');
   const endAction = actionByID(data, 'end_comms_session');
+  const retireAction = actionByID(data, 'retire_session_actor');
   el('startComms').disabled = !startAction.enabled;
   el('startComms').title = startAction.reason || mutationHelp(data);
   el('endComms').disabled = !endAction.enabled;
@@ -1188,9 +1195,16 @@ async function load() {
     '<div class="row"><div class="actor">' + fmtTime(s.started_at) + ' → ' + fmtTime(s.ended_at) + '</div><div class="meta">ended by @' + esc(s.ended_by) + ' · ' + esc(s.reason || 'comms session ended') + '</div><div class="meta">' + esc(s.event_count) + ' event(s) · ' + esc(s.claim_count) + ' claim(s) · ' + esc(s.finding_count) + ' finding(s) · ' + esc(s.note_count) + ' note(s)</div><div class="meta">' + esc((s.actors || []).map(a => '@' + a).join(', ')) + '</div></div>',
     'No archived comms sessions yet. Use End Comms Session when the project work window is done.');
   el('claims').innerHTML = '<div class="hint">Claims older than ' + esc(data.project.stale_after) + ' are marked stale. ' + esc(mutationHelp(data)) + '</div>' +
-    renderTable(data.claims, ['Actor', 'Scope', 'Intent', 'Age'], c =>
-    '<tr class="' + (c.stale ? 'claim-stale' : '') + '"><td><span class="actor">@' + esc(c.actor) + '</span></td><td><div class="scope">' + esc(c.scope) + '</div><div class="copy">' + esc(c.id.slice(0, 10)) + '</div></td><td>' + esc(c.intent) + '</td><td>' + esc(c.age) + (c.stale ? '<div><span class="pill stale">stale</span></div>' : '') + '</td></tr>',
+    renderTable(data.claims, ['Actor', 'Scope', 'Intent', 'Age', 'Action'], c => {
+      const action = c.stale && retireAction.enabled
+        ? '<button class="small danger" type="button" data-retire-actor="' + esc(c.actor) + '">Retire actor</button>'
+        : (c.stale ? '<span class="pill stale">stale</span>' : '<span class="meta">active</span>');
+      return '<tr class="' + (c.stale ? 'claim-stale' : '') + '"><td><span class="actor">@' + esc(c.actor) + '</span></td><td><div class="scope">' + esc(c.scope) + '</div><div class="copy">' + esc(c.id.slice(0, 10)) + '</div></td><td>' + esc(c.intent) + '</td><td>' + esc(c.age) + (c.stale ? '<div><span class="pill stale">stale</span></div>' : '') + '</td><td>' + action + '</td></tr>';
+    },
     'No active claims.');
+  document.querySelectorAll('[data-retire-actor]').forEach(button => {
+    button.addEventListener('click', () => retireActor(button.getAttribute('data-retire-actor')));
+  });
   el('findings').innerHTML = renderRows(data.findings, f =>
     '<div class="row">' + (f.priority ? '<span class="pill priority">priority</span> ' : '') + '<span class="pill finding">' + esc(f.category) + '</span><div class="intent">' + esc(f.summary) + '</div><div class="meta">@' + esc(f.actor) + ' · ' + fmtTime(f.ts) + '</div></div>',
     'No findings in the last 24h.');
@@ -1265,6 +1279,18 @@ async function endCommsSession() {
   if (!res.ok) throw new Error(await res.text());
   selectedSessionID = '';
   localStorage.removeItem('selectedSessionID');
+  hideError();
+  await load();
+}
+async function retireActor(actor) {
+  const reason = window.prompt('Retire @' + actor + '? This releases all active claims held by that actor and removes it from the active roster. History stays in the log.', 'stale actor retired from UI');
+  if (reason === null) return;
+  const res = await fetch('/api/session/retire', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ actor, reason })
+  });
+  if (!res.ok) throw new Error(await res.text());
   hideError();
   await load();
 }

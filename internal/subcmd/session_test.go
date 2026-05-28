@@ -52,6 +52,45 @@ func TestRunSessionRetireRemovesActorAndReleasesClaims(t *testing.T) {
 	}
 }
 
+func TestRunSessionRetireReleasesClaimsWithoutActiveSession(t *testing.T) {
+	repo := setupUITestRepo(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("COMMS_ACTOR", "human-eli")
+	t.Setenv("USER", "eli")
+	t.Chdir(repo)
+
+	rt, err := Open(OpenOpts{Mutating: true})
+	if err != nil {
+		t.Fatalf("open runtime: %v", err)
+	}
+	claimID := "01JX2Q3Y7W5B6N9P0R1S2T3R2A"
+	if err := rt.Append(event.Event{
+		TS:    time.Now().Add(-9 * time.Minute).UTC(),
+		ID:    claimID,
+		Actor: "claude-old",
+		Type:  event.TypeClaim,
+		Scope: []string{"src/old.ts"},
+		Data:  map[string]interface{}{"intent": "stale work"},
+	}); err != nil {
+		t.Fatalf("append setup: %v", err)
+	}
+	if err := rt.Close(); err != nil {
+		t.Fatalf("close runtime: %v", err)
+	}
+
+	if err := runSessionRetire("claude-old", "stale claim"); err != nil {
+		t.Fatalf("retire stale claim actor: %v", err)
+	}
+	rt, err = Open(OpenOpts{Mutating: false})
+	if err != nil {
+		t.Fatalf("reopen runtime: %v", err)
+	}
+	defer rt.Close()
+	if rt.State.Claims[claimID] != nil {
+		t.Fatalf("claim-only actor claim still active")
+	}
+}
+
 func TestRunSessionLeadTransfersLeader(t *testing.T) {
 	repo := setupUITestRepo(t)
 	t.Setenv("HOME", t.TempDir())
