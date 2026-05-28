@@ -90,6 +90,49 @@ func TestFoldClaimAndRelease(t *testing.T) {
 	}
 }
 
+func TestFoldSessionEndArchivesSessionAndReleasesClaims(t *testing.T) {
+	now := time.Now().UTC()
+	hello := mkEvent(t, now, "claude-1", event.TypeHello, nil, map[string]interface{}{"leader": true})
+	claim := mkEvent(t, now.Add(time.Second), "claude-1", event.TypeClaim, []string{"src/foo.ts"}, map[string]interface{}{"intent": "fix bug"})
+	end := mkEvent(t, now.Add(2*time.Second), "human-eli", event.TypeRelease, nil, map[string]interface{}{
+		"refs":        []interface{}{claim.ID},
+		"session_end": true,
+		"ended_actor": "claude-1",
+		"reason":      "project done",
+	})
+	s := Fold([]event.Event{hello, claim, end})
+	if len(s.Claims) != 0 {
+		t.Fatalf("session end should release claims, got %+v", s.Claims)
+	}
+	if _, ok := s.Sessions["claude-1"]; ok {
+		t.Fatalf("ended session should not remain active")
+	}
+	ended := s.EndedSessions["claude-1"]
+	if ended == nil {
+		t.Fatalf("ended session not archived")
+	}
+	if ended.EndedBy != "human-eli" || ended.Reason != "project done" || len(ended.ReleasedRefs) != 1 {
+		t.Fatalf("bad archive: %+v", ended)
+	}
+}
+
+func TestFoldHelloReactivatesEndedSession(t *testing.T) {
+	now := time.Now().UTC()
+	end := mkEvent(t, now, "human-eli", event.TypeRelease, nil, map[string]interface{}{
+		"session_end": true,
+		"ended_actor": "claude-1",
+		"reason":      "done",
+	})
+	hello := mkEvent(t, now.Add(time.Second), "claude-1", event.TypeHello, nil, map[string]interface{}{"hostname": "host"})
+	s := Fold([]event.Event{end, hello})
+	if s.EndedSessions["claude-1"] != nil {
+		t.Fatalf("new hello should remove ended archive while active")
+	}
+	if s.Sessions["claude-1"] == nil {
+		t.Fatalf("session should be active after new hello")
+	}
+}
+
 func TestFoldArbitratedSteal(t *testing.T) {
 	now := time.Now().UTC()
 	alice := mkEvent(t, now, "alice", event.TypeClaim, []string{"src/foo.ts"}, map[string]interface{}{"intent": "long task"})

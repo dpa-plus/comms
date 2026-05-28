@@ -4,16 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/dpa-plus/comms/internal/actor"
 	"github.com/dpa-plus/comms/internal/event"
-	"github.com/dpa-plus/comms/internal/overlap"
 	"github.com/dpa-plus/comms/internal/state"
 	"github.com/spf13/cobra"
 )
@@ -55,14 +51,7 @@ func runUI(addr string, demo bool, staleAfter time.Duration) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", server.servePage)
 	mux.HandleFunc("/api/status", server.serveStatus)
-	mux.HandleFunc("/api/hello", server.serveHello)
-	mux.HandleFunc("/api/check", server.serveCheck)
-	mux.HandleFunc("/api/claims", server.serveCreateClaim)
-	mux.HandleFunc("/api/claims/release", server.serveReleaseClaim)
-	mux.HandleFunc("/api/claims/release-mine", server.serveReleaseMine)
-	mux.HandleFunc("/api/notes", server.serveCreateNote)
-	mux.HandleFunc("/api/findings", server.serveCreateFinding)
-	mux.HandleFunc("/api/docs/", server.serveDoc)
+	mux.HandleFunc("/api/sessions/end", server.serveEndSession)
 
 	fmt.Printf("comms ui listening on http://%s\n", addr)
 	fmt.Printf("Claims older than %s are marked stale. Press Ctrl-C to stop.\n", staleAfter)
@@ -112,12 +101,26 @@ func (s uiServer) serveStatus(w http.ResponseWriter, r *http.Request) {
 	_ = enc.Encode(buildUISnapshot(rt, s.staleAfter))
 }
 
-func (s uiServer) serveHello(w http.ResponseWriter, r *http.Request) {
+func (s uiServer) serveEndSession(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if s.rejectDemo(w, "demo mode is read-only; no hello event is written") {
+	if s.demo {
+		http.Error(w, "demo mode is read-only; no session end event is written", http.StatusConflict)
+		return
+	}
+	var req struct {
+		Actor  string `json:"actor"`
+		Reason string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+	endedActor := strings.TrimSpace(req.Actor)
+	if endedActor == "" {
+		http.Error(w, "missing actor", http.StatusBadRequest)
 		return
 	}
 	rt, err := Open(OpenOpts{Mutating: true})
@@ -126,20 +129,30 @@ func (s uiServer) serveHello(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer rt.Close()
-
+	if _, ok := rt.State.Sessions[endedActor]; !ok {
+		http.Error(w, fmt.Sprintf("@%s is not an active session", endedActor), http.StatusConflict)
+		return
+	}
+	claims := rt.State.ActiveClaimsByActor(endedActor)
+	refs := make([]interface{}, 0, len(claims))
+	for _, claim := range claims {
+		refs = append(refs, claim.ID)
+	}
+	reason := strings.TrimSpace(req.Reason)
+	if reason == "" {
+		reason = "session ended from comms ui"
+	}
 	now := time.Now().UTC()
-	activeLeader := activeLeaderActor(rt.State, now.Add(-4*time.Hour))
-	hostname, _ := os.Hostname()
 	ev := event.Event{
 		TS:    now,
 		ID:    event.NewID(now),
 		Actor: rt.Actor,
-		Type:  event.TypeHello,
+		Type:  event.TypeRelease,
 		Data: map[string]interface{}{
-			"base_name": baseNameOfActor(rt.Actor),
-			"hostname":  hostname,
-			"tty":       "",
-			"leader":    activeLeader == "" || activeLeader == rt.Actor,
+			"refs":        refs,
+			"session_end": true,
+			"ended_actor": endedActor,
+			"reason":      reason,
 		},
 	}
 	if err := rt.Append(ev); err != nil {
@@ -149,445 +162,16 @@ func (s uiServer) serveHello(w http.ResponseWriter, r *http.Request) {
 	s.writeSnapshot(w, rt)
 }
 
-func (s uiServer) serveCheck(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	var req struct {
-		Path string `json:"path"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON body", http.StatusBadRequest)
-		return
-	}
-	if strings.TrimSpace(req.Path) == "" {
-		http.Error(w, "missing path", http.StatusBadRequest)
-		return
-	}
-	rt, err := Open(OpenOpts{Mutating: false, SkipLock: true})
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer rt.Close()
-
-	rel, ok := makeRepoRelative(req.Path, rt.Repo.Root)
-	if !ok {
-		writeJSON(w, http.StatusOK, map[string]interface{}{"clear": true, "message": "outside repo"})
-		return
-	}
-	scope, err := overlap.Parse(rel)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	conflicts := rt.State.ConflictsFor(scope, rt.Actor)
-	resp := map[string]interface{}{"clear": len(conflicts) == 0, "scope": scope.String()}
-	if len(conflicts) > 0 {
-		resp["conflicts"] = uiClaimsFromState(conflicts, s.staleAfter)
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
-func (s uiServer) serveCreateClaim(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if s.rejectDemo(w, "demo mode is read-only; no claim event is written") {
-		return
-	}
-	var req struct {
-		Scope       string `json:"scope"`
-		Intent      string `json:"intent"`
-		StealID     string `json:"steal_id"`
-		StealReason string `json:"steal_reason"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON body", http.StatusBadRequest)
-		return
-	}
-	scope, err := overlap.Parse(req.Scope)
-	if err != nil {
-		http.Error(w, "claim: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-	if strings.TrimSpace(req.Intent) == "" {
-		http.Error(w, "claim: intent is required", http.StatusBadRequest)
-		return
-	}
-
-	rt, err := Open(OpenOpts{Mutating: true})
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	defer rt.Close()
-
-	if rt.Policy.RequiresAnchor(scope.Path) && scope.Anchor.Kind == overlap.AnchorWhole {
-		http.Error(w, fmt.Sprintf("claim: anchor required for risky file %q", scope.Path), http.StatusConflict)
-		return
-	}
-
-	var displaceID string
-	if req.StealID != "" {
-		if strings.TrimSpace(req.StealReason) == "" {
-			http.Error(w, "claim: steal requires a reason", http.StatusBadRequest)
-			return
-		}
-		target := rt.State.ClaimByID(req.StealID)
-		if target == nil {
-			http.Error(w, "claim: steal id does not match any active claim", http.StatusBadRequest)
-			return
-		}
-		displaceID = target.ID
-	}
-	conflicts := rt.State.ConflictsFor(scope, rt.Actor)
-	if displaceID != "" {
-		conflicts = filterOutClaim(conflicts, displaceID)
-	}
-	if len(conflicts) > 0 {
-		writeJSON(w, http.StatusConflict, map[string]interface{}{
-			"error":     "claim conflicts with active claim",
-			"conflicts": uiClaimsFromState(conflicts, s.staleAfter),
-		})
-		return
-	}
-
-	now := time.Now().UTC()
-	data := map[string]interface{}{"intent": strings.TrimSpace(req.Intent)}
-	if displaceID != "" {
-		data["steals"] = displaceID
-		data["steal_reason"] = strings.TrimSpace(req.StealReason)
-		if a := os.Getenv("COMMS_ARBITRATOR"); a != "" {
-			data["arbitrator"] = a
-		} else if u := os.Getenv("USER"); u != "" {
-			data["arbitrator"] = u
-		}
-	}
-	ev := event.Event{TS: now, ID: event.NewID(now), Actor: rt.Actor, Type: event.TypeClaim, Scope: []string{scope.String()}, Data: data}
-	if err := rt.Append(ev); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	s.writeSnapshot(w, rt)
-}
-
-func (s uiServer) serveReleaseClaim(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if s.demo {
-		http.Error(w, "demo mode is read-only; no release events are written", http.StatusConflict)
-		return
-	}
-
-	var req struct {
-		ID     string `json:"id"`
-		Reason string `json:"reason"`
-		Force  bool   `json:"force"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON body", http.StatusBadRequest)
-		return
-	}
-	if req.ID == "" {
-		http.Error(w, "missing claim id", http.StatusBadRequest)
-		return
-	}
-	if req.Reason == "" {
-		req.Reason = "cleared from comms ui by user"
-	}
-
-	rt, err := Open(OpenOpts{Mutating: true})
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	defer rt.Close()
-
-	target := rt.State.ClaimByID(req.ID)
-	if target == nil {
-		http.Error(w, "claim is no longer active", http.StatusConflict)
-		return
-	}
-	stale := time.Since(target.TS) >= s.staleAfter
-	if !stale && !req.Force {
-		http.Error(w, "claim is not stale yet; pass force=true to clear an active claim from the UI", http.StatusConflict)
-		return
-	}
-	result := "claim cleared from comms ui"
-	if stale {
-		result = "stale claim cleared from comms ui"
-	}
-	if err := appendReleaseEvent(rt, []*state.Claim{target}, req.Reason, result); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	_ = enc.Encode(buildUISnapshot(rt, s.staleAfter))
-}
-
-func (s uiServer) serveReleaseMine(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if s.rejectDemo(w, "demo mode is read-only; no release events are written") {
-		return
-	}
-	var req struct {
-		Mode   string `json:"mode"`
-		Result string `json:"result"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON body", http.StatusBadRequest)
-		return
-	}
-	mode := strings.TrimSpace(req.Mode)
-	if mode == "" {
-		mode = "latest"
-	}
-	rt, err := Open(OpenOpts{Mutating: true})
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	defer rt.Close()
-	var targets []*state.Claim
-	switch mode {
-	case "latest":
-		c := rt.State.LatestClaimByActor(rt.Actor)
-		if c == nil {
-			http.Error(w, fmt.Sprintf("@%s holds no active claims", rt.Actor), http.StatusConflict)
-			return
-		}
-		targets = []*state.Claim{c}
-	case "all":
-		targets = rt.State.ActiveClaimsByActor(rt.Actor)
-		if len(targets) == 0 {
-			http.Error(w, fmt.Sprintf("@%s holds no active claims", rt.Actor), http.StatusConflict)
-			return
-		}
-	default:
-		http.Error(w, "mode must be latest or all", http.StatusBadRequest)
-		return
-	}
-	if strings.TrimSpace(req.Result) == "" {
-		req.Result = "released from comms ui"
-	}
-	if err := appendReleaseEvent(rt, targets, "", strings.TrimSpace(req.Result)); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	s.writeSnapshot(w, rt)
-}
-
-func (s uiServer) serveCreateNote(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if s.rejectDemo(w, "demo mode is read-only; no note event is written") {
-		return
-	}
-	var req struct {
-		Body     string `json:"body"`
-		Priority bool   `json:"priority"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON body", http.StatusBadRequest)
-		return
-	}
-	body := strings.TrimSpace(req.Body)
-	if body == "" {
-		http.Error(w, "note: body is required", http.StatusBadRequest)
-		return
-	}
-	if utf8.RuneCountInString(body) > maxNoteRunes {
-		http.Error(w, fmt.Sprintf("note: body exceeds %d runes", maxNoteRunes), http.StatusBadRequest)
-		return
-	}
-	rt, err := Open(OpenOpts{Mutating: true})
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	defer rt.Close()
-	if req.Priority && !s.actorIsLeader(rt) {
-		http.Error(w, s.leaderOnlyMessage(rt), http.StatusForbidden)
-		return
-	}
-	now := time.Now().UTC()
-	data := map[string]interface{}{"body": body}
-	if req.Priority {
-		data["priority"] = true
-	}
-	if err := rt.Append(event.Event{TS: now, ID: event.NewID(now), Actor: rt.Actor, Type: event.TypeNote, Data: data}); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	s.writeSnapshot(w, rt)
-}
-
-func (s uiServer) serveCreateFinding(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if s.rejectDemo(w, "demo mode is read-only; no finding event is written") {
-		return
-	}
-	var req struct {
-		Category string `json:"category"`
-		Summary  string `json:"summary"`
-		Refs     []struct {
-			Kind  string `json:"kind"`
-			Value string `json:"value"`
-		} `json:"refs"`
-		Priority bool `json:"priority"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON body", http.StatusBadRequest)
-		return
-	}
-	category := strings.TrimSpace(req.Category)
-	if _, ok := findCategories[category]; !ok {
-		http.Error(w, "finding: invalid category", http.StatusBadRequest)
-		return
-	}
-	summary := strings.TrimSpace(req.Summary)
-	if summary == "" {
-		http.Error(w, "finding: summary is required", http.StatusBadRequest)
-		return
-	}
-	rt, err := Open(OpenOpts{Mutating: true})
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	defer rt.Close()
-	if req.Priority && !s.actorIsLeader(rt) {
-		http.Error(w, s.leaderOnlyMessage(rt), http.StatusForbidden)
-		return
-	}
-	refs := make([]map[string]string, 0, len(req.Refs))
-	for _, ref := range req.Refs {
-		kind := strings.TrimSpace(ref.Kind)
-		value := strings.TrimSpace(ref.Value)
-		if kind == "" || value == "" {
-			http.Error(w, "finding: ref kind and value are required", http.StatusBadRequest)
-			return
-		}
-		for _, c := range kind + value {
-			if c < 0x20 {
-				http.Error(w, "finding: refs cannot contain control characters", http.StatusBadRequest)
-				return
-			}
-		}
-		refs = append(refs, map[string]string{"kind": kind, "value": value})
-	}
-	now := time.Now().UTC()
-	data := map[string]interface{}{"category": category, "summary": summary, "refs": refs}
-	if req.Priority {
-		data["priority"] = true
-	}
-	if err := rt.Append(event.Event{TS: now, ID: event.NewID(now), Actor: rt.Actor, Type: event.TypeFinding, Data: data}); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	s.writeSnapshot(w, rt)
-}
-
-func (s uiServer) serveDoc(w http.ResponseWriter, r *http.Request) {
-	slug := strings.TrimPrefix(r.URL.Path, "/api/docs/")
-	if slug == "" || strings.Contains(slug, "/") || !slugRE.MatchString(slug) {
-		http.Error(w, "invalid doc slug", http.StatusBadRequest)
-		return
-	}
-	switch r.Method {
-	case http.MethodGet:
-		rt, err := Open(OpenOpts{Mutating: false})
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		defer rt.Close()
-		raw, err := os.ReadFile(rt.Paths.DocFilePath(slug))
-		if err != nil {
-			if os.IsNotExist(err) {
-				http.Error(w, "doc not found", http.StatusNotFound)
-				return
-			}
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]string{"slug": slug, "body": string(raw)})
-	case http.MethodPut:
-		if s.rejectDemo(w, "demo mode is read-only; no doc is written") {
-			return
-		}
-		var req struct {
-			Body string `json:"body"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "invalid JSON body", http.StatusBadRequest)
-			return
-		}
-		rt, err := Open(OpenOpts{Mutating: true})
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		defer rt.Close()
-		docPath := rt.Paths.DocFilePath(slug)
-		if err := os.MkdirAll(filepath.Dir(docPath), 0o755); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if strings.TrimSpace(req.Body) == "" {
-			req.Body = fmt.Sprintf("# %s\n\n", slug)
-		}
-		if err := os.WriteFile(docPath, []byte(req.Body), 0o644); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		now := time.Now().UTC()
-		ev := event.Event{
-			TS:    now,
-			ID:    event.NewID(now),
-			Actor: rt.Actor,
-			Type:  event.TypeFinding,
-			Data: map[string]interface{}{
-				"category": "decision",
-				"summary":  fmt.Sprintf("updated doc:%s", slug),
-				"refs":     []map[string]string{{"kind": "doc", "value": slug}},
-			},
-		}
-		if err := rt.Append(ev); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		s.writeSnapshot(w, rt)
-	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-	}
-}
-
 type uiSnapshot struct {
-	Project  uiProject   `json:"project"`
-	Sessions []uiSession `json:"sessions"`
-	Claims   []uiClaim   `json:"claims"`
-	Findings []uiFinding `json:"findings"`
-	Notes    []uiNote    `json:"notes"`
-	Docs     []string    `json:"docs"`
-	Events   []uiEvent   `json:"events"`
-	Updated  time.Time   `json:"updated"`
+	Project       uiProject        `json:"project"`
+	Sessions      []uiSession      `json:"sessions"`
+	EndedSessions []uiEndedSession `json:"ended_sessions"`
+	Claims        []uiClaim        `json:"claims"`
+	Findings      []uiFinding      `json:"findings"`
+	Notes         []uiNote         `json:"notes"`
+	Docs          []string         `json:"docs"`
+	Events        []uiEvent        `json:"events"`
+	Updated       time.Time        `json:"updated"`
 }
 
 type uiProject struct {
@@ -608,6 +192,14 @@ type uiSession struct {
 	Hostname string    `json:"hostname"`
 	TS       time.Time `json:"ts"`
 	Leader   bool      `json:"leader"`
+}
+
+type uiEndedSession struct {
+	Actor        string    `json:"actor"`
+	EndedBy      string    `json:"ended_by"`
+	Reason       string    `json:"reason"`
+	ReleasedRefs int       `json:"released_refs"`
+	TS           time.Time `json:"ts"`
 }
 
 type uiClaim struct {
@@ -658,13 +250,14 @@ func buildUISnapshot(rt *Runtime, staleAfter time.Duration) uiSnapshot {
 			Actor:      rt.Actor,
 			StaleAfter: staleAfter.String(),
 		},
-		Sessions: []uiSession{},
-		Claims:   []uiClaim{},
-		Findings: []uiFinding{},
-		Notes:    []uiNote{},
-		Docs:     listDocs(rt.Paths.Docs),
-		Events:   []uiEvent{},
-		Updated:  now.UTC(),
+		Sessions:      []uiSession{},
+		EndedSessions: []uiEndedSession{},
+		Claims:        []uiClaim{},
+		Findings:      []uiFinding{},
+		Notes:         []uiNote{},
+		Docs:          listDocs(rt.Paths.Docs),
+		Events:        []uiEvent{},
+		Updated:       now.UTC(),
 	}
 	if out.Docs == nil {
 		out.Docs = []string{}
@@ -680,6 +273,12 @@ func buildUISnapshot(rt *Runtime, staleAfter time.Duration) uiSnapshot {
 	for _, s := range sessions {
 		out.Sessions = append(out.Sessions, uiSession{
 			Actor: s.Actor, BaseName: s.BaseName, Hostname: s.Hostname, TS: s.TS, Leader: s.Leader,
+		})
+	}
+	for _, ended := range sortedEndedSessions(rt.State) {
+		out.EndedSessions = append(out.EndedSessions, uiEndedSession{
+			Actor: ended.Actor, EndedBy: ended.EndedBy, Reason: ended.Reason,
+			ReleasedRefs: len(ended.ReleasedRefs), TS: ended.TS,
 		})
 	}
 	for _, c := range sortedClaims(rt.State) {
@@ -727,13 +326,16 @@ func buildDemoUISnapshot(staleAfter time.Duration) uiSnapshot {
 			Hash:            "3b9c1f2a77e4",
 			LogPath:         "demo mode: sample events only; no log file is written",
 			Demo:            true,
-			MutationMessage: "Demo mode is read-only; release actions are disabled.",
+			MutationMessage: "Demo mode is read-only; ending sessions is disabled.",
 			StaleAfter:      staleAfter.String(),
 		},
 		Sessions: []uiSession{
 			{Actor: "codex-20260527-a", BaseName: "codex", Hostname: "MacBook-Pro.local", TS: base.Add(-13 * time.Minute), Leader: true},
 			{Actor: "claude-20260527-a", BaseName: "claude", Hostname: "MacBook-Pro.local", TS: base.Add(-12 * time.Minute)},
 			{Actor: "human-eli", BaseName: "human", Hostname: "MacBook-Pro.local", TS: base.Add(-2 * time.Hour)},
+		},
+		EndedSessions: []uiEndedSession{
+			{Actor: "codex-previous", EndedBy: "human-eli", Reason: "project checkpoint complete", ReleasedRefs: 2, TS: base.Add(-25 * time.Minute)},
 		},
 		Claims: claims,
 		Findings: []uiFinding{
@@ -767,6 +369,12 @@ func eventSummary(ev event.Event) string {
 			return s
 		}
 	case event.TypeRelease:
+		if dataBool(ev.Data, "session_end") {
+			if actor, _ := ev.Data["ended_actor"].(string); actor != "" {
+				count := len(dataStringList(ev.Data, "refs"))
+				return fmt.Sprintf("ended session @%s; released %d claim%s", actor, count, pluralS(count))
+			}
+		}
 		if s, _ := ev.Data["result"].(string); s != "" {
 			return s
 		}
@@ -803,12 +411,28 @@ func dataBool(m map[string]interface{}, key string) bool {
 	return false
 }
 
-func (s uiServer) rejectDemo(w http.ResponseWriter, msg string) bool {
-	if !s.demo {
-		return false
+func dataStringList(m map[string]interface{}, key string) []string {
+	if m == nil {
+		return nil
 	}
-	http.Error(w, msg, http.StatusConflict)
-	return true
+	v, ok := m[key]
+	if !ok {
+		return nil
+	}
+	if s, ok := v.(string); ok {
+		return []string{s}
+	}
+	arr, ok := v.([]interface{})
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(arr))
+	for _, x := range arr {
+		if s, ok := x.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func (s uiServer) writeSnapshot(w http.ResponseWriter, rt *Runtime) {
@@ -823,28 +447,16 @@ func writeJSON(w http.ResponseWriter, status int, value interface{}) {
 	_ = enc.Encode(value)
 }
 
-func uiClaimsFromState(claims []*state.Claim, staleAfter time.Duration) []uiClaim {
-	now := time.Now()
-	out := make([]uiClaim, 0, len(claims))
-	for _, c := range claims {
-		out = append(out, uiClaim{
-			ID: c.ID, Actor: c.Actor, Scope: c.Scope.String(), Intent: c.Intent,
-			TS: c.TS, Age: shortAge(now.Sub(c.TS)), Stale: now.Sub(c.TS) >= staleAfter, StoleID: c.StolenFromID,
-		})
+func sortedEndedSessions(s *state.State) []*state.EndedSession {
+	if s == nil {
+		return nil
 	}
+	out := make([]*state.EndedSession, 0, len(s.EndedSessions))
+	for _, ended := range s.EndedSessions {
+		out = append(out, ended)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].TS.After(out[j].TS) })
 	return out
-}
-
-func (s uiServer) actorIsLeader(rt *Runtime) bool {
-	return activeLeaderActor(rt.State, time.Now().Add(-4*time.Hour)) == rt.Actor
-}
-
-func (s uiServer) leaderOnlyMessage(rt *Runtime) string {
-	leader := activeLeaderActor(rt.State, time.Now().Add(-4*time.Hour))
-	if leader == "" {
-		return "priority messages require an active leader; run hello first"
-	}
-	return fmt.Sprintf("priority messages are leader-only; current leader is @%s", leader)
 }
 
 func shortAge(d time.Duration) string {
@@ -1048,68 +660,14 @@ th {
 .claim-stale td {
   background: var(--red-soft);
 }
-.action-note {
-  color: var(--muted);
-  font-size: 12px;
-  margin-top: 5px;
-}
 .events {
   grid-column: 1 / -1;
 }
-.actions {
-  grid-column: 1 / -1;
-}
-.action-grid {
+.session-row {
   display: grid;
-  grid-template-columns: repeat(6, minmax(160px, 1fr));
-  gap: 12px;
-  padding: 14px;
-}
-.action-card {
-  border: 1px solid var(--soft);
-  border-radius: 8px;
-  padding: 12px;
-  display: grid;
-  gap: 8px;
-  align-content: start;
-}
-.action-card.wide {
-  grid-column: span 2;
-}
-.action-title {
-  font-weight: 680;
-  font-size: 13px;
-}
-input, textarea, select {
-  width: 100%;
-  border: 1px solid var(--line);
-  background: var(--bg);
-  color: var(--text);
-  border-radius: 6px;
-  min-height: 34px;
-  padding: 8px 10px;
-  font: inherit;
-}
-textarea {
-  min-height: 72px;
-  resize: vertical;
-}
-label.checkline {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  color: var(--muted);
-  font-size: 12px;
-}
-label.checkline input {
-  width: auto;
-  min-height: auto;
-}
-.result {
-  grid-column: 1 / -1;
-  min-height: 20px;
-  color: var(--muted);
-  font-size: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
 }
 .copy {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -1120,8 +678,6 @@ label.checkline input {
 @media (max-width: 1050px) {
   main { grid-template-columns: 1fr; }
   .events { grid-column: auto; }
-  .actions { grid-column: auto; }
-  .action-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 620px) {
   header {
@@ -1134,8 +690,6 @@ label.checkline input {
   h1 { font-size: 17px; }
   main { padding: 10px; gap: 12px; }
   .top-actions { align-items: flex-start; }
-  .action-grid { grid-template-columns: 1fr; }
-  .action-card.wide { grid-column: auto; }
   .claims table,
   .claims thead,
   .claims tbody,
@@ -1176,7 +730,6 @@ label.checkline input {
   .claims td:nth-child(2)::before { content: "Scope"; }
   .claims td:nth-child(3)::before { content: "Intent"; }
   .claims td:nth-child(4)::before { content: "Age"; }
-  .claims td:nth-child(5)::before { content: "Action"; }
   .events td:nth-child(1)::before { content: "When"; }
   .events td:nth-child(2)::before { content: "Type"; }
   .events td:nth-child(3)::before { content: "Actor"; }
@@ -1200,69 +753,11 @@ label.checkline input {
 </header>
 <div id="error" class="error-banner"></div>
 <main>
-  <section class="panel actions">
-    <h2>Actions</h2>
-    <div class="action-grid">
-      <div class="action-card">
-        <div class="action-title">Session</div>
-        <button id="helloAction" type="button">Hello</button>
-        <div class="meta">Announce this UI actor in the log.</div>
-      </div>
-      <form class="action-card" id="checkForm">
-        <div class="action-title">Check Path</div>
-        <input name="path" placeholder="src/file.ts or src/file.ts#L1-20" autocomplete="off">
-        <button type="submit">Check</button>
-      </form>
-      <form class="action-card wide" id="claimForm">
-        <div class="action-title">Claim</div>
-        <input name="scope" placeholder="src/file.ts#symbol" autocomplete="off">
-        <input name="intent" placeholder="intent" autocomplete="off">
-        <input name="steal" placeholder="optional steal claim id" autocomplete="off">
-        <input name="reason" placeholder="steal reason" autocomplete="off">
-        <button type="submit">Claim</button>
-      </form>
-      <form class="action-card" id="releaseMineForm">
-        <div class="action-title">Release Mine</div>
-        <select name="mode">
-          <option value="latest">latest claim</option>
-          <option value="all">all my claims</option>
-        </select>
-        <input name="result" placeholder="result" autocomplete="off">
-        <button type="submit">Release</button>
-      </form>
-      <form class="action-card wide" id="noteForm">
-        <div class="action-title">Note</div>
-        <textarea name="body" maxlength="200" placeholder="short FYI for this repo"></textarea>
-        <label class="checkline"><input name="priority" type="checkbox"> priority (leader only)</label>
-        <button type="submit">Post Note</button>
-      </form>
-      <form class="action-card wide" id="findingForm">
-        <div class="action-title">Finding</div>
-        <select name="category">
-          <option value="bug">bug</option>
-          <option value="fix">fix</option>
-          <option value="ship">ship</option>
-          <option value="decision">decision</option>
-          <option value="gotcha">gotcha</option>
-        </select>
-        <input name="summary" placeholder="summary" autocomplete="off">
-        <input name="refs" placeholder="refs, comma-separated kind:value" autocomplete="off">
-        <label class="checkline"><input name="priority" type="checkbox"> priority (leader only)</label>
-        <button type="submit">Record Finding</button>
-      </form>
-      <form class="action-card wide" id="docForm">
-        <div class="action-title">Doc</div>
-        <input name="slug" placeholder="slug e.g. lead-counting" autocomplete="off">
-        <button name="load" value="1" type="submit">Load Doc</button>
-        <textarea name="body" placeholder="# slug&#10;&#10;Markdown body"></textarea>
-        <button name="save" value="1" type="submit">Save Doc</button>
-      </form>
-      <div class="result" id="actionResult"></div>
-    </div>
-  </section>
   <section class="panel">
     <h2>Active Sessions</h2>
     <div id="sessions"></div>
+    <h2>Ended Sessions</h2>
+    <div id="endedSessions"></div>
   </section>
   <section class="panel claims">
     <h2>Active Claims</h2>
@@ -1314,24 +809,8 @@ function renderTable(items, headers, fn, label) {
 }
 function mutationHelp(data) {
   if (data.project.demo) return 'Demo mode is read-only.';
-  if (data.project.mutations_enabled) return 'Clear buttons append release events by @' + data.project.actor + '; old log rows stay intact.';
-  return data.project.mutation_message || 'Set COMMS_ACTOR before starting comms ui to clear claims here.';
-}
-function setActionResult(text, isError = false) {
-  el('actionResult').textContent = text;
-  el('actionResult').style.color = isError ? 'var(--red)' : 'var(--muted)';
-}
-async function postJSON(url, body) {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
-  const text = await res.text();
-  let json = null;
-  try { json = text ? JSON.parse(text) : null; } catch {}
-  if (!res.ok) throw new Error(json?.error || text || res.statusText);
-  return json;
+  if (data.project.mutations_enabled) return 'Agents create/release claims; use End Session when a conversation is done.';
+  return data.project.mutation_message || 'Set COMMS_ACTOR before starting comms ui to end sessions here.';
 }
 async function load() {
   const res = await fetch('/api/status', { cache: 'no-store' });
@@ -1343,11 +822,14 @@ async function load() {
   el('logPath').textContent = 'Log: ' + data.project.log_path;
   el('updated').textContent = 'updated ' + fmtTime(data.updated);
   el('sessions').innerHTML = renderRows(data.sessions, s =>
-    '<div class="row"><div class="actor">@' + esc(s.actor) + (s.leader ? ' <span class="pill leader">leader</span>' : '') + '</div><div class="meta">' + esc(s.base_name || 'session') + ' · ' + esc(s.hostname || 'unknown host') + ' · hello ' + fmtTime(s.ts) + '</div></div>',
+    '<div class="row session-row"><div><div class="actor">@' + esc(s.actor) + (s.leader ? ' <span class="pill leader">leader</span>' : '') + '</div><div class="meta">' + esc(s.base_name || 'session') + ' · ' + esc(s.hostname || 'unknown host') + ' · hello ' + fmtTime(s.ts) + '</div></div>' + sessionAction(data, s) + '</div>',
     'No active sessions in the last 4h.');
+  el('endedSessions').innerHTML = renderRows(data.ended_sessions, s =>
+    '<div class="row"><div class="actor">@' + esc(s.actor) + '</div><div class="meta">ended by @' + esc(s.ended_by) + ' · ' + fmtTime(s.ts) + '</div><div class="meta">' + esc(s.released_refs) + ' claim(s) released · ' + esc(s.reason || 'session ended') + '</div></div>',
+    'No ended sessions in this log.');
   el('claims').innerHTML = '<div class="hint">Claims older than ' + esc(data.project.stale_after) + ' are marked stale. ' + esc(mutationHelp(data)) + '</div>' +
-    renderTable(data.claims, ['Actor', 'Scope', 'Intent', 'Age', 'Action'], c =>
-    '<tr class="' + (c.stale ? 'claim-stale' : '') + '"><td><span class="actor">@' + esc(c.actor) + '</span></td><td><div class="scope">' + esc(c.scope) + '</div><div class="copy">' + esc(c.id.slice(0, 10)) + '</div></td><td>' + esc(c.intent) + '</td><td>' + esc(c.age) + (c.stale ? '<div><span class="pill stale">stale</span></div>' : '') + '</td><td>' + claimAction(data, c) + '</td></tr>',
+    renderTable(data.claims, ['Actor', 'Scope', 'Intent', 'Age'], c =>
+    '<tr class="' + (c.stale ? 'claim-stale' : '') + '"><td><span class="actor">@' + esc(c.actor) + '</span></td><td><div class="scope">' + esc(c.scope) + '</div><div class="copy">' + esc(c.id.slice(0, 10)) + '</div></td><td>' + esc(c.intent) + '</td><td>' + esc(c.age) + (c.stale ? '<div><span class="pill stale">stale</span></div>' : '') + '</td></tr>',
     'No active claims.');
   el('findings').innerHTML = renderRows(data.findings, f =>
     '<div class="row">' + (f.priority ? '<span class="pill priority">priority</span> ' : '') + '<span class="pill finding">' + esc(f.category) + '</span><div class="intent">' + esc(f.summary) + '</div><div class="meta">@' + esc(f.actor) + ' · ' + fmtTime(f.ts) + '</div></div>',
@@ -1362,157 +844,30 @@ async function load() {
     '<tr><td>' + fmtTime(ev.ts) + '</td><td><span class="pill ' + esc(ev.type) + '">' + esc(ev.type) + '</span></td><td>@' + esc(ev.actor) + '</td><td><span class="scope">' + esc((ev.scope || []).join(', ')) + '</span></td><td>' + esc(ev.summary) + '</td></tr>',
     'No log events yet. Run comms hello, comms claim, comms note, or start with comms ui --demo.');
 }
-function claimAction(data, c) {
-  if (data.project.demo) return '<span class="action-note">demo only</span>';
-  if (!data.project.mutations_enabled) return '<span class="action-note">start UI with COMMS_ACTOR to clear</span>';
-  const label = c.stale ? 'Release' : 'Clear';
-  return '<button class="danger" type="button" data-release="' + esc(c.id) + '" data-actor="' + esc(c.actor) + '" data-stale="' + (c.stale ? '1' : '0') + '">' + label + '</button>';
+function sessionAction(data, s) {
+  if (data.project.demo || !data.project.mutations_enabled) return '';
+  return '<button class="danger" type="button" data-end-session="' + esc(s.actor) + '">End Session</button>';
 }
-async function releaseClaim(id, holder, stale) {
-  const action = stale ? 'Release stale claim' : 'Clear active claim';
-  const defaultReason = stale ? 'user verified prior session ended' : 'user cleared claim from UI';
-  const reason = window.prompt(action + ' held by @' + holder + '? Reason for audit log:', defaultReason);
+async function endSession(actor) {
+  const reason = window.prompt('End session @' + actor + '? This releases all active claims for that actor and archives the session.', 'session done');
   if (reason === null) return;
-  const res = await fetch('/api/claims/release', {
+  const res = await fetch('/api/sessions/end', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id, reason, force: !stale })
+    body: JSON.stringify({ actor, reason })
   });
   if (!res.ok) throw new Error(await res.text());
   hideError();
   await load();
 }
 document.addEventListener('click', event => {
-  const btn = event.target.closest('[data-release]');
+  const btn = event.target.closest('[data-end-session]');
   if (!btn) return;
   btn.disabled = true;
-  releaseClaim(btn.getAttribute('data-release'), btn.getAttribute('data-actor'), btn.getAttribute('data-stale') === '1').catch(err => {
+  endSession(btn.getAttribute('data-end-session')).catch(err => {
     btn.disabled = false;
     showError(err);
   });
-});
-el('helloAction').addEventListener('click', async () => {
-  try {
-    await postJSON('/api/hello', {});
-    setActionResult('Session hello recorded.');
-    await load();
-  } catch (err) {
-    setActionResult(err.message.trim(), true);
-    showError(err);
-  }
-});
-el('checkForm').addEventListener('submit', async event => {
-  event.preventDefault();
-  const form = event.currentTarget;
-  try {
-    const result = await postJSON('/api/check', { path: form.path.value.trim() });
-    if (result.clear) {
-      setActionResult('Clear: ' + result.scope);
-    } else {
-      setActionResult('Blocked by ' + result.conflicts.map(c => '@' + c.actor + ' on ' + c.scope).join(', '), true);
-    }
-  } catch (err) {
-    setActionResult(err.message.trim(), true);
-    showError(err);
-  }
-});
-el('claimForm').addEventListener('submit', async event => {
-  event.preventDefault();
-  const form = event.currentTarget;
-  try {
-    await postJSON('/api/claims', {
-      scope: form.scope.value.trim(),
-      intent: form.intent.value.trim(),
-      steal_id: form.steal.value.trim(),
-      steal_reason: form.reason.value.trim()
-    });
-    form.reset();
-    setActionResult('Claim recorded.');
-    await load();
-  } catch (err) {
-    setActionResult(err.message.trim(), true);
-    showError(err);
-  }
-});
-el('releaseMineForm').addEventListener('submit', async event => {
-  event.preventDefault();
-  const form = event.currentTarget;
-  try {
-    await postJSON('/api/claims/release-mine', {
-      mode: form.mode.value,
-      result: form.result.value.trim()
-    });
-    form.reset();
-    setActionResult('Released claim(s).');
-    await load();
-  } catch (err) {
-    setActionResult(err.message.trim(), true);
-    showError(err);
-  }
-});
-el('noteForm').addEventListener('submit', async event => {
-  event.preventDefault();
-  const form = event.currentTarget;
-  try {
-    await postJSON('/api/notes', { body: form.body.value.trim(), priority: form.priority.checked });
-    form.reset();
-    setActionResult('Note recorded.');
-    await load();
-  } catch (err) {
-    setActionResult(err.message.trim(), true);
-    showError(err);
-  }
-});
-el('findingForm').addEventListener('submit', async event => {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const refs = form.refs.value.split(',').map(v => v.trim()).filter(Boolean).map(v => {
-    const idx = v.indexOf(':');
-    return idx > 0 ? { kind: v.slice(0, idx), value: v.slice(idx + 1) } : { kind: '', value: v };
-  });
-  try {
-    await postJSON('/api/findings', {
-      category: form.category.value,
-      summary: form.summary.value.trim(),
-      refs,
-      priority: form.priority.checked
-    });
-    form.reset();
-    setActionResult('Finding recorded.');
-    await load();
-  } catch (err) {
-    setActionResult(err.message.trim(), true);
-    showError(err);
-  }
-});
-el('docForm').addEventListener('submit', async event => {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const slug = form.slug.value.trim();
-  const submitter = event.submitter?.name || 'load';
-  try {
-    if (submitter === 'load') {
-      const res = await fetch('/api/docs/' + encodeURIComponent(slug), { cache: 'no-store' });
-      const text = await res.text();
-      if (!res.ok) throw new Error(text || res.statusText);
-      const doc = JSON.parse(text);
-      form.body.value = doc.body;
-      setActionResult('Loaded doc:' + slug);
-      return;
-    }
-    const res = await fetch('/api/docs/' + encodeURIComponent(slug), {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ body: form.body.value })
-    });
-    const text = await res.text();
-    if (!res.ok) throw new Error(text || res.statusText);
-    setActionResult('Saved doc:' + slug);
-    await load();
-  } catch (err) {
-    setActionResult(err.message.trim(), true);
-    showError(err);
-  }
 });
 el('theme').addEventListener('click', () => {
   const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
