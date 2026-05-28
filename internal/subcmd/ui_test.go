@@ -21,6 +21,12 @@ func TestBuildDemoUISnapshotMarksStaleAndShowsCommsArchive(t *testing.T) {
 	if snap.Project.MutationsEnabled {
 		t.Fatalf("demo snapshot must not enable mutations")
 	}
+	if got := actionByIDForTest(snap.Actions, "start_comms_session"); got.Enabled {
+		t.Fatalf("demo start action should be disabled: %+v", got)
+	}
+	if got := actionByIDForTest(snap.Actions, "select_session_log"); !got.Enabled {
+		t.Fatalf("session log action should be advertised: %+v", got)
+	}
 	if len(snap.Claims) != 3 {
 		t.Fatalf("demo claims len = %d, want 3", len(snap.Claims))
 	}
@@ -126,6 +132,12 @@ func TestUIServeEndCommsSessionArchivesAndReleasesAllClaims(t *testing.T) {
 	if len(snap.Sessions) != 0 {
 		t.Fatalf("sessions still active after comms session end: %+v", snap.Sessions)
 	}
+	if got := actionByIDForTest(snap.Actions, "start_comms_session"); !got.Enabled {
+		t.Fatalf("start should be enabled after ending session: %+v", got)
+	}
+	if got := actionByIDForTest(snap.Actions, "end_comms_session"); got.Enabled {
+		t.Fatalf("end should be disabled after ending session: %+v", got)
+	}
 	if len(snap.CommsSessions) != 1 {
 		t.Fatalf("comms session not archived: %+v", snap.CommsSessions)
 	}
@@ -188,6 +200,12 @@ func TestUIServeStartCommsSessionCreatesCurrentSession(t *testing.T) {
 	}
 	if len(snap.Events) != 1 || snap.Events[0].Summary != "started comms session: new project window" {
 		t.Fatalf("bad current event log: %+v", snap.Events)
+	}
+	if got := actionByIDForTest(snap.Actions, "start_comms_session"); got.Enabled {
+		t.Fatalf("start should be disabled while session active: %+v", got)
+	}
+	if got := actionByIDForTest(snap.Actions, "end_comms_session"); !got.Enabled {
+		t.Fatalf("end should be enabled while session active: %+v", got)
 	}
 }
 
@@ -288,4 +306,13 @@ func setupUITestRepo(t *testing.T) string {
 		}
 	}
 	return dir
+}
+
+func actionByIDForTest(actions []uiAction, id string) uiAction {
+	for _, action := range actions {
+		if action.ID == id {
+			return action
+		}
+	}
+	return uiAction{}
 }
