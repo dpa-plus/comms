@@ -30,6 +30,17 @@ Common fields:
 ```
 Best-effort metadata; all fields may be empty.
 
+The UI's **Start Comms Session** button appends a normal `hello` event with
+extra boundary metadata:
+
+```json
+{"data": {"base_name": "human", "hostname": "MacBook-Pro.local", "comms_session_start": true, "reason": "project work session started"}}
+```
+
+Agents can also implicitly start a comms session by running `comms hello`; the
+UI treats all events after the previous `comms_session_end=true` release as the
+current session.
+
 ### `claim`
 ```json
 {
@@ -67,6 +78,25 @@ Arbitrated release (a different actor closing someone else's claim) MUST include
   }
 }
 ```
+
+The UI's **End Comms Session** button appends a normal `release` event with
+session-boundary metadata:
+
+```json
+{
+  "data": {
+    "refs": ["<all-active-claim-ids>"],
+    "comms_session_end": true,
+    "ended_actors": ["claude-3a1f", "codex-9b2c"],
+    "reason": "project work session done"
+  }
+}
+```
+
+The reducer treats this as a project-level communication-session boundary:
+all active claims are released, active sessions are cleared, and the UI archives
+the log window from the previous `comms_session_end=true` event through this
+event. The physical `log.jsonl` remains one append-only file.
 
 ### `note`
 ```json
@@ -136,6 +166,33 @@ If `git rev-parse` fails (not a git repo, no git installed), pass `--repo-id <ha
 ## Concurrency
 
 Every mutating command acquires an exclusive `flock(2)` on `<logdir>/.lock` before reading the log + appending. The lock releases when the process exits — including `kill -9`. We never spawn child processes while holding the lock (since the child would inherit the FD and deadlock).
+
+## UI API
+
+`comms ui` serves a read-mostly local dashboard over HTTP. The backend exposes:
+
+| Endpoint                   | Method | Purpose                                                           |
+| -------------------------- | ------ | ----------------------------------------------------------------- |
+| `/api/status`              | GET    | Current project snapshot, active state, archives, per-session logs, and action metadata. |
+| `/api/comms-session/start` | POST   | Append a `hello` event with `comms_session_start=true`. Requires `COMMS_ACTOR`. |
+| `/api/comms-session/end`   | POST   | Append a `release` event with `comms_session_end=true` and all active claim refs. Requires `COMMS_ACTOR`. |
+
+`/api/status` includes an `actions` array so agents or UI clients can discover
+what the backend currently allows:
+
+```json
+{
+  "actions": [
+    {"id": "start_comms_session", "label": "Start Comms Session", "method": "POST", "path": "/api/comms-session/start", "enabled": true},
+    {"id": "end_comms_session", "label": "End Comms Session", "method": "POST", "path": "/api/comms-session/end", "enabled": false, "reason": "no active comms session to end"},
+    {"id": "select_session_log", "label": "Select Session Event Log", "enabled": true}
+  ]
+}
+```
+
+Per-session logs are returned as `current_session.events` and
+`comms_sessions[].events`; they are filtered views over the same append-only
+JSONL log, not separate log files.
 
 ## Recovery rules for `comms` reading the log
 

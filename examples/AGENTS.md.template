@@ -11,6 +11,13 @@ COMMS_ACTOR=codex-20260527-a comms status
 ```
 Pick one concrete per-session actor and reuse it for this conversation.
 
+**UI / session archive:**
+The user may open `comms ui` to watch the workflow. The UI can start/end the
+whole project-level comms session and exposes backend metadata at
+`GET /api/status`: `actions`, `current_session.events`, and
+`comms_sessions[].events`. Agents should still coordinate through the CLI unless
+the user explicitly asks them to inspect the UI API.
+
 **Before any file edit during the workflow:**
 ```bash
 COMMS_ACTOR=codex-20260527-a comms claim "src/path/to/file.ts" --intent "what you're changing"

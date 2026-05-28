@@ -217,6 +217,7 @@ func (s uiServer) serveEndCommsSession(w http.ResponseWriter, r *http.Request) {
 type uiSnapshot struct {
 	Project       uiProject        `json:"project"`
 	Current       *uiCommsSession  `json:"current_session,omitempty"`
+	Actions       []uiAction       `json:"actions"`
 	Sessions      []uiSession      `json:"sessions"`
 	CommsSessions []uiCommsSession `json:"comms_sessions"`
 	Claims        []uiClaim        `json:"claims"`
@@ -237,6 +238,15 @@ type uiProject struct {
 	MutationsEnabled bool   `json:"mutations_enabled"`
 	MutationMessage  string `json:"mutation_message,omitempty"`
 	StaleAfter       string `json:"stale_after"`
+}
+
+type uiAction struct {
+	ID      string `json:"id"`
+	Label   string `json:"label"`
+	Method  string `json:"method,omitempty"`
+	Path    string `json:"path,omitempty"`
+	Enabled bool   `json:"enabled"`
+	Reason  string `json:"reason,omitempty"`
 }
 
 type uiSession struct {
@@ -310,6 +320,7 @@ func buildUISnapshot(rt *Runtime, staleAfter time.Duration) uiSnapshot {
 			Actor:      rt.Actor,
 			StaleAfter: staleAfter.String(),
 		},
+		Actions:       []uiAction{},
 		Sessions:      []uiSession{},
 		CommsSessions: []uiCommsSession{},
 		Claims:        []uiClaim{},
@@ -355,6 +366,7 @@ func buildUISnapshot(rt *Runtime, staleAfter time.Duration) uiSnapshot {
 	} else if len(out.CommsSessions) > 0 {
 		out.Events = out.CommsSessions[0].Events
 	}
+	out.Actions = buildUIActions(out)
 	return out
 }
 
@@ -393,6 +405,11 @@ func buildDemoUISnapshot(staleAfter time.Duration) uiSnapshot {
 			MutationMessage: "Demo mode is read-only; starting and ending sessions is disabled.",
 			StaleAfter:      staleAfter.String(),
 		},
+		Actions: []uiAction{
+			{ID: "start_comms_session", Label: "Start Comms Session", Method: http.MethodPost, Path: "/api/comms-session/start", Enabled: false, Reason: "demo mode is read-only"},
+			{ID: "end_comms_session", Label: "End Comms Session", Method: http.MethodPost, Path: "/api/comms-session/end", Enabled: false, Reason: "demo mode is read-only"},
+			{ID: "select_session_log", Label: "Select Session Event Log", Enabled: true, Reason: "client-side filtered view over current_session/events and comms_sessions/events"},
+		},
 		Current: &uiCommsSession{
 			ID: "current", StartedAt: base.Add(-13 * time.Minute), Actors: []string{"claude-20260527-a", "codex-20260527-a", "human-eli"},
 			Reason: "demo preview", EventCount: len(currentEvents), ClaimCount: 3, FindingCount: 3, NoteCount: 2, Events: currentEvents,
@@ -426,6 +443,38 @@ func buildDemoUISnapshot(staleAfter time.Duration) uiSnapshot {
 		Events:  currentEvents,
 		Updated: base.Add(18 * time.Second),
 	}
+}
+
+func buildUIActions(snap uiSnapshot) []uiAction {
+	start := uiAction{ID: "start_comms_session", Label: "Start Comms Session", Method: http.MethodPost, Path: "/api/comms-session/start"}
+	end := uiAction{ID: "end_comms_session", Label: "End Comms Session", Method: http.MethodPost, Path: "/api/comms-session/end"}
+	logs := uiAction{ID: "select_session_log", Label: "Select Session Event Log", Enabled: true, Reason: "client-side filtered view over current_session/events and comms_sessions/events"}
+
+	if snap.Project.Demo {
+		start.Reason = "demo mode is read-only"
+		end.Reason = "demo mode is read-only"
+		return []uiAction{start, end, logs}
+	}
+	if !snap.Project.MutationsEnabled {
+		reason := snap.Project.MutationMessage
+		if reason == "" {
+			reason = "mutating UI actions require COMMS_ACTOR"
+		}
+		start.Reason = reason
+		end.Reason = reason
+		return []uiAction{start, end, logs}
+	}
+	if snap.Current == nil && len(snap.Sessions) == 0 && len(snap.Claims) == 0 {
+		start.Enabled = true
+	} else {
+		start.Reason = "a comms session is already active"
+	}
+	if snap.Current != nil {
+		end.Enabled = true
+	} else {
+		end.Reason = "no active comms session to end"
+	}
+	return []uiAction{start, end, logs}
 }
 
 func buildCommsSessionViews(events []event.Event) (*uiCommsSession, []uiCommsSession) {
@@ -1003,6 +1052,9 @@ function mutationHelp(data) {
   if (data.project.mutations_enabled) return 'Agents create/release claims; Start and End control the whole coordination window.';
   return data.project.mutation_message || 'Set COMMS_ACTOR before starting comms ui to start or end the comms session here.';
 }
+function actionByID(data, id) {
+  return (data.actions || []).find(a => a.id === id) || {};
+}
 let selectedSessionID = localStorage.getItem('selectedSessionID') || 'current';
 let latestData = null;
 async function load() {
@@ -1015,11 +1067,12 @@ async function load() {
   el('logPath').textContent = 'Log: ' + data.project.log_path;
   el('updated').textContent = 'updated ' + fmtTime(data.updated);
   latestData = data;
-  const hasCurrent = !!data.current_session;
-  el('startComms').disabled = data.project.demo || !data.project.mutations_enabled || hasCurrent || data.sessions.length > 0 || data.claims.length > 0;
-  el('startComms').title = mutationHelp(data);
-  el('endComms').disabled = data.project.demo || !data.project.mutations_enabled || !hasCurrent;
-  el('endComms').title = mutationHelp(data);
+  const startAction = actionByID(data, 'start_comms_session');
+  const endAction = actionByID(data, 'end_comms_session');
+  el('startComms').disabled = !startAction.enabled;
+  el('startComms').title = startAction.reason || mutationHelp(data);
+  el('endComms').disabled = !endAction.enabled;
+  el('endComms').title = endAction.reason || mutationHelp(data);
   el('sessions').innerHTML = renderRows(data.sessions, s =>
     '<div class="row session-row"><div><div class="actor">@' + esc(s.actor) + (s.leader ? ' <span class="pill leader">leader</span>' : '') + '</div><div class="meta">' + esc(s.base_name || 'session') + ' · ' + esc(s.hostname || 'unknown host') + ' · hello ' + fmtTime(s.ts) + '</div></div></div>',
     'No active sessions in the last 4h.');

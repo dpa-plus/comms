@@ -33,6 +33,25 @@ COMMS_ACTOR=claude-20260527-a comms status
 
 Mention the chosen actor in your reply so the user can see it.
 
+## Operator UI
+
+The user may run `COMMS_ACTOR=human-eli comms ui` to watch the whole project
+coordination window. The UI has **Start Comms Session** and **End Comms
+Session** controls and a **Session Event Log** selector for current vs archived
+session logs.
+
+Agents still use the CLI for coordination. Do not click UI controls or call the
+UI mutation endpoints unless the user explicitly asks. If asked to inspect the
+UI backend, use:
+
+```bash
+curl -fsS http://127.0.0.1:7878/api/status
+```
+
+The backend advertises `actions`, `current_session.events`, and
+`comms_sessions[].events`; those are filtered views over the append-only JSONL
+log.
+
 ## Claim Before Edits
 
 Before editing a file in a coordinated project:
