@@ -46,9 +46,10 @@ comms ui [--demo] [--stale-after 90m] [--addr 127.0.0.1:7878] # local dashboard
 ```
 
 The dashboard is for watching repo state. Agents still perform normal work via
-the CLI/skill. When started with `COMMS_ACTOR`, the UI can end whole sessions:
-it releases that actor's active claims, archives the session, and appends the
-audit event to the JSONL log. Demo mode remains read-only.
+the CLI/skill. When started with `COMMS_ACTOR`, the UI can end the whole comms
+session for the project: it releases every active claim, clears active
+sessions, and appends one archive-boundary event to the JSONL log. Demo mode
+remains read-only.
 
 ## License
 

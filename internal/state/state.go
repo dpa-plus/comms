@@ -24,9 +24,9 @@ type State struct {
 	// Sessions keyed by actor name. Only the most recent hello per actor is kept.
 	Sessions map[string]*Session
 
-	// EndedSessions keyed by actor name. A later hello reactivates the actor
-	// and removes it from this archive view.
-	EndedSessions map[string]*EndedSession
+	// EndedCommsSessions are project-level archive boundaries. Each entry
+	// represents all events since the previous comms-session end marker.
+	EndedCommsSessions []*EndedCommsSession
 
 	// Findings and Notes in chronological order. Caller filters by `since`.
 	Findings []*Finding
@@ -57,13 +57,19 @@ type Session struct {
 	Leader   bool
 }
 
-// EndedSession is an archived session-end marker folded from a release event.
-type EndedSession struct {
-	Actor        string
-	TS           time.Time
+// EndedCommsSession is an archived project-level coordination window.
+type EndedCommsSession struct {
+	ID           string
+	StartedAt    time.Time
+	EndedAt      time.Time
 	EndedBy      string
 	Reason       string
+	Actors       []string
 	ReleasedRefs []string
+	EventCount   int
+	ClaimCount   int
+	FindingCount int
+	NoteCount    int
 }
 
 // Finding is a `comms find` event.
@@ -103,15 +109,31 @@ func Fold(events []event.Event) *State {
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].ID < sorted[j].ID })
 
 	s := &State{
-		Claims:        make(map[string]*Claim),
-		Sessions:      make(map[string]*Session),
-		EndedSessions: make(map[string]*EndedSession),
+		Claims:   make(map[string]*Claim),
+		Sessions: make(map[string]*Session),
 	}
 
+	var windowStart time.Time
+	windowActors := map[string]bool{}
+	windowEvents, windowClaims, windowFindings, windowNotes := 0, 0, 0, 0
+
 	for _, ev := range sorted {
+		if windowStart.IsZero() {
+			windowStart = ev.TS
+		}
+		windowEvents++
+		windowActors[ev.Actor] = true
+		switch ev.Type {
+		case event.TypeClaim:
+			windowClaims++
+		case event.TypeFinding:
+			windowFindings++
+		case event.TypeNote:
+			windowNotes++
+		}
+
 		switch ev.Type {
 		case event.TypeHello:
-			delete(s.EndedSessions, ev.Actor)
 			s.Sessions[ev.Actor] = &Session{
 				Actor:    ev.Actor,
 				TS:       ev.TS,
@@ -139,23 +161,29 @@ func Fold(events []event.Event) *State {
 			for _, ref := range refs {
 				delete(s.Claims, ref)
 			}
-			if boolOf(ev.Data, "session_end") {
-				endedActor := stringOf(ev.Data, "ended_actor")
-				if endedActor == "" {
-					endedActor = ev.Actor
-				}
+			if boolOf(ev.Data, "comms_session_end") {
 				reason := stringOf(ev.Data, "reason")
 				if reason == "" {
 					reason = stringOf(ev.Data, "result")
 				}
-				delete(s.Sessions, endedActor)
-				s.EndedSessions[endedActor] = &EndedSession{
-					Actor:        endedActor,
-					TS:           ev.TS,
+				s.EndedCommsSessions = append(s.EndedCommsSessions, &EndedCommsSession{
+					ID:           ev.ID,
+					StartedAt:    windowStart,
+					EndedAt:      ev.TS,
 					EndedBy:      ev.Actor,
 					Reason:       reason,
+					Actors:       sortedActorSet(windowActors),
 					ReleasedRefs: refs,
-				}
+					EventCount:   windowEvents,
+					ClaimCount:   windowClaims,
+					FindingCount: windowFindings,
+					NoteCount:    windowNotes,
+				})
+				s.Claims = make(map[string]*Claim)
+				s.Sessions = make(map[string]*Session)
+				windowStart = time.Time{}
+				windowActors = map[string]bool{}
+				windowEvents, windowClaims, windowFindings, windowNotes = 0, 0, 0, 0
 			}
 		case event.TypeFinding:
 			s.Findings = append(s.Findings, &Finding{
@@ -178,6 +206,17 @@ func Fold(events []event.Event) *State {
 		}
 	}
 	return s
+}
+
+func sortedActorSet(set map[string]bool) []string {
+	out := make([]string, 0, len(set))
+	for actor := range set {
+		if actor != "" {
+			out = append(out, actor)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func claimFromEvent(ev event.Event) (*Claim, error) {

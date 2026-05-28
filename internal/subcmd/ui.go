@@ -51,7 +51,7 @@ func runUI(addr string, demo bool, staleAfter time.Duration) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", server.servePage)
 	mux.HandleFunc("/api/status", server.serveStatus)
-	mux.HandleFunc("/api/sessions/end", server.serveEndSession)
+	mux.HandleFunc("/api/comms-session/end", server.serveEndCommsSession)
 
 	fmt.Printf("comms ui listening on http://%s\n", addr)
 	fmt.Printf("Claims older than %s are marked stale. Press Ctrl-C to stop.\n", staleAfter)
@@ -101,26 +101,20 @@ func (s uiServer) serveStatus(w http.ResponseWriter, r *http.Request) {
 	_ = enc.Encode(buildUISnapshot(rt, s.staleAfter))
 }
 
-func (s uiServer) serveEndSession(w http.ResponseWriter, r *http.Request) {
+func (s uiServer) serveEndCommsSession(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	if s.demo {
-		http.Error(w, "demo mode is read-only; no session end event is written", http.StatusConflict)
+		http.Error(w, "demo mode is read-only; no comms session end event is written", http.StatusConflict)
 		return
 	}
 	var req struct {
-		Actor  string `json:"actor"`
 		Reason string `json:"reason"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
-		return
-	}
-	endedActor := strings.TrimSpace(req.Actor)
-	if endedActor == "" {
-		http.Error(w, "missing actor", http.StatusBadRequest)
 		return
 	}
 	rt, err := Open(OpenOpts{Mutating: true})
@@ -129,18 +123,17 @@ func (s uiServer) serveEndSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer rt.Close()
-	if _, ok := rt.State.Sessions[endedActor]; !ok {
-		http.Error(w, fmt.Sprintf("@%s is not an active session", endedActor), http.StatusConflict)
-		return
-	}
-	claims := rt.State.ActiveClaimsByActor(endedActor)
-	refs := make([]interface{}, 0, len(claims))
-	for _, claim := range claims {
+	refs := make([]interface{}, 0, len(rt.State.Claims))
+	for _, claim := range sortedClaims(rt.State) {
 		refs = append(refs, claim.ID)
+	}
+	endedActors := make([]interface{}, 0, len(rt.State.Sessions))
+	for _, session := range collectActiveSessions(rt.State, time.Time{}) {
+		endedActors = append(endedActors, session.Actor)
 	}
 	reason := strings.TrimSpace(req.Reason)
 	if reason == "" {
-		reason = "session ended from comms ui"
+		reason = "comms session ended from ui"
 	}
 	now := time.Now().UTC()
 	ev := event.Event{
@@ -149,10 +142,10 @@ func (s uiServer) serveEndSession(w http.ResponseWriter, r *http.Request) {
 		Actor: rt.Actor,
 		Type:  event.TypeRelease,
 		Data: map[string]interface{}{
-			"refs":        refs,
-			"session_end": true,
-			"ended_actor": endedActor,
-			"reason":      reason,
+			"refs":              refs,
+			"comms_session_end": true,
+			"ended_actors":      endedActors,
+			"reason":            reason,
 		},
 	}
 	if err := rt.Append(ev); err != nil {
@@ -165,7 +158,7 @@ func (s uiServer) serveEndSession(w http.ResponseWriter, r *http.Request) {
 type uiSnapshot struct {
 	Project       uiProject        `json:"project"`
 	Sessions      []uiSession      `json:"sessions"`
-	EndedSessions []uiEndedSession `json:"ended_sessions"`
+	CommsSessions []uiCommsSession `json:"comms_sessions"`
 	Claims        []uiClaim        `json:"claims"`
 	Findings      []uiFinding      `json:"findings"`
 	Notes         []uiNote         `json:"notes"`
@@ -194,12 +187,18 @@ type uiSession struct {
 	Leader   bool      `json:"leader"`
 }
 
-type uiEndedSession struct {
-	Actor        string    `json:"actor"`
+type uiCommsSession struct {
+	ID           string    `json:"id"`
+	StartedAt    time.Time `json:"started_at"`
+	EndedAt      time.Time `json:"ended_at"`
 	EndedBy      string    `json:"ended_by"`
 	Reason       string    `json:"reason"`
+	Actors       []string  `json:"actors"`
 	ReleasedRefs int       `json:"released_refs"`
-	TS           time.Time `json:"ts"`
+	EventCount   int       `json:"event_count"`
+	ClaimCount   int       `json:"claim_count"`
+	FindingCount int       `json:"finding_count"`
+	NoteCount    int       `json:"note_count"`
 }
 
 type uiClaim struct {
@@ -251,7 +250,7 @@ func buildUISnapshot(rt *Runtime, staleAfter time.Duration) uiSnapshot {
 			StaleAfter: staleAfter.String(),
 		},
 		Sessions:      []uiSession{},
-		EndedSessions: []uiEndedSession{},
+		CommsSessions: []uiCommsSession{},
 		Claims:        []uiClaim{},
 		Findings:      []uiFinding{},
 		Notes:         []uiNote{},
@@ -275,10 +274,12 @@ func buildUISnapshot(rt *Runtime, staleAfter time.Duration) uiSnapshot {
 			Actor: s.Actor, BaseName: s.BaseName, Hostname: s.Hostname, TS: s.TS, Leader: s.Leader,
 		})
 	}
-	for _, ended := range sortedEndedSessions(rt.State) {
-		out.EndedSessions = append(out.EndedSessions, uiEndedSession{
-			Actor: ended.Actor, EndedBy: ended.EndedBy, Reason: ended.Reason,
-			ReleasedRefs: len(ended.ReleasedRefs), TS: ended.TS,
+	for _, ended := range sortedCommsSessions(rt.State) {
+		out.CommsSessions = append(out.CommsSessions, uiCommsSession{
+			ID: ended.ID, StartedAt: ended.StartedAt, EndedAt: ended.EndedAt,
+			EndedBy: ended.EndedBy, Reason: ended.Reason, Actors: ended.Actors,
+			ReleasedRefs: len(ended.ReleasedRefs), EventCount: ended.EventCount,
+			ClaimCount: ended.ClaimCount, FindingCount: ended.FindingCount, NoteCount: ended.NoteCount,
 		})
 	}
 	for _, c := range sortedClaims(rt.State) {
@@ -334,8 +335,13 @@ func buildDemoUISnapshot(staleAfter time.Duration) uiSnapshot {
 			{Actor: "claude-20260527-a", BaseName: "claude", Hostname: "MacBook-Pro.local", TS: base.Add(-12 * time.Minute)},
 			{Actor: "human-eli", BaseName: "human", Hostname: "MacBook-Pro.local", TS: base.Add(-2 * time.Hour)},
 		},
-		EndedSessions: []uiEndedSession{
-			{Actor: "codex-previous", EndedBy: "human-eli", Reason: "project checkpoint complete", ReleasedRefs: 2, TS: base.Add(-25 * time.Minute)},
+		CommsSessions: []uiCommsSession{
+			{
+				ID: "01JX2Q3M6M6B6N9P0R1S2T3U4V", StartedAt: base.Add(-8 * time.Hour), EndedAt: base.Add(-30 * time.Minute),
+				EndedBy: "human-eli", Reason: "morning verification pass finished",
+				Actors: []string{"claude-morning", "codex-morning", "human-eli"}, ReleasedRefs: 2,
+				EventCount: 19, ClaimCount: 5, FindingCount: 4, NoteCount: 3,
+			},
 		},
 		Claims: claims,
 		Findings: []uiFinding{
@@ -356,6 +362,7 @@ func buildDemoUISnapshot(staleAfter time.Duration) uiSnapshot {
 			{ID: "01JX2Q3Y7W5B6N9P0R1S2T3U4V", Actor: "codex-20260527-a", Type: event.TypeClaim, Scope: []string{"src/aggregate/lead_counter.ts#L40-90"}, Summary: "fix lead double-counting in aggregation loop", TS: base.Add(-12 * time.Minute)},
 			{ID: "01JX2Q3X6V4B6N9P0R1S2T3U4V", Actor: "claude-20260527-a", Type: event.TypeHello, Summary: "", TS: base.Add(-12 * time.Minute)},
 			{ID: "01JX2Q3Z5V6B6N9P0R1S2T3U4V", Actor: "codex-20260527-a", Type: event.TypeHello, Summary: "", TS: base.Add(-13 * time.Minute)},
+			{ID: "01JX2Q3M6M6B6N9P0R1S2T3U4V", Actor: "human-eli", Type: event.TypeRelease, Summary: "ended comms session; released 2 claims", TS: base.Add(-30 * time.Minute)},
 			{ID: "01JX2Q3S1T8B6N9P0R1S2T3U4V", Actor: "claude-20260527-a", Type: event.TypeFinding, Summary: "decision: tracker is source of truth for leads", TS: base.Add(-19 * time.Minute)},
 		},
 		Updated: base.Add(18 * time.Second),
@@ -369,11 +376,9 @@ func eventSummary(ev event.Event) string {
 			return s
 		}
 	case event.TypeRelease:
-		if dataBool(ev.Data, "session_end") {
-			if actor, _ := ev.Data["ended_actor"].(string); actor != "" {
-				count := len(dataStringList(ev.Data, "refs"))
-				return fmt.Sprintf("ended session @%s; released %d claim%s", actor, count, pluralS(count))
-			}
+		if dataBool(ev.Data, "comms_session_end") {
+			count := len(dataStringList(ev.Data, "refs"))
+			return fmt.Sprintf("ended comms session; released %d claim%s", count, pluralS(count))
 		}
 		if s, _ := ev.Data["result"].(string); s != "" {
 			return s
@@ -422,6 +427,9 @@ func dataStringList(m map[string]interface{}, key string) []string {
 	if s, ok := v.(string); ok {
 		return []string{s}
 	}
+	if arr, ok := v.([]string); ok {
+		return append([]string(nil), arr...)
+	}
 	arr, ok := v.([]interface{})
 	if !ok {
 		return nil
@@ -447,15 +455,12 @@ func writeJSON(w http.ResponseWriter, status int, value interface{}) {
 	_ = enc.Encode(value)
 }
 
-func sortedEndedSessions(s *state.State) []*state.EndedSession {
+func sortedCommsSessions(s *state.State) []*state.EndedCommsSession {
 	if s == nil {
 		return nil
 	}
-	out := make([]*state.EndedSession, 0, len(s.EndedSessions))
-	for _, ended := range s.EndedSessions {
-		out = append(out, ended)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].TS.After(out[j].TS) })
+	out := append([]*state.EndedCommsSession(nil), s.EndedCommsSessions...)
+	sort.Slice(out, func(i, j int) bool { return out[i].EndedAt.After(out[j].EndedAt) })
 	return out
 }
 
@@ -747,6 +752,7 @@ th {
   </div>
   <div class="top-actions">
     <span class="sub"><span class="status-dot"></span><span id="updated">live</span></span>
+    <button id="endComms" class="danger" type="button">End Comms Session</button>
     <button id="theme" type="button" aria-label="Toggle dark mode">Dark</button>
     <button id="refresh" type="button">Refresh</button>
   </div>
@@ -756,8 +762,8 @@ th {
   <section class="panel">
     <h2>Active Sessions</h2>
     <div id="sessions"></div>
-    <h2>Ended Sessions</h2>
-    <div id="endedSessions"></div>
+    <h2>Comms Session Archive</h2>
+    <div id="commsSessions"></div>
   </section>
   <section class="panel claims">
     <h2>Active Claims</h2>
@@ -809,8 +815,8 @@ function renderTable(items, headers, fn, label) {
 }
 function mutationHelp(data) {
   if (data.project.demo) return 'Demo mode is read-only.';
-  if (data.project.mutations_enabled) return 'Agents create/release claims; use End Session when a conversation is done.';
-  return data.project.mutation_message || 'Set COMMS_ACTOR before starting comms ui to end sessions here.';
+  if (data.project.mutations_enabled) return 'Agents create/release claims; End Comms Session closes the whole coordination window.';
+  return data.project.mutation_message || 'Set COMMS_ACTOR before starting comms ui to end the comms session here.';
 }
 async function load() {
   const res = await fetch('/api/status', { cache: 'no-store' });
@@ -821,12 +827,14 @@ async function load() {
   el('projectMeta').innerHTML = esc(data.project.hash) + ' · ' + esc(data.project.root) + (data.project.demo ? ' · <span class="demo-mark">demo mode</span>' : '');
   el('logPath').textContent = 'Log: ' + data.project.log_path;
   el('updated').textContent = 'updated ' + fmtTime(data.updated);
+  el('endComms').disabled = data.project.demo || !data.project.mutations_enabled || (!data.sessions.length && !data.claims.length);
+  el('endComms').title = mutationHelp(data);
   el('sessions').innerHTML = renderRows(data.sessions, s =>
-    '<div class="row session-row"><div><div class="actor">@' + esc(s.actor) + (s.leader ? ' <span class="pill leader">leader</span>' : '') + '</div><div class="meta">' + esc(s.base_name || 'session') + ' · ' + esc(s.hostname || 'unknown host') + ' · hello ' + fmtTime(s.ts) + '</div></div>' + sessionAction(data, s) + '</div>',
+    '<div class="row session-row"><div><div class="actor">@' + esc(s.actor) + (s.leader ? ' <span class="pill leader">leader</span>' : '') + '</div><div class="meta">' + esc(s.base_name || 'session') + ' · ' + esc(s.hostname || 'unknown host') + ' · hello ' + fmtTime(s.ts) + '</div></div></div>',
     'No active sessions in the last 4h.');
-  el('endedSessions').innerHTML = renderRows(data.ended_sessions, s =>
-    '<div class="row"><div class="actor">@' + esc(s.actor) + '</div><div class="meta">ended by @' + esc(s.ended_by) + ' · ' + fmtTime(s.ts) + '</div><div class="meta">' + esc(s.released_refs) + ' claim(s) released · ' + esc(s.reason || 'session ended') + '</div></div>',
-    'No ended sessions in this log.');
+  el('commsSessions').innerHTML = renderRows(data.comms_sessions, s =>
+    '<div class="row"><div class="actor">' + fmtTime(s.started_at) + ' → ' + fmtTime(s.ended_at) + '</div><div class="meta">ended by @' + esc(s.ended_by) + ' · ' + esc(s.reason || 'comms session ended') + '</div><div class="meta">' + esc(s.event_count) + ' event(s) · ' + esc(s.claim_count) + ' claim(s) · ' + esc(s.finding_count) + ' finding(s) · ' + esc(s.note_count) + ' note(s)</div><div class="meta">' + esc((s.actors || []).map(a => '@' + a).join(', ')) + '</div></div>',
+    'No archived comms sessions yet. Use End Comms Session when the project work window is done.');
   el('claims').innerHTML = '<div class="hint">Claims older than ' + esc(data.project.stale_after) + ' are marked stale. ' + esc(mutationHelp(data)) + '</div>' +
     renderTable(data.claims, ['Actor', 'Scope', 'Intent', 'Age'], c =>
     '<tr class="' + (c.stale ? 'claim-stale' : '') + '"><td><span class="actor">@' + esc(c.actor) + '</span></td><td><div class="scope">' + esc(c.scope) + '</div><div class="copy">' + esc(c.id.slice(0, 10)) + '</div></td><td>' + esc(c.intent) + '</td><td>' + esc(c.age) + (c.stale ? '<div><span class="pill stale">stale</span></div>' : '') + '</td></tr>',
@@ -844,28 +852,22 @@ async function load() {
     '<tr><td>' + fmtTime(ev.ts) + '</td><td><span class="pill ' + esc(ev.type) + '">' + esc(ev.type) + '</span></td><td>@' + esc(ev.actor) + '</td><td><span class="scope">' + esc((ev.scope || []).join(', ')) + '</span></td><td>' + esc(ev.summary) + '</td></tr>',
     'No log events yet. Run comms hello, comms claim, comms note, or start with comms ui --demo.');
 }
-function sessionAction(data, s) {
-  if (data.project.demo || !data.project.mutations_enabled) return '';
-  return '<button class="danger" type="button" data-end-session="' + esc(s.actor) + '">End Session</button>';
-}
-async function endSession(actor) {
-  const reason = window.prompt('End session @' + actor + '? This releases all active claims for that actor and archives the session.', 'session done');
+async function endCommsSession() {
+  const reason = window.prompt('End the whole comms session? This releases all active claims, clears active sessions, and archives this communication window for later analysis.', 'project work session done');
   if (reason === null) return;
-  const res = await fetch('/api/sessions/end', {
+  const res = await fetch('/api/comms-session/end', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ actor, reason })
+    body: JSON.stringify({ reason })
   });
   if (!res.ok) throw new Error(await res.text());
   hideError();
   await load();
 }
-document.addEventListener('click', event => {
-  const btn = event.target.closest('[data-end-session]');
-  if (!btn) return;
-  btn.disabled = true;
-  endSession(btn.getAttribute('data-end-session')).catch(err => {
-    btn.disabled = false;
+el('endComms').addEventListener('click', () => {
+  el('endComms').disabled = true;
+  endCommsSession().catch(err => {
+    el('endComms').disabled = false;
     showError(err);
   });
 });
