@@ -24,6 +24,10 @@ type State struct {
 	// Sessions keyed by actor name. Only the most recent hello per actor is kept.
 	Sessions map[string]*Session
 
+	// EndedSessions keyed by actor name. A later hello reactivates the actor
+	// and removes it from this archive view.
+	EndedSessions map[string]*EndedSession
+
 	// Findings and Notes in chronological order. Caller filters by `since`.
 	Findings []*Finding
 	Notes    []*Note
@@ -51,6 +55,15 @@ type Session struct {
 	Hostname string
 	TTY      string
 	Leader   bool
+}
+
+// EndedSession is an archived session-end marker folded from a release event.
+type EndedSession struct {
+	Actor        string
+	TS           time.Time
+	EndedBy      string
+	Reason       string
+	ReleasedRefs []string
 }
 
 // Finding is a `comms find` event.
@@ -90,13 +103,15 @@ func Fold(events []event.Event) *State {
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].ID < sorted[j].ID })
 
 	s := &State{
-		Claims:   make(map[string]*Claim),
-		Sessions: make(map[string]*Session),
+		Claims:        make(map[string]*Claim),
+		Sessions:      make(map[string]*Session),
+		EndedSessions: make(map[string]*EndedSession),
 	}
 
 	for _, ev := range sorted {
 		switch ev.Type {
 		case event.TypeHello:
+			delete(s.EndedSessions, ev.Actor)
 			s.Sessions[ev.Actor] = &Session{
 				Actor:    ev.Actor,
 				TS:       ev.TS,
@@ -120,8 +135,27 @@ func Fold(events []event.Event) *State {
 		case event.TypeRelease:
 			// data.refs may be a single string or a []string for backward compat;
 			// we accept either.
-			for _, ref := range refList(ev.Data, "refs") {
+			refs := refList(ev.Data, "refs")
+			for _, ref := range refs {
 				delete(s.Claims, ref)
+			}
+			if boolOf(ev.Data, "session_end") {
+				endedActor := stringOf(ev.Data, "ended_actor")
+				if endedActor == "" {
+					endedActor = ev.Actor
+				}
+				reason := stringOf(ev.Data, "reason")
+				if reason == "" {
+					reason = stringOf(ev.Data, "result")
+				}
+				delete(s.Sessions, endedActor)
+				s.EndedSessions[endedActor] = &EndedSession{
+					Actor:        endedActor,
+					TS:           ev.TS,
+					EndedBy:      ev.Actor,
+					Reason:       reason,
+					ReleasedRefs: refs,
+				}
 			}
 		case event.TypeFinding:
 			s.Findings = append(s.Findings, &Finding{

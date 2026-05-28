@@ -62,26 +62,16 @@ enough to flag abandoned sessions quickly. To use a different threshold:
 comms ui --stale-after 45m
 ```
 
-If you start the UI with `COMMS_ACTOR` set, claim rows include a **Clear** or
-**Release** button. Fresh claims use **Clear**; stale claims use **Release**.
-The button does not delete or edit old JSONL rows. It appends a normal
-`release` event with an audit reason, the same way
-`comms release <id> --reason "..."` does. Clearing a fresh claim requires an
-explicit UI confirmation and is recorded as a release event too.
+The UI is intentionally not a replacement for the CLI. Agents still use
+`comms hello`, `claim`, `release`, `note`, `find`, and `doc` themselves. The
+UI is for watching the repo and ending whole sessions when you are done with
+them.
 
-The UI also includes forms for the rest of the day-to-day workflow:
-
-- **Hello** appends a `hello` event for the UI actor.
-- **Check Path** reports whether a file/scope is blocked by someone else's
-  active claim.
-- **Claim** appends a `claim` event, with optional steal ID + reason.
-- **Release Mine** releases your latest claim or all claims held by the UI
-  actor.
-- **Note** appends a short `note`; priority notes are leader-only.
-- **Finding** appends a categorized `finding`; priority findings are
-  leader-only.
-- **Doc** loads or saves `.comms/docs/<slug>.md`; saving also appends the
-  normal `updated doc:<slug>` finding.
+If you start the UI with `COMMS_ACTOR` set, active session rows include an
+**End Session** button. Ending a session appends one normal `release` event
+with `session_end=true`, releases every active claim held by that actor, moves
+the actor out of **Active Sessions**, and keeps an **Ended Sessions** archive
+for later analysis. It does not delete old JSONL rows.
 
 If the repo has no events yet, the log table will be empty. To preview the UI
 with sample sessions, claims, findings, notes, docs, and raw events:

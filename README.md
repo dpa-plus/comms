@@ -45,9 +45,10 @@ comms doc <slug> --edit                       # wiki: open $EDITOR under sidecar
 comms ui [--demo] [--stale-after 90m] [--addr 127.0.0.1:7878] # local dashboard
 ```
 
-The dashboard shows status/log data and, when started with `COMMS_ACTOR`, can
-append the same normal events as the CLI: hello, check, claim, release, note,
-finding, and doc updates. Demo mode remains read-only.
+The dashboard is for watching repo state. Agents still perform normal work via
+the CLI/skill. When started with `COMMS_ACTOR`, the UI can end whole sessions:
+it releases that actor's active claims, archives the session, and appends the
+audit event to the JSONL log. Demo mode remains read-only.
 
 ## License
 

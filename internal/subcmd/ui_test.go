@@ -12,7 +12,7 @@ import (
 	"github.com/dpa-plus/comms/internal/event"
 )
 
-func TestBuildDemoUISnapshotMarksStaleWithoutMutations(t *testing.T) {
+func TestBuildDemoUISnapshotMarksStaleAndArchivesEndedSession(t *testing.T) {
 	snap := buildDemoUISnapshot(90 * time.Minute)
 
 	if !snap.Project.Demo {
@@ -26,6 +26,9 @@ func TestBuildDemoUISnapshotMarksStaleWithoutMutations(t *testing.T) {
 	}
 	if !snap.Sessions[0].Leader {
 		t.Fatalf("first demo session should be leader")
+	}
+	if len(snap.EndedSessions) != 1 {
+		t.Fatalf("demo ended sessions len = %d, want 1", len(snap.EndedSessions))
 	}
 	if len(snap.Notes) == 0 || !snap.Notes[0].Priority {
 		t.Fatalf("first demo note should be priority")
@@ -41,7 +44,7 @@ func TestBuildDemoUISnapshotMarksStaleWithoutMutations(t *testing.T) {
 	}
 }
 
-func TestUIServeReleaseClaimAppendsReleaseEvent(t *testing.T) {
+func TestUIServeEndSessionArchivesAndReleasesClaims(t *testing.T) {
 	repo := setupUITestRepo(t)
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("COMMS_ACTOR", "human-eli")
@@ -54,24 +57,33 @@ func TestUIServeReleaseClaimAppendsReleaseEvent(t *testing.T) {
 		t.Fatalf("open runtime: %v", err)
 	}
 	err = rt.Append(event.Event{
-		TS:    time.Now().Add(-8 * time.Hour).UTC(),
-		ID:    claimID,
+		TS:    time.Now().Add(-10 * time.Minute).UTC(),
+		ID:    "01JX2Q3Y7W5B6N9P0R1S2T3U4A",
 		Actor: "claude-20260527-a",
-		Type:  event.TypeClaim,
-		Scope: []string{"src/stale.ts"},
-		Data:  map[string]interface{}{"intent": "stale work"},
+		Type:  event.TypeHello,
+		Data:  map[string]interface{}{"base_name": "claude", "hostname": "host"},
 	})
+	if err == nil {
+		err = rt.Append(event.Event{
+			TS:    time.Now().Add(-8 * time.Minute).UTC(),
+			ID:    claimID,
+			Actor: "claude-20260527-a",
+			Type:  event.TypeClaim,
+			Scope: []string{"src/session.ts"},
+			Data:  map[string]interface{}{"intent": "finish work"},
+		})
+	}
 	if closeErr := rt.Close(); closeErr != nil {
 		t.Fatalf("close runtime: %v", closeErr)
 	}
 	if err != nil {
-		t.Fatalf("append claim: %v", err)
+		t.Fatalf("append setup events: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/api/claims/release", strings.NewReader(`{"id":"`+claimID[:10]+`","reason":"user verified session ended"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/end", strings.NewReader(`{"actor":"claude-20260527-a","reason":"project done"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	uiServer{staleAfter: 90 * time.Minute}.serveReleaseClaim(rec, req)
+	uiServer{staleAfter: 90 * time.Minute}.serveEndSession(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
@@ -81,125 +93,16 @@ func TestUIServeReleaseClaimAppendsReleaseEvent(t *testing.T) {
 		t.Fatalf("decode snapshot: %v", err)
 	}
 	if len(snap.Claims) != 0 {
-		t.Fatalf("claims still active after release: %+v", snap.Claims)
+		t.Fatalf("claims still active after session end: %+v", snap.Claims)
 	}
-	if len(snap.Events) != 2 || snap.Events[0].Type != event.TypeRelease {
-		t.Fatalf("newest event should be release, got %+v", snap.Events)
+	if len(snap.Sessions) != 0 {
+		t.Fatalf("session still active after end: %+v", snap.Sessions)
 	}
-
-	rt, err = Open(OpenOpts{Mutating: false})
-	if err != nil {
-		t.Fatalf("reopen runtime: %v", err)
+	if len(snap.EndedSessions) != 1 || snap.EndedSessions[0].Actor != "claude-20260527-a" {
+		t.Fatalf("ended session not archived: %+v", snap.EndedSessions)
 	}
-	defer rt.Close()
-	if got := rt.State.ClaimByID(claimID); got != nil {
-		t.Fatalf("claim still active after UI release: %+v", got)
-	}
-	if len(rt.Events) != 2 {
-		t.Fatalf("event count = %d, want 2", len(rt.Events))
-	}
-	release := rt.Events[1]
-	if release.Type != event.TypeRelease {
-		t.Fatalf("last event type = %s, want release", release.Type)
-	}
-	if release.Data["original_actor"] != "claude-20260527-a" {
-		t.Fatalf("original_actor = %v", release.Data["original_actor"])
-	}
-}
-
-func TestUIServeReleaseClaimRejectsFreshClaimWithoutForce(t *testing.T) {
-	repo := setupUITestRepo(t)
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("COMMS_ACTOR", "human-eli")
-	t.Setenv("USER", "eli")
-	t.Chdir(repo)
-
-	claimID := "01JX2Q3Y7W5B6N9P0R1S2T3U4V"
-	rt, err := Open(OpenOpts{Mutating: true})
-	if err != nil {
-		t.Fatalf("open runtime: %v", err)
-	}
-	err = rt.Append(event.Event{
-		TS:    time.Now().Add(-2 * time.Minute).UTC(),
-		ID:    claimID,
-		Actor: "claude-20260527-a",
-		Type:  event.TypeClaim,
-		Scope: []string{"src/fresh.ts"},
-		Data:  map[string]interface{}{"intent": "fresh work"},
-	})
-	if closeErr := rt.Close(); closeErr != nil {
-		t.Fatalf("close runtime: %v", closeErr)
-	}
-	if err != nil {
-		t.Fatalf("append claim: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/api/claims/release", strings.NewReader(`{"id":"`+claimID+`","reason":"should not close"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	uiServer{staleAfter: 90 * time.Minute}.serveReleaseClaim(rec, req)
-
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want 409, body = %s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "force=true") {
-		t.Fatalf("body = %q", rec.Body.String())
-	}
-
-	rt, err = Open(OpenOpts{Mutating: false})
-	if err != nil {
-		t.Fatalf("reopen runtime: %v", err)
-	}
-	defer rt.Close()
-	if got := rt.State.ClaimByID(claimID); got == nil {
-		t.Fatalf("fresh claim should remain active")
-	}
-	if len(rt.Events) != 1 {
-		t.Fatalf("event count = %d, want only original claim", len(rt.Events))
-	}
-}
-
-func TestUIServeReleaseClaimClearsFreshClaimWithForce(t *testing.T) {
-	repo := setupUITestRepo(t)
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("COMMS_ACTOR", "human-eli")
-	t.Setenv("USER", "eli")
-	t.Chdir(repo)
-
-	claimID := "01JX2Q3Y7W5B6N9P0R1S2T3U4V"
-	rt, err := Open(OpenOpts{Mutating: true})
-	if err != nil {
-		t.Fatalf("open runtime: %v", err)
-	}
-	err = rt.Append(event.Event{
-		TS:    time.Now().Add(-2 * time.Minute).UTC(),
-		ID:    claimID,
-		Actor: "claude-20260527-a",
-		Type:  event.TypeClaim,
-		Scope: []string{"src/fresh.ts"},
-		Data:  map[string]interface{}{"intent": "fresh work"},
-	})
-	if closeErr := rt.Close(); closeErr != nil {
-		t.Fatalf("close runtime: %v", closeErr)
-	}
-	if err != nil {
-		t.Fatalf("append claim: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/api/claims/release", strings.NewReader(`{"id":"`+claimID+`","reason":"user cleared active claim","force":true}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	uiServer{staleAfter: 90 * time.Minute}.serveReleaseClaim(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	var snap uiSnapshot
-	if err := json.Unmarshal(rec.Body.Bytes(), &snap); err != nil {
-		t.Fatalf("decode snapshot: %v", err)
-	}
-	if len(snap.Claims) != 0 {
-		t.Fatalf("claims still active after forced clear: %+v", snap.Claims)
+	if snap.EndedSessions[0].ReleasedRefs != 1 {
+		t.Fatalf("released refs = %d, want 1", snap.EndedSessions[0].ReleasedRefs)
 	}
 
 	rt, err = Open(OpenOpts{Mutating: false})
@@ -208,159 +111,28 @@ func TestUIServeReleaseClaimClearsFreshClaimWithForce(t *testing.T) {
 	}
 	defer rt.Close()
 	if got := rt.State.ClaimByID(claimID); got != nil {
-		t.Fatalf("fresh claim should have been cleared: %+v", got)
+		t.Fatalf("claim still active after session end: %+v", got)
 	}
-	if len(rt.Events) != 2 {
-		t.Fatalf("event count = %d, want claim + release", len(rt.Events))
+	if rt.State.Sessions["claude-20260527-a"] != nil {
+		t.Fatalf("session still active in folded state")
 	}
-	release := rt.Events[1]
-	if release.Data["result"] != "claim cleared from comms ui" {
-		t.Fatalf("release result = %v", release.Data["result"])
+	ended := rt.State.EndedSessions["claude-20260527-a"]
+	if ended == nil || ended.EndedBy != "human-eli" || ended.Reason != "project done" {
+		t.Fatalf("bad ended state: %+v", ended)
 	}
 }
 
-func TestUIDemoRejectsRelease(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/api/claims/release", strings.NewReader(`{"id":"01JX"}`))
+func TestUIDemoRejectsEndSession(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/end", strings.NewReader(`{"actor":"claude-1"}`))
 	rec := httptest.NewRecorder()
 
-	uiServer{demo: true, staleAfter: 90 * time.Minute}.serveReleaseClaim(rec, req)
+	uiServer{demo: true, staleAfter: 90 * time.Minute}.serveEndSession(rec, req)
 
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want 409", rec.Code)
 	}
 	if !strings.Contains(rec.Body.String(), "demo mode is read-only") {
 		t.Fatalf("body = %q", rec.Body.String())
-	}
-}
-
-func TestUIActionEndpointsAppendEventsAndDocs(t *testing.T) {
-	repo := setupUITestRepo(t)
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("COMMS_ACTOR", "claude-leader")
-	t.Setenv("USER", "eli")
-	t.Chdir(repo)
-	server := uiServer{staleAfter: 90 * time.Minute}
-
-	post := func(path, body string) *httptest.ResponseRecorder {
-		t.Helper()
-		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		rec := httptest.NewRecorder()
-		switch path {
-		case "/api/hello":
-			server.serveHello(rec, req)
-		case "/api/claims":
-			server.serveCreateClaim(rec, req)
-		case "/api/claims/release-mine":
-			server.serveReleaseMine(rec, req)
-		case "/api/notes":
-			server.serveCreateNote(rec, req)
-		case "/api/findings":
-			server.serveCreateFinding(rec, req)
-		default:
-			t.Fatalf("unknown path %s", path)
-		}
-		return rec
-	}
-
-	if rec := post("/api/hello", `{}`); rec.Code != http.StatusOK {
-		t.Fatalf("hello status = %d body = %s", rec.Code, rec.Body.String())
-	}
-	if rec := post("/api/claims", `{"scope":"src/ui.ts","intent":"edit ui"}`); rec.Code != http.StatusOK {
-		t.Fatalf("claim status = %d body = %s", rec.Code, rec.Body.String())
-	}
-	if rec := post("/api/notes", `{"body":"everyone should know","priority":true}`); rec.Code != http.StatusOK {
-		t.Fatalf("note status = %d body = %s", rec.Code, rec.Body.String())
-	}
-	if rec := post("/api/findings", `{"category":"decision","summary":"use the UI","refs":[{"kind":"doc","value":"ui"}],"priority":true}`); rec.Code != http.StatusOK {
-		t.Fatalf("finding status = %d body = %s", rec.Code, rec.Body.String())
-	}
-
-	req := httptest.NewRequest(http.MethodPut, "/api/docs/ui", strings.NewReader(`{"body":"# ui\n\nUse actions."}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	server.serveDoc(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("doc save status = %d body = %s", rec.Code, rec.Body.String())
-	}
-
-	req = httptest.NewRequest(http.MethodGet, "/api/docs/ui", nil)
-	rec = httptest.NewRecorder()
-	server.serveDoc(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("doc get status = %d body = %s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "Use actions.") {
-		t.Fatalf("doc body missing saved content: %s", rec.Body.String())
-	}
-
-	rt, err := Open(OpenOpts{Mutating: false})
-	if err != nil {
-		t.Fatalf("open runtime: %v", err)
-	}
-	defer rt.Close()
-	if len(rt.Events) != 5 {
-		t.Fatalf("events len = %d, want 5", len(rt.Events))
-	}
-	if len(rt.State.Claims) != 1 {
-		t.Fatalf("claims len = %d, want 1", len(rt.State.Claims))
-	}
-	if len(rt.State.Notes) != 1 || !rt.State.Notes[0].Priority {
-		t.Fatalf("priority note not recorded: %+v", rt.State.Notes)
-	}
-	if len(rt.State.Findings) != 2 || !rt.State.Findings[0].Priority {
-		t.Fatalf("findings not recorded: %+v", rt.State.Findings)
-	}
-
-	if rec := post("/api/claims/release-mine", `{"mode":"latest","result":"done"}`); rec.Code != http.StatusOK {
-		t.Fatalf("release-mine status = %d body = %s", rec.Code, rec.Body.String())
-	}
-	rt2, err := Open(OpenOpts{Mutating: false})
-	if err != nil {
-		t.Fatalf("open runtime after release: %v", err)
-	}
-	defer rt2.Close()
-	if len(rt2.State.Claims) != 0 {
-		t.Fatalf("claims len after release = %d, want 0", len(rt2.State.Claims))
-	}
-}
-
-func TestUICheckReportsConflicts(t *testing.T) {
-	repo := setupUITestRepo(t)
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("COMMS_ACTOR", "human-eli")
-	t.Setenv("USER", "eli")
-	t.Chdir(repo)
-
-	rt, err := Open(OpenOpts{Mutating: true})
-	if err != nil {
-		t.Fatalf("open runtime: %v", err)
-	}
-	err = rt.Append(event.Event{
-		TS:    time.Now().UTC(),
-		ID:    "01JX2Q3Y7W5B6N9P0R1S2T3U4V",
-		Actor: "claude-20260527-a",
-		Type:  event.TypeClaim,
-		Scope: []string{"src/conflict.ts"},
-		Data:  map[string]interface{}{"intent": "edit conflict"},
-	})
-	if closeErr := rt.Close(); closeErr != nil {
-		t.Fatalf("close runtime: %v", closeErr)
-	}
-	if err != nil {
-		t.Fatalf("append claim: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/api/check", strings.NewReader(`{"path":"src/conflict.ts"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	uiServer{staleAfter: 90 * time.Minute}.serveCheck(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), `"clear": false`) {
-		t.Fatalf("expected blocked check response, got %s", rec.Body.String())
 	}
 }
 
