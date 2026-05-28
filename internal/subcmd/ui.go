@@ -54,6 +54,8 @@ func runUI(addr string, demo bool, staleAfter time.Duration) error {
 	mux.HandleFunc("/api/status", server.serveStatus)
 	mux.HandleFunc("/api/comms-session/start", server.serveStartCommsSession)
 	mux.HandleFunc("/api/comms-session/end", server.serveEndCommsSession)
+	mux.HandleFunc("/api/session/retire", server.serveRetireSessionActor)
+	mux.HandleFunc("/api/session/lead", server.serveTransferLeader)
 
 	fmt.Printf("comms ui listening on http://%s\n", addr)
 	fmt.Printf("Claims older than %s are marked stale. Press Ctrl-C to stop.\n", staleAfter)
@@ -101,6 +103,66 @@ func (s uiServer) serveStatus(w http.ResponseWriter, r *http.Request) {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(buildUISnapshot(rt, s.staleAfter))
+}
+
+func (s uiServer) serveRetireSessionActor(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.demo {
+		http.Error(w, "demo mode is read-only; no actor retire event is written", http.StatusConflict)
+		return
+	}
+	var req struct {
+		Actor  string `json:"actor"`
+		Reason string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+	rt, err := Open(OpenOpts{Mutating: true})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer rt.Close()
+	if _, err := appendSessionRetire(rt, req.Actor, req.Reason); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	s.writeSnapshot(w, rt)
+}
+
+func (s uiServer) serveTransferLeader(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.demo {
+		http.Error(w, "demo mode is read-only; no leader transfer event is written", http.StatusConflict)
+		return
+	}
+	var req struct {
+		Actor  string `json:"actor"`
+		Reason string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+	rt, err := Open(OpenOpts{Mutating: true})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer rt.Close()
+	if err := appendLeaderTransfer(rt, req.Actor, req.Reason); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	s.writeSnapshot(w, rt)
 }
 
 func (s uiServer) serveStartCommsSession(w http.ResponseWriter, r *http.Request) {
@@ -252,6 +314,7 @@ type uiAction struct {
 
 type uiSession struct {
 	Actor    string    `json:"actor"`
+	Label    string    `json:"label,omitempty"`
 	BaseName string    `json:"base_name"`
 	Hostname string    `json:"hostname"`
 	TS       time.Time `json:"ts"`
@@ -345,7 +408,7 @@ func buildUISnapshot(rt *Runtime, staleAfter time.Duration) uiSnapshot {
 	markLeaderSessions(sessions)
 	for _, s := range sessions {
 		out.Sessions = append(out.Sessions, uiSession{
-			Actor: s.Actor, BaseName: s.BaseName, Hostname: s.Hostname, TS: s.TS, Leader: s.Leader,
+			Actor: s.Actor, Label: s.Label, BaseName: s.BaseName, Hostname: s.Hostname, TS: s.TS, Leader: s.Leader,
 		})
 	}
 	out.Current, out.CommsSessions = buildCommsSessionViews(rt.Events)
@@ -375,13 +438,13 @@ func buildUISnapshot(rt *Runtime, staleAfter time.Duration) uiSnapshot {
 func buildDemoUISnapshot(staleAfter time.Duration) uiSnapshot {
 	base := time.Date(2026, 5, 27, 10, 24, 0, 0, time.UTC)
 	currentEvents := []uiEvent{
-		{ID: "01JX2Q3P8P8B6N9P0R1S2T3U4V", Actor: "codex-20260527-a", Type: event.TypeNote, Summary: "PRIORITY: Everyone pause before touching aggregation until claim clears.", TS: base.Add(-1 * time.Minute)},
-		{ID: "01JX2Q3P9P9B6N9P0R1S2T3U4V", Actor: "codex-20260527-a", Type: event.TypeFinding, Summary: "PRIORITY: decision: everyone should check live Meta numbers before shipping", TS: base.Add(-2 * time.Minute)},
-		{ID: "01JX2Q3T2U9B6N9P0R1S2T3U4V", Actor: "codex-20260527-a", Type: event.TypeFinding, Summary: "fix: leads sourced only from tracker overlay", TS: base.Add(-4 * time.Minute)},
-		{ID: "01JX2Q3Q0R6B6N9P0R1S2T3U4V", Actor: "claude-20260527-a", Type: event.TypeNote, Summary: "FYI Prisma schema migration coming next session", TS: base.Add(-8 * time.Minute)},
-		{ID: "01JX2Q3Y7W5B6N9P0R1S2T3U4V", Actor: "codex-20260527-a", Type: event.TypeClaim, Scope: []string{"src/aggregate/lead_counter.ts#L40-90"}, Summary: "fix lead double-counting in aggregation loop", TS: base.Add(-12 * time.Minute)},
-		{ID: "01JX2Q3X6V4B6N9P0R1S2T3U4V", Actor: "claude-20260527-a", Type: event.TypeHello, Summary: "", TS: base.Add(-12 * time.Minute)},
-		{ID: "01JX2Q3Z5V6B6N9P0R1S2T3U4V", Actor: "codex-20260527-a", Type: event.TypeHello, Summary: "started comms session: demo preview", TS: base.Add(-13 * time.Minute)},
+		{ID: "01JX2Q3P8P8B6N9P0R1S2T3U4V", Actor: "codex-dev", Type: event.TypeNote, Summary: "PRIORITY: Everyone pause before touching aggregation until claim clears.", TS: base.Add(-1 * time.Minute)},
+		{ID: "01JX2Q3P9P9B6N9P0R1S2T3U4V", Actor: "codex-dev", Type: event.TypeFinding, Summary: "PRIORITY: decision: everyone should check live Meta numbers before shipping", TS: base.Add(-2 * time.Minute)},
+		{ID: "01JX2Q3T2U9B6N9P0R1S2T3U4V", Actor: "codex-dev", Type: event.TypeFinding, Summary: "fix: leads sourced only from tracker overlay", TS: base.Add(-4 * time.Minute)},
+		{ID: "01JX2Q3Q0R6B6N9P0R1S2T3U4V", Actor: "claude-dev", Type: event.TypeNote, Summary: "FYI Prisma schema migration coming next session", TS: base.Add(-8 * time.Minute)},
+		{ID: "01JX2Q3Y7W5B6N9P0R1S2T3U4V", Actor: "codex-dev", Type: event.TypeClaim, Scope: []string{"src/aggregate/lead_counter.ts#L40-90"}, Summary: "fix lead double-counting in aggregation loop", TS: base.Add(-12 * time.Minute)},
+		{ID: "01JX2Q3X6V4B6N9P0R1S2T3U4V", Actor: "claude-dev", Type: event.TypeHello, Summary: "", TS: base.Add(-12 * time.Minute)},
+		{ID: "01JX2Q3Z5V6B6N9P0R1S2T3U4V", Actor: "codex-dev", Type: event.TypeHello, Summary: "started comms session: demo preview", TS: base.Add(-13 * time.Minute)},
 	}
 	archivedEvents := []uiEvent{
 		{ID: "01JX2Q3M6M6B6N9P0R1S2T3U4V", Actor: "human-eli", Type: event.TypeRelease, Summary: "ended comms session; released 2 claims", TS: base.Add(-30 * time.Minute)},
@@ -390,8 +453,8 @@ func buildDemoUISnapshot(staleAfter time.Duration) uiSnapshot {
 		{ID: "01JX2Q39191B6N9P0R1S2T3U4V", Actor: "claude-morning", Type: event.TypeHello, Summary: "started comms session: morning verification", TS: base.Add(-2 * time.Hour)},
 	}
 	claims := []uiClaim{
-		{ID: "01JX2Q3Y7W5B6N9P0R1S2T3U4V", Actor: "codex-20260527-a", Scope: "src/aggregate/lead_counter.ts#L40-90", Intent: "fix lead double-counting in aggregation loop", TS: base.Add(-12 * time.Minute), Age: "12m"},
-		{ID: "01JX2Q3W5V3B6N9P0R1S2T3U4V", Actor: "claude-20260527-a", Scope: "src/auth/token.ts#validateToken", Intent: "tighten JWT expiry validation", TS: base.Add(-18 * time.Minute), Age: "18m"},
+		{ID: "01JX2Q3Y7W5B6N9P0R1S2T3U4V", Actor: "codex-dev", Scope: "src/aggregate/lead_counter.ts#L40-90", Intent: "fix lead double-counting in aggregation loop", TS: base.Add(-12 * time.Minute), Age: "12m"},
+		{ID: "01JX2Q3W5V3B6N9P0R1S2T3U4V", Actor: "claude-dev", Scope: "src/auth/token.ts#validateToken", Intent: "tighten JWT expiry validation", TS: base.Add(-18 * time.Minute), Age: "18m"},
 		{ID: "01JX2Q3V4V2B6N9P0R1S2T3U4V", Actor: "codex-9b2c", Scope: "prisma/schema.prisma#User", Intent: "review user model constraints", TS: base.Add(-7 * time.Hour), Age: "7h"},
 	}
 	for i := range claims {
@@ -410,16 +473,18 @@ func buildDemoUISnapshot(staleAfter time.Duration) uiSnapshot {
 		Actions: []uiAction{
 			{ID: "start_comms_session", Label: "Start Comms Session", Method: http.MethodPost, Path: "/api/comms-session/start", Enabled: false, Reason: "demo mode is read-only"},
 			{ID: "end_comms_session", Label: "End Comms Session", Method: http.MethodPost, Path: "/api/comms-session/end", Enabled: false, Reason: "demo mode is read-only"},
+			{ID: "retire_session_actor", Label: "Retire Session Actor", Method: http.MethodPost, Path: "/api/session/retire", Enabled: false, Reason: "demo mode is read-only"},
+			{ID: "transfer_leader", Label: "Transfer Leader", Method: http.MethodPost, Path: "/api/session/lead", Enabled: false, Reason: "demo mode is read-only"},
 			{ID: "select_session_log", Label: "Select Session Event Log", Enabled: true, Reason: "client-side filtered view over current_session/events and comms_sessions/events"},
 		},
 		Current: &uiCommsSession{
-			ID: "current", StartedAt: base.Add(-13 * time.Minute), Actors: []string{"claude-20260527-a", "codex-20260527-a", "human-eli"},
+			ID: "current", StartedAt: base.Add(-13 * time.Minute), Actors: []string{"claude-dev", "codex-dev", "human-eli"},
 			Reason: "demo preview", EventCount: len(currentEvents), ClaimCount: 3, FindingCount: 3, NoteCount: 2, Events: currentEvents,
 		},
 		Sessions: []uiSession{
-			{Actor: "codex-20260527-a", BaseName: "codex", Hostname: "MacBook-Pro.local", TS: base.Add(-13 * time.Minute), Leader: true},
-			{Actor: "claude-20260527-a", BaseName: "claude", Hostname: "MacBook-Pro.local", TS: base.Add(-12 * time.Minute)},
-			{Actor: "human-eli", BaseName: "human", Hostname: "MacBook-Pro.local", TS: base.Add(-2 * time.Hour)},
+			{Actor: "codex-dev", Label: "Codex Dev", BaseName: "codex", Hostname: "MacBook-Pro.local", TS: base.Add(-13 * time.Minute), Leader: true},
+			{Actor: "claude-dev", Label: "Claude Dev", BaseName: "claude", Hostname: "MacBook-Pro.local", TS: base.Add(-12 * time.Minute)},
+			{Actor: "human-eli", Label: "Eli", BaseName: "human", Hostname: "MacBook-Pro.local", TS: base.Add(-2 * time.Hour)},
 		},
 		CommsSessions: []uiCommsSession{
 			{
@@ -431,15 +496,15 @@ func buildDemoUISnapshot(staleAfter time.Duration) uiSnapshot {
 		},
 		Claims: claims,
 		Findings: []uiFinding{
-			{ID: "01JX2Q3P9P9B6N9P0R1S2T3U4V", Actor: "codex-20260527-a", Category: "decision", Summary: "everyone should check live Meta numbers before shipping", Priority: true, TS: base.Add(-2 * time.Minute)},
-			{ID: "01JX2Q3T2U9B6N9P0R1S2T3U4V", Actor: "codex-20260527-a", Category: "fix", Summary: "leads sourced only from tracker overlay", TS: base.Add(-4 * time.Minute)},
-			{ID: "01JX2Q3S1T8B6N9P0R1S2T3U4V", Actor: "claude-20260527-a", Category: "decision", Summary: "tracker is source of truth for leads", TS: base.Add(-19 * time.Minute)},
+			{ID: "01JX2Q3P9P9B6N9P0R1S2T3U4V", Actor: "codex-dev", Category: "decision", Summary: "everyone should check live Meta numbers before shipping", Priority: true, TS: base.Add(-2 * time.Minute)},
+			{ID: "01JX2Q3T2U9B6N9P0R1S2T3U4V", Actor: "codex-dev", Category: "fix", Summary: "leads sourced only from tracker overlay", TS: base.Add(-4 * time.Minute)},
+			{ID: "01JX2Q3S1T8B6N9P0R1S2T3U4V", Actor: "claude-dev", Category: "decision", Summary: "tracker is source of truth for leads", TS: base.Add(-19 * time.Minute)},
 			{ID: "01JX2Q3R0S7B6N9P0R1S2T3U4V", Actor: "codex-9b2c", Category: "gotcha", Summary: "whole-file prisma claims require an anchor", TS: base.Add(-47 * time.Minute)},
 		},
 		Notes: []uiNote{
-			{ID: "01JX2Q3P8P8B6N9P0R1S2T3U4V", Actor: "codex-20260527-a", Body: "Everyone pause before touching aggregation until claim clears.", Priority: true, TS: base.Add(-1 * time.Minute)},
-			{ID: "01JX2Q3Q0R6B6N9P0R1S2T3U4V", Actor: "claude-20260527-a", Body: "FYI Prisma schema migration coming next session", TS: base.Add(-8 * time.Minute)},
-			{ID: "01JX2Q3P0Q5B6N9P0R1S2T3U4V", Actor: "codex-9b2c", Body: "@claude-20260527-a can I take src/auth/token.ts when you're done?", TS: base.Add(-14 * time.Minute)},
+			{ID: "01JX2Q3P8P8B6N9P0R1S2T3U4V", Actor: "codex-dev", Body: "Everyone pause before touching aggregation until claim clears.", Priority: true, TS: base.Add(-1 * time.Minute)},
+			{ID: "01JX2Q3Q0R6B6N9P0R1S2T3U4V", Actor: "claude-dev", Body: "FYI Prisma schema migration coming next session", TS: base.Add(-8 * time.Minute)},
+			{ID: "01JX2Q3P0Q5B6N9P0R1S2T3U4V", Actor: "codex-9b2c", Body: "@claude-dev can I take src/auth/token.ts when you're done?", TS: base.Add(-14 * time.Minute)},
 		},
 		Docs:    []string{"lead-counting", "tracker-architecture", "ui"},
 		Lessons: []string{"verify-data-before-ui", "claim-smallest-scope", "capture-filter-context"},
@@ -451,12 +516,16 @@ func buildDemoUISnapshot(staleAfter time.Duration) uiSnapshot {
 func buildUIActions(snap uiSnapshot) []uiAction {
 	start := uiAction{ID: "start_comms_session", Label: "Start Comms Session", Method: http.MethodPost, Path: "/api/comms-session/start"}
 	end := uiAction{ID: "end_comms_session", Label: "End Comms Session", Method: http.MethodPost, Path: "/api/comms-session/end"}
+	retire := uiAction{ID: "retire_session_actor", Label: "Retire Session Actor", Method: http.MethodPost, Path: "/api/session/retire"}
+	lead := uiAction{ID: "transfer_leader", Label: "Transfer Leader", Method: http.MethodPost, Path: "/api/session/lead"}
 	logs := uiAction{ID: "select_session_log", Label: "Select Session Event Log", Enabled: true, Reason: "client-side filtered view over current_session/events and comms_sessions/events"}
 
 	if snap.Project.Demo {
 		start.Reason = "demo mode is read-only"
 		end.Reason = "demo mode is read-only"
-		return []uiAction{start, end, logs}
+		retire.Reason = "demo mode is read-only"
+		lead.Reason = "demo mode is read-only"
+		return []uiAction{start, end, retire, lead, logs}
 	}
 	if !snap.Project.MutationsEnabled {
 		reason := snap.Project.MutationMessage
@@ -465,7 +534,9 @@ func buildUIActions(snap uiSnapshot) []uiAction {
 		}
 		start.Reason = reason
 		end.Reason = reason
-		return []uiAction{start, end, logs}
+		retire.Reason = reason
+		lead.Reason = reason
+		return []uiAction{start, end, retire, lead, logs}
 	}
 	if snap.Current == nil && len(snap.Sessions) == 0 && len(snap.Claims) == 0 {
 		start.Enabled = true
@@ -477,7 +548,14 @@ func buildUIActions(snap uiSnapshot) []uiAction {
 	} else {
 		end.Reason = "no active comms session to end"
 	}
-	return []uiAction{start, end, logs}
+	if len(snap.Sessions) > 0 {
+		retire.Enabled = true
+		lead.Enabled = true
+	} else {
+		retire.Reason = "no active session actor to retire"
+		lead.Reason = "no active session actor can become leader"
+	}
+	return []uiAction{start, end, retire, lead, logs}
 }
 
 func buildCommsSessionViews(events []event.Event) (*uiCommsSession, []uiCommsSession) {
@@ -589,6 +667,15 @@ func eventSummary(ev event.Event) string {
 		if dataBool(ev.Data, "comms_session_end") {
 			count := len(dataStringList(ev.Data, "refs"))
 			return fmt.Sprintf("ended comms session; released %d claim%s", count, pluralS(count))
+		}
+		if dataBool(ev.Data, "session_retire") {
+			target, _ := ev.Data["retired_actor"].(string)
+			count := len(dataStringList(ev.Data, "refs"))
+			return fmt.Sprintf("retired @%s from active sessions; released %d claim%s", target, count, pluralS(count))
+		}
+		if dataBool(ev.Data, "leader_transfer") {
+			target, _ := ev.Data["leader_actor"].(string)
+			return fmt.Sprintf("@%s became comms leader", target)
 		}
 		if s, _ := ev.Data["result"].(string); s != "" {
 			return s
@@ -837,6 +924,7 @@ main {
 }
 .row:last-child { border-bottom: 0; }
 .actor { font-weight: 680; }
+.meta-inline { color: var(--muted); font-size: 12px; font-weight: 520; }
 .meta { color: var(--muted); font-size: 12px; margin-top: 4px; overflow-wrap: anywhere; }
 .scope { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; font-weight: 650; }
 .intent { margin-top: 5px; }
@@ -1080,8 +1168,10 @@ async function load() {
   el('startComms').title = startAction.reason || mutationHelp(data);
   el('endComms').disabled = !endAction.enabled;
   el('endComms').title = endAction.reason || mutationHelp(data);
-  el('sessions').innerHTML = renderRows(data.sessions, s =>
-    '<div class="row session-row"><div><div class="actor">@' + esc(s.actor) + (s.leader ? ' <span class="pill leader">leader</span>' : '') + '</div><div class="meta">' + esc(s.base_name || 'session') + ' · ' + esc(s.hostname || 'unknown host') + ' · hello ' + fmtTime(s.ts) + '</div></div></div>',
+  el('sessions').innerHTML = renderRows(data.sessions, s => {
+    const title = s.label ? esc(s.label) + ' <span class="meta-inline">@' + esc(s.actor) + '</span>' : '@' + esc(s.actor);
+    return '<div class="row session-row"><div><div class="actor">' + title + (s.leader ? ' <span class="pill leader">leader</span>' : '') + '</div><div class="meta">' + esc(s.base_name || 'session') + ' · ' + esc(s.hostname || 'unknown host') + ' · hello ' + fmtTime(s.ts) + '</div></div></div>';
+  },
     'No active sessions in the last 4h.');
   el('currentSession').innerHTML = data.current_session
     ? '<div class="row"><div class="actor">Started ' + fmtTime(data.current_session.started_at) + '</div><div class="meta">' + esc(data.current_session.event_count) + ' event(s) · ' + esc(data.current_session.claim_count) + ' claim(s) · ' + esc(data.current_session.finding_count) + ' finding(s) · ' + esc(data.current_session.note_count) + ' note(s)</div><div class="meta">' + esc((data.current_session.actors || []).map(a => '@' + a).join(', ')) + '</div></div>'

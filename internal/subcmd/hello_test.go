@@ -9,10 +9,10 @@ func TestRunHelloKeepsLeaderOnReentry(t *testing.T) {
 	t.Setenv("USER", "eli")
 	t.Chdir(repo)
 
-	if err := runHello(nil); err != nil {
+	if err := runHello(nil, "Codex Dev"); err != nil {
 		t.Fatalf("first hello: %v", err)
 	}
-	if err := runHello(nil); err != nil {
+	if err := runHello(nil, "Codex Dev"); err != nil {
 		t.Fatalf("second hello: %v", err)
 	}
 
@@ -25,5 +25,8 @@ func TestRunHelloKeepsLeaderOnReentry(t *testing.T) {
 	leader := activeLeaderActor(rt.State, rt.Events[0].TS.Add(-1))
 	if leader != "codex-1" {
 		t.Fatalf("leader after re-entry = %q, want codex-1", leader)
+	}
+	if got := rt.State.Sessions["codex-1"].Label; got != "Codex Dev" {
+		t.Fatalf("label = %q, want Codex Dev", got)
 	}
 }

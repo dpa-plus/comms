@@ -76,8 +76,12 @@ func emitStatusHuman(rt *Runtime, cutoff time.Time, since string) {
 			if s.Leader {
 				role = "  leader"
 			}
-			fmt.Printf("  @%-14s hello'd %s   %d claim%s  %d finding%s%s\n",
-				s.Actor, s.TS.Local().Format("15:04"), cClaims, pluralS(cClaims), cFindings, pluralS(cFindings), role)
+			label := ""
+			if s.Label != "" {
+				label = fmt.Sprintf(" (%s)", s.Label)
+			}
+			fmt.Printf("  @%-14s%s hello'd %s   %d claim%s  %d finding%s%s\n",
+				s.Actor, label, s.TS.Local().Format("15:04"), cClaims, pluralS(cClaims), cFindings, pluralS(cFindings), role)
 		}
 	}
 
@@ -145,6 +149,7 @@ type statusJSONShape struct {
 
 type statusSession struct {
 	Actor  string    `json:"actor"`
+	Label  string    `json:"label,omitempty"`
 	TS     time.Time `json:"ts"`
 	Leader bool      `json:"leader"`
 }
@@ -180,7 +185,7 @@ func emitStatusJSON(rt *Runtime, cutoff time.Time) error {
 	sessions := collectActiveSessions(rt.State, time.Now().Add(-4*time.Hour))
 	markLeaderSessions(sessions)
 	for _, s := range sessions {
-		out.Sessions = append(out.Sessions, statusSession{Actor: s.Actor, TS: s.TS, Leader: s.Leader})
+		out.Sessions = append(out.Sessions, statusSession{Actor: s.Actor, Label: s.Label, TS: s.TS, Leader: s.Leader})
 	}
 	for _, c := range sortedClaims(rt.State) {
 		out.Claims = append(out.Claims, statusClaim{

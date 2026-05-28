@@ -62,6 +62,57 @@ func TestFoldHelloTracksLeader(t *testing.T) {
 	}
 }
 
+func TestFoldHelloTracksDisplayLabel(t *testing.T) {
+	now := time.Now().UTC()
+	s := Fold([]event.Event{
+		mkEvent(t, now, "claude-dev", event.TypeHello, nil, map[string]interface{}{"label": "Claude Dev"}),
+	})
+	if got := s.Sessions["claude-dev"].Label; got != "Claude Dev" {
+		t.Fatalf("label = %q, want Claude Dev", got)
+	}
+}
+
+func TestFoldSessionRetireRemovesSessionAndClaims(t *testing.T) {
+	now := time.Now().UTC()
+	hello := mkEvent(t, now, "claude-7e4c", event.TypeHello, nil, map[string]interface{}{"leader": true})
+	claim := mkEvent(t, now.Add(time.Second), "claude-7e4c", event.TypeClaim, []string{"src/foo.ts"}, map[string]interface{}{"intent": "old work"})
+	retire := mkEvent(t, now.Add(2*time.Second), "claude-dev", event.TypeRelease, nil, map[string]interface{}{
+		"refs":           []interface{}{claim.ID},
+		"session_retire": true,
+		"retired_actor":  "claude-7e4c",
+		"reason":         "renamed to claude-dev",
+	})
+
+	s := Fold([]event.Event{hello, claim, retire})
+	if s.Sessions["claude-7e4c"] != nil {
+		t.Fatalf("retired session should be removed from active state: %+v", s.Sessions)
+	}
+	if s.Claims[claim.ID] != nil {
+		t.Fatalf("retired actor's claim should be released")
+	}
+}
+
+func TestFoldLeaderTransfer(t *testing.T) {
+	now := time.Now().UTC()
+	events := []event.Event{
+		mkEvent(t, now, "claude-7e4c", event.TypeHello, nil, map[string]interface{}{"leader": true}),
+		mkEvent(t, now.Add(time.Second), "claude-dev", event.TypeHello, nil, map[string]interface{}{"label": "Claude Dev"}),
+		mkEvent(t, now.Add(2*time.Second), "human-eli", event.TypeRelease, nil, map[string]interface{}{
+			"leader_transfer": true,
+			"leader_actor":    "claude-dev",
+			"reason":          "user asked Claude Dev to lead",
+		}),
+	}
+
+	s := Fold(events)
+	if !s.Sessions["claude-dev"].Leader {
+		t.Fatalf("claude-dev should be leader: %+v", s.Sessions)
+	}
+	if s.Sessions["claude-7e4c"].Leader {
+		t.Fatalf("old leader should be cleared: %+v", s.Sessions)
+	}
+}
+
 func TestFoldPriorityNoteAndFinding(t *testing.T) {
 	now := time.Now().UTC()
 	events := []event.Event{

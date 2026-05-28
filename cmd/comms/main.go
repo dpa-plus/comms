@@ -34,6 +34,7 @@ func main() {
 		subcmd.NewFindCmd(),
 		subcmd.NewDocCmd(),
 		subcmd.NewLessonCmd(),
+		subcmd.NewSessionCmd(),
 		subcmd.NewUICmd(),
 	)
 	// Hidden helpers used by tests and the SessionStart hook.

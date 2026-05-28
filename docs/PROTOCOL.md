@@ -5,7 +5,7 @@
 The log is JSONL — one event per line, append-only.
 
 ```jsonl
-{"ts":"2026-05-22T14:30:00Z","id":"01HZ...","actor":"claude-3a1f","type":"hello","data":{"base_name":"claude","hostname":"Eli-MacBook-Pro","tty":"/dev/ttys003"}}
+{"ts":"2026-05-22T14:30:00Z","id":"01HZ...","actor":"claude-dev","type":"hello","data":{"base_name":"claude","label":"Claude Dev","hostname":"Eli-MacBook-Pro","tty":"/dev/ttys003"}}
 {"ts":"2026-05-22T14:32:01Z","id":"01HZ...","actor":"claude-3a1f","type":"claim","scope":["src/foo.ts#bar"],"data":{"intent":"fix N+1"}}
 {"ts":"2026-05-22T14:45:00Z","id":"01HZ...","actor":"claude-3a1f","type":"finding","data":{"category":"fix","summary":"N+1 resolved","refs":[{"kind":"path","value":"src/foo.ts"},{"kind":"commit","value":"abc1234"}]}}
 {"ts":"2026-05-22T14:46:00Z","id":"01HZ...","actor":"claude-3a1f","type":"release","data":{"refs":["01HZ..."],"result":"PR #321 merged"}}
@@ -26,9 +26,10 @@ Common fields:
 
 ### `hello`
 ```json
-{"data": {"base_name": "claude", "hostname": "Eli-MacBook-Pro", "tty": "/dev/ttys003"}}
+{"data": {"base_name": "claude", "label": "Claude Dev", "hostname": "Eli-MacBook-Pro", "tty": "/dev/ttys003"}}
 ```
-Best-effort metadata; all fields may be empty.
+Best-effort metadata; all fields may be empty. `label` is a friendly display
+name for status/UI only. The stable identity remains `actor`.
 
 The UI's **Start Comms Session** button appends a normal `hello` event with
 extra boundary metadata:
@@ -97,6 +98,36 @@ The reducer treats this as a project-level communication-session boundary:
 all active claims are released, active sessions are cleared, and the UI archives
 the log window from the previous `comms_session_end=true` event through this
 event. The physical `log.jsonl` remains one append-only file.
+
+Session roster admin is also encoded as normal `release` events. Retiring an
+actor removes it from active sessions and releases any claim refs listed, but
+does not delete historical rows:
+
+```json
+{
+  "actor": "claude-dev",
+  "data": {
+    "refs": ["<claim-held-by-old-actor>"],
+    "session_retire": true,
+    "retired_actor": "claude-7e4c",
+    "reason": "renamed to claude-dev"
+  }
+}
+```
+
+Leader transfer is append-only too. The reducer clears every active session's
+leader flag, then sets exactly one target actor:
+
+```json
+{
+  "actor": "human-eli",
+  "data": {
+    "leader_transfer": true,
+    "leader_actor": "claude-dev",
+    "reason": "user asked Claude Dev to lead"
+  }
+}
+```
 
 ### `note`
 ```json
@@ -176,6 +207,8 @@ Every mutating command acquires an exclusive `flock(2)` on `<logdir>/.lock` befo
 | `/api/status`              | GET    | Current project snapshot, active state, archives, per-session logs, and action metadata. |
 | `/api/comms-session/start` | POST   | Append a `hello` event with `comms_session_start=true`. Requires `COMMS_ACTOR`. |
 | `/api/comms-session/end`   | POST   | Append a `release` event with `comms_session_end=true` and all active claim refs. Requires `COMMS_ACTOR`. |
+| `/api/session/retire`      | POST   | Append a `release` event with `session_retire=true`; releases that actor's claims. Requires `COMMS_ACTOR`. |
+| `/api/session/lead`        | POST   | Append a `release` event with `leader_transfer=true`. Requires `COMMS_ACTOR`. |
 
 `/api/status` includes an `actions` array so agents or UI clients can discover
 what the backend currently allows:
@@ -185,6 +218,8 @@ what the backend currently allows:
   "actions": [
     {"id": "start_comms_session", "label": "Start Comms Session", "method": "POST", "path": "/api/comms-session/start", "enabled": true},
     {"id": "end_comms_session", "label": "End Comms Session", "method": "POST", "path": "/api/comms-session/end", "enabled": false, "reason": "no active comms session to end"},
+    {"id": "retire_session_actor", "label": "Retire Session Actor", "method": "POST", "path": "/api/session/retire", "enabled": true},
+    {"id": "transfer_leader", "label": "Transfer Leader", "method": "POST", "path": "/api/session/lead", "enabled": true},
     {"id": "select_session_log", "label": "Select Session Event Log", "enabled": true}
   ]
 }

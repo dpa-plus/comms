@@ -212,6 +212,90 @@ func TestUIServeStartCommsSessionCreatesCurrentSession(t *testing.T) {
 	}
 }
 
+func TestUIServeRetireSessionActor(t *testing.T) {
+	repo := setupUITestRepo(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("COMMS_ACTOR", "human-eli")
+	t.Setenv("USER", "eli")
+	t.Chdir(repo)
+
+	rt, err := Open(OpenOpts{Mutating: true})
+	if err != nil {
+		t.Fatalf("open runtime: %v", err)
+	}
+	claimID := "01JX2Q3Y7W5B6N9P0R1S2T3U5A"
+	for _, ev := range []event.Event{
+		{TS: time.Now().Add(-10 * time.Minute).UTC(), ID: "01JX2Q3Y7W5B6N9P0R1S2T3U5B", Actor: "claude-7e4c", Type: event.TypeHello, Data: map[string]interface{}{"base_name": "claude"}},
+		{TS: time.Now().Add(-9 * time.Minute).UTC(), ID: claimID, Actor: "claude-7e4c", Type: event.TypeClaim, Scope: []string{"src/foo.ts"}, Data: map[string]interface{}{"intent": "old work"}},
+	} {
+		if err := rt.Append(ev); err != nil {
+			t.Fatalf("append setup event: %v", err)
+		}
+	}
+	if err := rt.Close(); err != nil {
+		t.Fatalf("close runtime: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/session/retire", strings.NewReader(`{"actor":"claude-7e4c","reason":"renamed"}`))
+	rec := httptest.NewRecorder()
+	uiServer{staleAfter: 90 * time.Minute}.serveRetireSessionActor(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var snap uiSnapshot
+	if err := json.Unmarshal(rec.Body.Bytes(), &snap); err != nil {
+		t.Fatalf("decode snapshot: %v", err)
+	}
+	if len(snap.Sessions) != 0 || len(snap.Claims) != 0 {
+		t.Fatalf("retired actor should be gone with claims released: sessions=%+v claims=%+v", snap.Sessions, snap.Claims)
+	}
+}
+
+func TestUIServeTransferLeader(t *testing.T) {
+	repo := setupUITestRepo(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("COMMS_ACTOR", "human-eli")
+	t.Setenv("USER", "eli")
+	t.Chdir(repo)
+
+	rt, err := Open(OpenOpts{Mutating: true})
+	if err != nil {
+		t.Fatalf("open runtime: %v", err)
+	}
+	for _, ev := range []event.Event{
+		{TS: time.Now().Add(-10 * time.Minute).UTC(), ID: "01JX2Q3Y7W5B6N9P0R1S2T3U6A", Actor: "claude-7e4c", Type: event.TypeHello, Data: map[string]interface{}{"base_name": "claude", "leader": true}},
+		{TS: time.Now().Add(-9 * time.Minute).UTC(), ID: "01JX2Q3Y7W5B6N9P0R1S2T3U6B", Actor: "claude-dev", Type: event.TypeHello, Data: map[string]interface{}{"base_name": "claude", "label": "Claude Dev"}},
+	} {
+		if err := rt.Append(ev); err != nil {
+			t.Fatalf("append setup event: %v", err)
+		}
+	}
+	if err := rt.Close(); err != nil {
+		t.Fatalf("close runtime: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/session/lead", strings.NewReader(`{"actor":"claude-dev","reason":"lead now"}`))
+	rec := httptest.NewRecorder()
+	uiServer{staleAfter: 90 * time.Minute}.serveTransferLeader(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var snap uiSnapshot
+	if err := json.Unmarshal(rec.Body.Bytes(), &snap); err != nil {
+		t.Fatalf("decode snapshot: %v", err)
+	}
+	for _, session := range snap.Sessions {
+		if session.Actor == "claude-dev" && !session.Leader {
+			t.Fatalf("claude-dev should be leader: %+v", snap.Sessions)
+		}
+		if session.Actor == "claude-7e4c" && session.Leader {
+			t.Fatalf("old actor should not remain leader: %+v", snap.Sessions)
+		}
+	}
+}
+
 func TestUIStartCommsSessionRejectsWhenActive(t *testing.T) {
 	repo := setupUITestRepo(t)
 	t.Setenv("HOME", t.TempDir())
