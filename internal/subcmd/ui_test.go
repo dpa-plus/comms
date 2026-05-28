@@ -289,6 +289,48 @@ func TestUIServeRetireSessionActor(t *testing.T) {
 	}
 }
 
+func TestUIServeRetireClaimOnlyActor(t *testing.T) {
+	repo := setupUITestRepo(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("COMMS_ACTOR", "human-eli")
+	t.Setenv("USER", "eli")
+	t.Chdir(repo)
+
+	rt, err := Open(OpenOpts{Mutating: true})
+	if err != nil {
+		t.Fatalf("open runtime: %v", err)
+	}
+	claimID := "01JX2Q3Y7W5B6N9P0R1S2T3U7A"
+	if err := rt.Append(event.Event{
+		TS:    time.Now().Add(-9 * time.Minute).UTC(),
+		ID:    claimID,
+		Actor: "claude-old",
+		Type:  event.TypeClaim,
+		Scope: []string{"src/old.ts"},
+		Data:  map[string]interface{}{"intent": "stale work"},
+	}); err != nil {
+		t.Fatalf("append setup event: %v", err)
+	}
+	if err := rt.Close(); err != nil {
+		t.Fatalf("close runtime: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/session/retire", strings.NewReader(`{"actor":"claude-old","reason":"stale"}`))
+	rec := httptest.NewRecorder()
+	uiServer{staleAfter: 90 * time.Minute}.serveRetireSessionActor(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var snap uiSnapshot
+	if err := json.Unmarshal(rec.Body.Bytes(), &snap); err != nil {
+		t.Fatalf("decode snapshot: %v", err)
+	}
+	if len(snap.Claims) != 0 {
+		t.Fatalf("claim-only actor claim should be released: %+v", snap.Claims)
+	}
+}
+
 func TestUIServeTransferLeader(t *testing.T) {
 	repo := setupUITestRepo(t)
 	t.Setenv("HOME", t.TempDir())
