@@ -33,6 +33,7 @@ func main() {
 		subcmd.NewNoteCmd(),
 		subcmd.NewFindCmd(),
 		subcmd.NewDocCmd(),
+		subcmd.NewUICmd(),
 	)
 	// Hidden helpers used by tests and the SessionStart hook.
 	root.AddCommand(subcmd.NewRepoHashCmd())

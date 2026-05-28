@@ -121,7 +121,7 @@ func runClaim(scopeRaw, intent, stealID, stealReason string) error {
 	// Print the claim ID + short summary on stdout.
 	if displaceID != "" {
 		fmt.Printf("@%s claimed %s (stole %s from prior holder)\n  ID: %s\n",
-			rt.Actor, scope.String(), displaceID[:6], ev.ID)
+			rt.Actor, scope.String(), short(displaceID), ev.ID)
 	} else {
 		fmt.Printf("@%s claimed %s\n  ID: %s\n", rt.Actor, scope.String(), ev.ID)
 	}

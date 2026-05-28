@@ -16,18 +16,20 @@ const maxNoteRunes = 200
 // NewNoteCmd builds `comms note "<≤200-char FYI>"`. Short ephemeral messages
 // to the team that don't require any acknowledgment.
 func NewNoteCmd() *cobra.Command {
+	var priority bool
 	cmd := &cobra.Command{
-		Use:   `note "<≤200-char FYI>"`,
+		Use:   `note [--priority] "<≤200-char FYI>"`,
 		Short: "Post a short FYI",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runNote(args[0])
+			return runNote(args[0], priority)
 		},
 	}
+	cmd.Flags().BoolVar(&priority, "priority", false, "leader-only: pin this note as high priority in status/UI")
 	return cmd
 }
 
-func runNote(body string) error {
+func runNote(body string, priority bool) error {
 	if body == "" {
 		Fatalf(2, "note: body is empty")
 	}
@@ -40,18 +42,29 @@ func runNote(body string) error {
 		return err
 	}
 	defer rt.Close()
+	if priority {
+		requireLeader(rt)
+	}
 
 	now := time.Now().UTC()
+	data := map[string]interface{}{"body": body}
+	if priority {
+		data["priority"] = true
+	}
 	ev := event.Event{
 		TS:    now,
 		ID:    event.NewID(now),
 		Actor: rt.Actor,
 		Type:  event.TypeNote,
-		Data:  map[string]interface{}{"body": body},
+		Data:  data,
 	}
 	if err := rt.Append(ev); err != nil {
 		return err
 	}
-	fmt.Printf("@%s noted: %s\n", rt.Actor, body)
+	label := "noted"
+	if priority {
+		label = "priority note"
+	}
+	fmt.Printf("@%s %s: %s\n", rt.Actor, label, body)
 	return nil
 }

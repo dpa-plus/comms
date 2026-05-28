@@ -47,25 +47,34 @@ func runStatus(asJSON bool, since string) error {
 	if asJSON {
 		return emitStatusJSON(rt, cutoff)
 	}
-	emitStatusHuman(rt, cutoff)
+	emitStatusHuman(rt, cutoff, since)
 	return nil
 }
 
-func emitStatusHuman(rt *Runtime, cutoff time.Time) {
-	sessions := collectActiveSessions(rt.State, time.Now().Add(-4*time.Hour))
-	claims := sortedClaims(rt.State)
+func emitStatusHuman(rt *Runtime, cutoff time.Time, since string) {
+	allSessions := collectActiveSessions(rt.State, time.Now().Add(-4*time.Hour))
+	allClaims := sortedClaims(rt.State)
+	allDocs := listDocs(rt.Paths.Docs)
+	sessions, omittedSessions := limitSlice(allSessions, 10)
+	claims, omittedClaims := limitSlice(allClaims, 15)
 	findings := recentFindings(rt.State, cutoff, 5)
 	notes := recentNotes(rt.State, cutoff, 3)
-	docs := listDocs(rt.Paths.Docs)
+	docs, omittedDocs := limitSlice(allDocs, 10)
+	omitted := omittedSessions + omittedClaims + omittedDocs
 
 	fmt.Printf("ACTIVE SESSIONS (hello'd in last 4h)\n")
 	if len(sessions) == 0 {
 		fmt.Println("  (none)")
 	} else {
+		markLeaderSessions(sessions)
 		for _, s := range sessions {
 			cClaims, cFindings := claimAndFindingCounts(rt.State, s.Actor)
-			fmt.Printf("  @%-14s hello'd %s   %d claim%s  %d finding%s\n",
-				s.Actor, s.TS.Local().Format("15:04"), cClaims, pluralS(cClaims), cFindings, pluralS(cFindings))
+			role := ""
+			if s.Leader {
+				role = "  leader"
+			}
+			fmt.Printf("  @%-14s hello'd %s   %d claim%s  %d finding%s%s\n",
+				s.Actor, s.TS.Local().Format("15:04"), cClaims, pluralS(cClaims), cFindings, pluralS(cFindings), role)
 		}
 	}
 
@@ -81,22 +90,30 @@ func emitStatusHuman(rt *Runtime, cutoff time.Time) {
 	}
 
 	fmt.Println()
-	fmt.Println("RECENT FINDINGS (last 24h)")
+	fmt.Printf("RECENT FINDINGS (last %s)\n", since)
 	if len(findings) == 0 {
 		fmt.Println("  (none)")
 	} else {
 		for _, f := range findings {
-			fmt.Printf("  %-9s @%-14s %s\n", f.Category, f.Actor, f.Summary)
+			marker := ""
+			if f.Priority {
+				marker = "!"
+			}
+			fmt.Printf("  %-9s%s @%-14s %s\n", f.Category, marker, f.Actor, f.Summary)
 		}
 	}
 
 	fmt.Println()
-	fmt.Println("RECENT NOTES (last 24h)")
+	fmt.Printf("RECENT NOTES (last %s)\n", since)
 	if len(notes) == 0 {
 		fmt.Println("  (none)")
 	} else {
 		for _, n := range notes {
-			fmt.Printf("  @%-14s %s\n", n.Actor, n.Body)
+			marker := ""
+			if n.Priority {
+				marker = "! "
+			}
+			fmt.Printf("  %s@%-14s %s\n", marker, n.Actor, n.Body)
 		}
 	}
 
@@ -104,20 +121,24 @@ func emitStatusHuman(rt *Runtime, cutoff time.Time) {
 		fmt.Println()
 		fmt.Printf("DOCS (%d): %s\n", len(docs), strings.Join(docs, ", "))
 	}
+	if omitted > 0 {
+		fmt.Printf("\n... %d more; run `comms log --since %s` for details\n", omitted, since)
+	}
 }
 
 // statusJSONShape is the canonical machine output for `comms status --json`.
 type statusJSONShape struct {
-	Sessions []statusSession  `json:"sessions"`
-	Claims   []statusClaim    `json:"claims"`
-	Findings []statusFinding  `json:"findings"`
-	Notes    []statusNote     `json:"notes"`
-	Docs     []string         `json:"docs"`
+	Sessions []statusSession `json:"sessions"`
+	Claims   []statusClaim   `json:"claims"`
+	Findings []statusFinding `json:"findings"`
+	Notes    []statusNote    `json:"notes"`
+	Docs     []string        `json:"docs"`
 }
 
 type statusSession struct {
-	Actor string    `json:"actor"`
-	TS    time.Time `json:"ts"`
+	Actor  string    `json:"actor"`
+	TS     time.Time `json:"ts"`
+	Leader bool      `json:"leader"`
 }
 
 type statusClaim struct {
@@ -134,20 +155,24 @@ type statusFinding struct {
 	Actor    string    `json:"actor"`
 	Category string    `json:"category"`
 	Summary  string    `json:"summary"`
+	Priority bool      `json:"priority"`
 	TS       time.Time `json:"ts"`
 }
 
 type statusNote struct {
-	ID    string    `json:"id"`
-	Actor string    `json:"actor"`
-	Body  string    `json:"body"`
-	TS    time.Time `json:"ts"`
+	ID       string    `json:"id"`
+	Actor    string    `json:"actor"`
+	Body     string    `json:"body"`
+	Priority bool      `json:"priority"`
+	TS       time.Time `json:"ts"`
 }
 
 func emitStatusJSON(rt *Runtime, cutoff time.Time) error {
 	out := statusJSONShape{}
-	for _, s := range collectActiveSessions(rt.State, time.Now().Add(-4*time.Hour)) {
-		out.Sessions = append(out.Sessions, statusSession{Actor: s.Actor, TS: s.TS})
+	sessions := collectActiveSessions(rt.State, time.Now().Add(-4*time.Hour))
+	markLeaderSessions(sessions)
+	for _, s := range sessions {
+		out.Sessions = append(out.Sessions, statusSession{Actor: s.Actor, TS: s.TS, Leader: s.Leader})
 	}
 	for _, c := range sortedClaims(rt.State) {
 		out.Claims = append(out.Claims, statusClaim{
@@ -158,12 +183,12 @@ func emitStatusJSON(rt *Runtime, cutoff time.Time) error {
 	for _, f := range recentFindings(rt.State, cutoff, 50) {
 		out.Findings = append(out.Findings, statusFinding{
 			ID: f.ID, Actor: f.Actor, Category: f.Category,
-			Summary: f.Summary, TS: f.TS,
+			Summary: f.Summary, Priority: f.Priority, TS: f.TS,
 		})
 	}
 	for _, n := range recentNotes(rt.State, cutoff, 50) {
 		out.Notes = append(out.Notes, statusNote{
-			ID: n.ID, Actor: n.Actor, Body: n.Body, TS: n.TS,
+			ID: n.ID, Actor: n.Actor, Body: n.Body, Priority: n.Priority, TS: n.TS,
 		})
 	}
 	out.Docs = listDocs(rt.Paths.Docs)
@@ -189,6 +214,53 @@ func collectActiveSessions(s *state.State, cutoff time.Time) []*state.Session {
 	return out
 }
 
+func activeLeaderActor(s *state.State, cutoff time.Time) string {
+	sessions := collectActiveSessions(s, cutoff)
+	markLeaderSessions(sessions)
+	for _, sess := range sessions {
+		if sess.Leader {
+			return sess.Actor
+		}
+	}
+	return ""
+}
+
+func markLeaderSessions(sessions []*state.Session) {
+	if len(sessions) == 0 {
+		return
+	}
+	var explicit *state.Session
+	for _, s := range sessions {
+		if s.Leader {
+			explicit = s
+			break
+		}
+	}
+	for _, s := range sessions {
+		s.Leader = false
+	}
+	leader := explicit
+	if leader == nil {
+		leader = sessions[0]
+		for _, s := range sessions {
+			if s.TS.Before(leader.TS) {
+				leader = s
+			}
+		}
+	}
+	leader.Leader = true
+}
+
+func requireLeader(rt *Runtime) {
+	leader := activeLeaderActor(rt.State, time.Now().Add(-4*time.Hour))
+	if leader == "" {
+		Fatalf(1, "priority messages require an active leader; run `comms hello` first")
+	}
+	if rt.Actor != leader {
+		Fatalf(1, "priority messages are leader-only; current leader is @%s", leader)
+	}
+}
+
 func sortedClaims(s *state.State) []*state.Claim {
 	if s == nil {
 		return nil
@@ -205,17 +277,22 @@ func recentFindings(s *state.State, cutoff time.Time, max int) []*state.Finding 
 	if s == nil {
 		return nil
 	}
-	// Findings are appended chronologically already; walk newest first.
-	out := make([]*state.Finding, 0, max)
+	out := make([]*state.Finding, 0, len(s.Findings))
 	for i := len(s.Findings) - 1; i >= 0; i-- {
 		f := s.Findings[i]
 		if f.TS.Before(cutoff) {
 			continue
 		}
 		out = append(out, f)
-		if len(out) >= max {
-			break
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Priority != out[j].Priority {
+			return out[i].Priority
 		}
+		return out[i].TS.After(out[j].TS)
+	})
+	if max > 0 && len(out) > max {
+		out = out[:max]
 	}
 	return out
 }
@@ -224,16 +301,22 @@ func recentNotes(s *state.State, cutoff time.Time, max int) []*state.Note {
 	if s == nil {
 		return nil
 	}
-	out := make([]*state.Note, 0, max)
+	out := make([]*state.Note, 0, len(s.Notes))
 	for i := len(s.Notes) - 1; i >= 0; i-- {
 		n := s.Notes[i]
 		if n.TS.Before(cutoff) {
 			continue
 		}
 		out = append(out, n)
-		if len(out) >= max {
-			break
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Priority != out[j].Priority {
+			return out[i].Priority
 		}
+		return out[i].TS.After(out[j].TS)
+	})
+	if max > 0 && len(out) > max {
+		out = out[:max]
 	}
 	return out
 }
@@ -279,4 +362,11 @@ func parseDuration(s string) (time.Duration, error) {
 		return 0, fmt.Errorf("invalid --since %q (use 1h, 30m, 168h, etc.)", s)
 	}
 	return d, nil
+}
+
+func limitSlice[T any](in []T, max int) ([]T, int) {
+	if len(in) <= max {
+		return in, 0
+	}
+	return in[:max], len(in) - max
 }

@@ -47,6 +47,36 @@ func TestFoldHelloDedupesByActor(t *testing.T) {
 	}
 }
 
+func TestFoldHelloTracksLeader(t *testing.T) {
+	now := time.Now().UTC()
+	events := []event.Event{
+		mkEvent(t, now, "codex-1", event.TypeHello, nil, map[string]interface{}{"leader": true}),
+		mkEvent(t, now.Add(time.Second), "claude-1", event.TypeHello, nil, map[string]interface{}{}),
+	}
+	s := Fold(events)
+	if !s.Sessions["codex-1"].Leader {
+		t.Fatalf("codex-1 should be leader")
+	}
+	if s.Sessions["claude-1"].Leader {
+		t.Fatalf("claude-1 should not be leader")
+	}
+}
+
+func TestFoldPriorityNoteAndFinding(t *testing.T) {
+	now := time.Now().UTC()
+	events := []event.Event{
+		mkEvent(t, now, "codex-1", event.TypeNote, nil, map[string]interface{}{"body": "important", "priority": true}),
+		mkEvent(t, now.Add(time.Second), "codex-1", event.TypeFinding, nil, map[string]interface{}{"category": "decision", "summary": "important decision", "priority": true}),
+	}
+	s := Fold(events)
+	if len(s.Notes) != 1 || !s.Notes[0].Priority {
+		t.Fatalf("priority note not folded: %+v", s.Notes)
+	}
+	if len(s.Findings) != 1 || !s.Findings[0].Priority {
+		t.Fatalf("priority finding not folded: %+v", s.Findings)
+	}
+}
+
 func TestFoldClaimAndRelease(t *testing.T) {
 	now := time.Now().UTC()
 	claim := mkEvent(t, now, "claude-3a1f", event.TypeClaim, []string{"src/foo.ts"}, map[string]interface{}{"intent": "fix bug"})

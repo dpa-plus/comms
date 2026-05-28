@@ -61,7 +61,7 @@ func WriteConflict(w io.Writer, c Conflict) {
 	fmt.Fprintf(w, "\nSurface this to the user. Ask whether @%s's session is still active.\n", primary.Actor)
 	fmt.Fprintf(w, "\nIf user confirms the prior session ended:\n")
 	fmt.Fprintf(w, "  comms claim %q --intent %q --steal %s --reason \"user verified prior session ended\"\n",
-		c.AttemptedScope, intentOr(c.AttemptedIntent, "<your-intent>"), primary.ID[:6])
+		c.AttemptedScope, intentOr(c.AttemptedIntent, "<your-intent>"), shortID(primary.ID))
 	fmt.Fprintf(w, "\nIf session is still active:\n")
 	fmt.Fprintf(w, "  Choose a different scope, or `comms note \"@%s can I take this when you're done?\"`\n", primary.Actor)
 }
@@ -71,6 +71,13 @@ func intentOr(s, fallback string) string {
 		return fallback
 	}
 	return s
+}
+
+func shortID(id string) string {
+	if len(id) > 6 {
+		return id[:6]
+	}
+	return id
 }
 
 func formatDuration(d time.Duration) string {

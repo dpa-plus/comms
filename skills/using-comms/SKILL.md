@@ -1,110 +1,119 @@
 ---
 name: using-comms
-description: Multi-agent coordination via the `comms` CLI. Use BEFORE any Edit/Write tool call. Triggers — "before I edit", "claim this", "what is X working on", "release my claim", "found a bug", "decided to use", "session ended", "is this file claimed".
+description: Use only when the user explicitly invokes the using-comms skill by name, for example "$using-comms", "using-comms", "use the using-comms skill", or "invoke the using-comms skill". Do not trigger merely because the user mentions comms, says "start comms", "use comms", "with comms", "claim with comms", "check comms", "release comms", or describes coordination work.
 ---
 
 # Using `comms`
 
-`comms` coordinates parallel coding sessions (Claude, Codex, human shells) via per-session exclusive claims and a JSONL event log. Use it whenever you're working in a repo that contains `.comms/`.
+Use this workflow only after the user explicitly invokes `using-comms`.
+Bare references to `comms` are not enough.
 
-## The 3-rule contract
+`comms` coordinates parallel coding sessions through per-session claims,
+short notes/findings, and a repo-local docs wiki backed by a per-machine JSONL
+event log.
 
-1. **Claim before edit.** Before any `Edit` or `Write` tool call on a file not already claimed by you this session, run `comms claim "<path>[#anchor]" --intent "<reason>"`. The PreToolUse hook does this for you automatically — but you can claim explicitly when you know in advance what you'll touch.
-2. **Release when done.** When you finish a task (PR merged, fix committed, decision recorded), run `comms release --result "<outcome>"` or `comms release --latest`.
-3. **Surface conflicts.** If a claim or check exits 1, the stderr names the other actor + the exact next-command. Show that to the user; never `--steal` without their go-ahead.
+## Actor Identity
 
-## Examples
-
-### Claim a single file
+In desktop app sessions, prefix every command with a concrete actor:
 
 ```bash
-comms claim "frontend/src/lib/aggregate.ts" --intent "fix lead double-counting"
+COMMS_ACTOR=claude-20260527-a comms status
+COMMS_ACTOR=codex-20260527-a comms status
 ```
 
-### Claim with a line-range anchor (lighter conflict surface)
+Pick one actor name when this skill starts and reuse it for the conversation.
+Do not use generic names like `eli`, `claude`, `codex`, `agent`, or `user`.
+
+## Session Start
 
 ```bash
-comms claim "frontend/src/lib/aggregate.ts#L40-90" --intent "rewrite the for-loop"
+COMMS_ACTOR=claude-20260527-a comms hello
+COMMS_ACTOR=claude-20260527-a comms status
 ```
 
-### Claim with a symbol anchor
+Mention the chosen actor in your reply so the user can see it.
+
+## Claim Before Edits
+
+Before editing a file in a coordinated project:
 
 ```bash
-comms claim "src/auth.ts#validateToken" --intent "tighten the JWT exp check"
+COMMS_ACTOR=claude-20260527-a comms claim "frontend/src/lib/aggregate.ts" --intent "fix lead double-counting"
 ```
 
-### Release
+Use narrower anchors when practical:
 
 ```bash
-comms release --latest --result "PR #321 merged"
+COMMS_ACTOR=claude-20260527-a comms claim "frontend/src/lib/aggregate.ts#L40-90" --intent "rewrite aggregation loop"
+COMMS_ACTOR=claude-20260527-a comms claim "src/auth.ts#validateToken" --intent "tighten JWT expiry check"
 ```
 
-### Record a finding (5 categories)
+## Release
 
 ```bash
-comms find fix "leads sourced only from tracker overlay" --ref path:frontend/src/lib/aggregate.ts --ref commit:cece752
-comms find decision "tracker is source of truth for leads" --ref doc:lead-counting
-comms find gotcha "META_TOKEN_ENC_KEY is immutable after first deploy" --ref path:backend/src/crypto.ts
-comms find bug "Tracker rows duplicated when Meta sync runs >1×/hour" --ref path:backend/src/meta-sync.ts
-comms find ship "v1.4 deployed to develop" --ref pr:#321
+COMMS_ACTOR=claude-20260527-a comms release --latest --result "PR #321 merged"
+COMMS_ACTOR=claude-20260527-a comms release --all-mine --result "switching tasks"
+```
+
+## Findings
+
+```bash
+COMMS_ACTOR=claude-20260527-a comms find fix "leads sourced only from tracker overlay" --ref path:frontend/src/lib/aggregate.ts
+COMMS_ACTOR=claude-20260527-a comms find decision "tracker is source of truth for leads" --ref doc:lead-counting
+COMMS_ACTOR=claude-20260527-a comms find gotcha "META_TOKEN_ENC_KEY is immutable after first deploy" --ref path:src/crypto.ts
+COMMS_ACTOR=claude-20260527-a comms find bug "tracker rows duplicated when Meta sync runs more than once per hour"
+COMMS_ACTOR=claude-20260527-a comms find ship "v1.4 deployed to develop" --ref pr:#321
 ```
 
 Category cheat sheet:
 
-- `bug` — open problem, needs fixing
-- `fix` — problem just resolved
-- `ship` — now in production / released
-- `decision` — architectural choice worth remembering
-- `gotcha` — non-obvious trap; persistent reminder for future agents
+- `bug` means an open problem.
+- `fix` means a resolved problem.
+- `ship` means released or deployed.
+- `decision` means an architectural choice.
+- `gotcha` means a persistent trap future agents should remember.
 
-Rule of thumb: ephemeral chatter = `note`, persistent-gotcha = `gotcha`, design-choice = `decision`.
-
-### Quick FYI (no decision required)
+Use `comms note` for short FYIs that are not persistent decisions:
 
 ```bash
-comms note "FYI Prisma schema migration coming next session"
+COMMS_ACTOR=claude-20260527-a comms note "FYI Prisma schema migration coming next session"
 ```
 
-### Docs (the wiki)
+## Docs
 
 ```bash
-comms doc --list                              # see all slugs
-comms doc tracker-architecture                # print one
-comms doc tracker-architecture --edit         # open $EDITOR under sidecar flock
+COMMS_ACTOR=claude-20260527-a comms doc --list
+COMMS_ACTOR=claude-20260527-a comms doc tracker-architecture
+COMMS_ACTOR=claude-20260527-a comms doc tracker-architecture --edit
 ```
 
-## Conflict-handling protocol
+## Conflict Handling
 
-When `comms claim` exits 1, stderr looks like:
+If `comms claim` exits 1, stop and surface the conflict to the user.
+Do not run `--steal` unless the user confirms the prior session is dead.
 
-```
-BLOCKED: src/foo.ts is claimed.
-  Holder:  @claude-3a1f
-  Claim:   01HZK4...
-  Intent:  "fix lead double-counting"
-  Since:   2026-05-22T09:14:00Z (5h 12m ago)
+If the user confirms takeover:
 
-Surface this to the user. Ask whether @claude-3a1f's session is still active.
-
-If user confirms the prior session ended:
-  comms claim "src/foo.ts" --intent "<your-intent>" --steal 01HZK4 --reason "user verified prior session ended"
-
-If session is still active:
-  Choose a different scope, or `comms note "@claude-3a1f can I take this when you're done?"`
+```bash
+COMMS_ACTOR=claude-20260527-a comms claim "src/foo.ts" --intent "<your intent>" --steal <claim-id> --reason "user verified prior session ended"
 ```
 
-Your job:
+If the session is still active, choose another scope or leave a note:
 
-1. **Stop. Don't `--steal` reflexively.** Read the holder + intent + since.
-2. **Ask the user**: "Another session (@claude-3a1f, claimed 5h ago to 'fix lead double-counting') holds this scope. Is that session still active?"
-3. **If user says it's dead**, run the literal `--steal` command from the stderr. Use a `--reason` that quotes the user's confirmation.
-4. **If user says it's alive**, pick a different scope OR `comms note "@claude-3a1f can I take this when you're done?"` and switch to another task.
+```bash
+COMMS_ACTOR=claude-20260527-a comms note "@claude-3a1f can I take src/foo.ts when you're done?"
+```
 
-## Failure modes
+## Failure Modes
 
-- **Exit 1 (blocked)** = block the edit, surface to user.
-- **Exit 2 (system error: broken log, missing dir, etc.)** = log a warning to the user but do NOT block. A broken `comms` should not brick all editing.
+- Exit 1 means blocked by another actor or a policy rule; show the user.
+- Exit 2 means system error; warn the user and continue only if they approve.
 
-## Hard rule
+## What This Skill Does Not Do
 
-**Before any Edit or Write tool call on a file not already claimed by you this session, run `comms claim`.**
+Do not install hooks.
+Do not edit `.zshrc`.
+Do not start `comms` automatically.
+Do not claim files unless the user invoked `using-comms`.
+
+**Before any Edit or Write tool call in an active `using-comms` workflow, claim the file with the selected `COMMS_ACTOR`.**

@@ -87,7 +87,7 @@ func TestScopes_LineRanges(t *testing.T) {
 		a, b string
 		want bool
 	}{
-		{"src/foo.ts#L1-10", "src/foo.ts#L5-20", true},  // overlap
+		{"src/foo.ts#L1-10", "src/foo.ts#L5-20", true},   // overlap
 		{"src/foo.ts#L1-10", "src/foo.ts#L11-20", false}, // adjacent, disjoint
 		{"src/foo.ts#L1-10", "src/foo.ts#L10-20", true},  // boundary touches
 		{"src/foo.ts#L100-200", "src/foo.ts#L50-60", false},
@@ -117,6 +117,11 @@ func TestScopes_Symbols(t *testing.T) {
 	// Case-sensitive.
 	if Scopes(parse("src/foo.ts#Bar"), parse("src/foo.ts#bar")) {
 		t.Errorf("symbol comparison must be case-sensitive")
+	}
+	// NFC-normalized: precomposed "é" and decomposed "e"+"´" should
+	// canonicalize to the same symbol.
+	if !Scopes(parse("src/foo.ts#Café"), parse("src/foo.ts#Cafe\u0301")) {
+		t.Errorf("symbols must be NFC-normalized before comparison")
 	}
 }
 
@@ -190,13 +195,13 @@ func TestParse_AnchorValidation(t *testing.T) {
 		wantErr bool
 	}{
 		{"src/foo.ts#L1-10", false},
-		{"src/foo.ts#L5-5", false},  // single line OK
-		{"src/foo.ts#L10-5", true},  // inverted
-		{"src/foo.ts#L0-10", true},  // zero
-		{"src/foo.ts#L-5", true},    // missing start
+		{"src/foo.ts#L5-5", false}, // single line OK
+		{"src/foo.ts#L10-5", true}, // inverted
+		{"src/foo.ts#L0-10", true}, // zero
+		{"src/foo.ts#L-5", true},   // missing start
 		{"src/foo.ts#bar", false},
-		{"src/foo.ts#", true},        // empty anchor
-		{"src/foo.ts# ", true},       // whitespace-only
+		{"src/foo.ts#", true},  // empty anchor
+		{"src/foo.ts# ", true}, // whitespace-only
 	}
 	for _, c := range cases {
 		t.Run(c.in, func(t *testing.T) {

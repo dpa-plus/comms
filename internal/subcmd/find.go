@@ -21,8 +21,9 @@ var findCategories = map[string]string{
 // NewFindCmd builds `comms find <category> "<summary>" [--ref kind:value ...]`.
 func NewFindCmd() *cobra.Command {
 	var refs []string
+	var priority bool
 	cmd := &cobra.Command{
-		Use:   `find <bug|fix|ship|decision|gotcha> "<summary>"`,
+		Use:   `find [--priority] <bug|fix|ship|decision|gotcha> "<summary>"`,
 		Short: "Record a finding (bug, fix, ship, decision, or gotcha)",
 		Long: `Record a finding in one of five categories:
 
@@ -41,14 +42,15 @@ numbers, issue links. Example:
     --ref pr:#321`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runFind(args[0], args[1], refs)
+			return runFind(args[0], args[1], refs, priority)
 		},
 	}
 	cmd.Flags().StringSliceVar(&refs, "ref", nil, "kind:value reference (repeatable)")
+	cmd.Flags().BoolVar(&priority, "priority", false, "leader-only: pin this finding as high priority in status/UI")
 	return cmd
 }
 
-func runFind(category, summary string, refs []string) error {
+func runFind(category, summary string, refs []string, priority bool) error {
 	if _, ok := findCategories[category]; !ok {
 		Fatalf(2, "find: invalid category %q. Choose: bug, fix, ship, decision, gotcha.", category)
 	}
@@ -65,6 +67,9 @@ func runFind(category, summary string, refs []string) error {
 		return err
 	}
 	defer rt.Close()
+	if priority {
+		requireLeader(rt)
+	}
 
 	refsForJSON := make([]map[string]string, len(parsedRefs))
 	for i, r := range parsedRefs {
@@ -83,10 +88,17 @@ func runFind(category, summary string, refs []string) error {
 			"refs":     refsForJSON,
 		},
 	}
+	if priority {
+		ev.Data["priority"] = true
+	}
 	if err := rt.Append(ev); err != nil {
 		return err
 	}
-	fmt.Printf("[%s] @%s: %s\n", category, rt.Actor, summary)
+	prefix := ""
+	if priority {
+		prefix = "PRIORITY "
+	}
+	fmt.Printf("%s[%s] @%s: %s\n", prefix, category, rt.Actor, summary)
 	if len(parsedRefs) > 0 {
 		for _, r := range parsedRefs {
 			fmt.Printf("  ref: %s:%s\n", r.kind, r.value)
