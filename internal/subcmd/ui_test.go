@@ -251,6 +251,8 @@ func TestUIActionEndpointsAppendEventsAndDocs(t *testing.T) {
 			server.serveHello(rec, req)
 		case "/api/claims":
 			server.serveCreateClaim(rec, req)
+		case "/api/claims/release-mine":
+			server.serveReleaseMine(rec, req)
 		case "/api/notes":
 			server.serveCreateNote(rec, req)
 		case "/api/findings":
@@ -308,6 +310,18 @@ func TestUIActionEndpointsAppendEventsAndDocs(t *testing.T) {
 	}
 	if len(rt.State.Findings) != 2 || !rt.State.Findings[0].Priority {
 		t.Fatalf("findings not recorded: %+v", rt.State.Findings)
+	}
+
+	if rec := post("/api/claims/release-mine", `{"mode":"latest","result":"done"}`); rec.Code != http.StatusOK {
+		t.Fatalf("release-mine status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	rt2, err := Open(OpenOpts{Mutating: false})
+	if err != nil {
+		t.Fatalf("open runtime after release: %v", err)
+	}
+	defer rt2.Close()
+	if len(rt2.State.Claims) != 0 {
+		t.Fatalf("claims len after release = %d, want 0", len(rt2.State.Claims))
 	}
 }
 

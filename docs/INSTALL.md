@@ -75,6 +75,8 @@ The UI also includes forms for the rest of the day-to-day workflow:
 - **Check Path** reports whether a file/scope is blocked by someone else's
   active claim.
 - **Claim** appends a `claim` event, with optional steal ID + reason.
+- **Release Mine** releases your latest claim or all claims held by the UI
+  actor.
 - **Note** appends a short `note`; priority notes are leader-only.
 - **Finding** appends a categorized `finding`; priority findings are
   leader-only.

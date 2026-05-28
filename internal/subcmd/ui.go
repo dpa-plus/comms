@@ -59,6 +59,7 @@ func runUI(addr string, demo bool, staleAfter time.Duration) error {
 	mux.HandleFunc("/api/check", server.serveCheck)
 	mux.HandleFunc("/api/claims", server.serveCreateClaim)
 	mux.HandleFunc("/api/claims/release", server.serveReleaseClaim)
+	mux.HandleFunc("/api/claims/release-mine", server.serveReleaseMine)
 	mux.HandleFunc("/api/notes", server.serveCreateNote)
 	mux.HandleFunc("/api/findings", server.serveCreateFinding)
 	mux.HandleFunc("/api/docs/", server.serveDoc)
@@ -330,6 +331,61 @@ func (s uiServer) serveReleaseClaim(w http.ResponseWriter, r *http.Request) {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(buildUISnapshot(rt, s.staleAfter))
+}
+
+func (s uiServer) serveReleaseMine(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.rejectDemo(w, "demo mode is read-only; no release events are written") {
+		return
+	}
+	var req struct {
+		Mode   string `json:"mode"`
+		Result string `json:"result"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+	mode := strings.TrimSpace(req.Mode)
+	if mode == "" {
+		mode = "latest"
+	}
+	rt, err := Open(OpenOpts{Mutating: true})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer rt.Close()
+	var targets []*state.Claim
+	switch mode {
+	case "latest":
+		c := rt.State.LatestClaimByActor(rt.Actor)
+		if c == nil {
+			http.Error(w, fmt.Sprintf("@%s holds no active claims", rt.Actor), http.StatusConflict)
+			return
+		}
+		targets = []*state.Claim{c}
+	case "all":
+		targets = rt.State.ActiveClaimsByActor(rt.Actor)
+		if len(targets) == 0 {
+			http.Error(w, fmt.Sprintf("@%s holds no active claims", rt.Actor), http.StatusConflict)
+			return
+		}
+	default:
+		http.Error(w, "mode must be latest or all", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.Result) == "" {
+		req.Result = "released from comms ui"
+	}
+	if err := appendReleaseEvent(rt, targets, "", strings.TrimSpace(req.Result)); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.writeSnapshot(w, rt)
 }
 
 func (s uiServer) serveCreateNote(w http.ResponseWriter, r *http.Request) {
@@ -1165,6 +1221,15 @@ label.checkline input {
         <input name="reason" placeholder="steal reason" autocomplete="off">
         <button type="submit">Claim</button>
       </form>
+      <form class="action-card" id="releaseMineForm">
+        <div class="action-title">Release Mine</div>
+        <select name="mode">
+          <option value="latest">latest claim</option>
+          <option value="all">all my claims</option>
+        </select>
+        <input name="result" placeholder="result" autocomplete="off">
+        <button type="submit">Release</button>
+      </form>
       <form class="action-card wide" id="noteForm">
         <div class="action-title">Note</div>
         <textarea name="body" maxlength="200" placeholder="short FYI for this repo"></textarea>
@@ -1363,6 +1428,22 @@ el('claimForm').addEventListener('submit', async event => {
     });
     form.reset();
     setActionResult('Claim recorded.');
+    await load();
+  } catch (err) {
+    setActionResult(err.message.trim(), true);
+    showError(err);
+  }
+});
+el('releaseMineForm').addEventListener('submit', async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  try {
+    await postJSON('/api/claims/release-mine', {
+      mode: form.mode.value,
+      result: form.result.value.trim()
+    });
+    form.reset();
+    setActionResult('Released claim(s).');
     await load();
   } catch (err) {
     setActionResult(err.message.trim(), true);
