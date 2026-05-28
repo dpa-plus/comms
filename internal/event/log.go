@@ -29,10 +29,15 @@ func Append(path string, e Event) error {
 		return fmt.Errorf("event log: open: %w", err)
 	}
 	defer f.Close()
-	// Single Write call — the kernel guarantees atomicity for writes ≤ PIPE_BUF
-	// on most platforms, but since we hold flock we don't depend on that.
-	if _, err := f.Write(line); err != nil {
-		return fmt.Errorf("event log: write: %w", err)
+	for len(line) > 0 {
+		n, err := f.Write(line)
+		if err != nil {
+			return fmt.Errorf("event log: write: %w", err)
+		}
+		if n == 0 {
+			return fmt.Errorf("event log: write: %w", io.ErrShortWrite)
+		}
+		line = line[n:]
 	}
 	return nil
 }
@@ -65,11 +70,12 @@ func Read(path string) ([]Event, error) {
 	)
 	for {
 		lineNum++
-		line, err := br.ReadBytes('\n')
-		hasNewline := err == nil
+		line, hasNewline, err := readLine(br)
 		switch {
 		case len(line) == 0 && errors.Is(err, io.EOF):
 			return events, nil
+		case errors.Is(err, errLineTooLong):
+			return nil, &ErrCorrupt{Path: path, Line: lineNum, Cause: fmt.Errorf("line exceeds %d bytes", maxLineBytes)}
 		case err != nil && !errors.Is(err, io.EOF):
 			return nil, fmt.Errorf("event log: read line %d: %w", lineNum, err)
 		}
@@ -81,9 +87,6 @@ func Read(path string) ([]Event, error) {
 			}
 			fmt.Fprintf(os.Stderr, "comms: warning: log %s ends with unterminated line %d, ignored\n", path, lineNum)
 			return events, nil
-		}
-		if len(line) > maxLineBytes {
-			return nil, &ErrCorrupt{Path: path, Line: lineNum, Cause: fmt.Errorf("line exceeds %d bytes", maxLineBytes)}
 		}
 		// Strip the trailing newline for parsing.
 		trimmed := line[:len(line)-1]
@@ -105,6 +108,29 @@ func Read(path string) ([]Event, error) {
 
 		if errors.Is(err, io.EOF) {
 			return events, nil
+		}
+	}
+}
+
+var errLineTooLong = errors.New("line too long")
+
+func readLine(br *bufio.Reader) ([]byte, bool, error) {
+	var out []byte
+	for {
+		frag, err := br.ReadSlice('\n')
+		out = append(out, frag...)
+		if len(out) > maxLineBytes {
+			return nil, false, errLineTooLong
+		}
+		switch {
+		case err == nil:
+			return out, true, nil
+		case errors.Is(err, bufio.ErrBufferFull):
+			continue
+		case errors.Is(err, io.EOF):
+			return out, false, io.EOF
+		default:
+			return out, false, err
 		}
 	}
 }

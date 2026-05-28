@@ -130,7 +130,7 @@ func makeRepoRelative(path, repoRoot string) (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	if strings.HasPrefix(rel, "..") {
+	if rel == ".." || strings.HasPrefix(rel, "../") {
 		return "", false
 	}
 	return filepath.ToSlash(rel), true

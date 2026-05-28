@@ -1,32 +1,36 @@
 <!-- COMMS PROTOCOL — READ FIRST -->
 
-This repo uses `comms` (github.com/dpa-plus/comms) for multi-agent coordination.
+This repo can use `comms` (github.com/dpa-plus/comms) for opt-in multi-agent coordination.
 
-**On every session start, before any other work:**
+Only start the workflow when the user explicitly asks to use `comms` or invokes the `using-comms` skill.
+
+**When the workflow starts:**
 ```bash
-comms hello && comms status
+COMMS_ACTOR=codex-20260527-a comms hello
+COMMS_ACTOR=codex-20260527-a comms status
 ```
+Pick one concrete per-session actor and reuse it for this conversation.
 
-**Before any file edit:**
+**Before any file edit during the workflow:**
 ```bash
-comms claim "src/path/to/file.ts" --intent "what you're changing"
+COMMS_ACTOR=codex-20260527-a comms claim "src/path/to/file.ts" --intent "what you're changing"
 ```
 If exit code 1: read stderr, surface the conflict to the user, ask whether the prior session is alive. If user authorizes, use `--steal <id> --reason "..."`.
 
 **When done with a claim:**
 ```bash
-comms release --result "PR #123 merged"
+COMMS_ACTOR=codex-20260527-a comms release --result "PR #123 merged"
 ```
 
 **Record findings:**
 ```bash
-comms find fix "..." --ref path:src/foo.ts --ref commit:abc1234     # problem resolved
-comms find bug "..." --ref path:src/bar.ts                          # open problem
-comms find decision "..." --ref doc:slug                            # architecture choice
-comms find gotcha "..." --ref path:src/auth.ts                      # persistent trap
-comms find ship "..." --ref pr:#123                                 # released
+COMMS_ACTOR=codex-20260527-a comms find fix "..." --ref path:src/foo.ts --ref commit:abc1234
+COMMS_ACTOR=codex-20260527-a comms find bug "..." --ref path:src/bar.ts
+COMMS_ACTOR=codex-20260527-a comms find decision "..." --ref doc:slug
+COMMS_ACTOR=codex-20260527-a comms find gotcha "..." --ref path:src/auth.ts
+COMMS_ACTOR=codex-20260527-a comms find ship "..." --ref pr:#123
 ```
 
-**FAILURE TO RUN `comms hello` BEFORE FIRST EDIT IS A PROTOCOL VIOLATION.**
+Do not install hooks or edit shell startup files unless the user explicitly asks.
 
 <!-- END COMMS PROTOCOL -->

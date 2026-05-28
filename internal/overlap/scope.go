@@ -19,6 +19,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // Scope is the parsed form of a `path[#anchor]` string.
@@ -39,9 +41,9 @@ type Scope struct {
 type AnchorKind int
 
 const (
-	AnchorWhole AnchorKind = iota // no `#` anchor — claims the entire file
-	AnchorLine                    // L<n>-<m>
-	AnchorSymbol                  // symbol-name (opaque string)
+	AnchorWhole  AnchorKind = iota // no `#` anchor — claims the entire file
+	AnchorLine                     // L<n>-<m>
+	AnchorSymbol                   // symbol-name (opaque string)
 )
 
 // Anchor is the per-file claim refinement. Exactly one of LineStart/LineEnd
@@ -179,9 +181,7 @@ func parseAnchor(s string) (Anchor, error) {
 	if !utf8.ValidString(sym) {
 		return Anchor{}, fmt.Errorf("scope: symbol is not valid UTF-8")
 	}
-	// NFC-normalize. Go's stdlib doesn't ship NFC out of the box; we accept the
-	// pre-normalized string for MVP and document that callers should normalize
-	// upstream. Most real symbol identifiers are ASCII, so this is fine.
+	sym = norm.NFC.String(sym)
 	return Anchor{Kind: AnchorSymbol, Symbol: sym}, nil
 }
 

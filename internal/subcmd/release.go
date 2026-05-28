@@ -16,10 +16,10 @@ import (
 // else's claim requires --reason (= arbitrated release, recorded in audit).
 func NewReleaseCmd() *cobra.Command {
 	var (
-		latest   bool
-		allMine  bool
-		reason   string
-		result   string
+		latest  bool
+		allMine bool
+		reason  string
+		result  string
 	)
 	cmd := &cobra.Command{
 		Use:   "release [<id>|--latest|--all-mine] [--result <text>]",
@@ -71,11 +71,27 @@ func runRelease(args []string, latest, allMine bool, reason, result string) erro
 		}
 	}
 
+	if err := appendReleaseEvent(rt, targets, reason, result); err != nil {
+		return err
+	}
+	for _, c := range targets {
+		isArbitrated := c.Actor != rt.Actor
+
+		if isArbitrated {
+			fmt.Printf("Released @%s's claim %s (arbitrated by @%s, reason: %s)\n", c.Actor, short(c.ID), rt.Actor, reason)
+		} else {
+			fmt.Printf("Released claim %s (%s)\n", short(c.ID), c.Scope.String())
+		}
+	}
+	return nil
+}
+
+func appendReleaseEvent(rt *Runtime, targets []*state.Claim, reason, result string) error {
 	now := time.Now().UTC()
 	for _, c := range targets {
 		isArbitrated := c.Actor != rt.Actor
 		if isArbitrated && reason == "" {
-			Fatalf(2, "release: closing @%s's claim %s requires --reason (arbitrated release)", c.Actor, c.ID[:6])
+			return fmt.Errorf("release: closing @%s's claim %s requires --reason (arbitrated release)", c.Actor, short(c.ID))
 		}
 
 		data := map[string]interface{}{
@@ -105,11 +121,6 @@ func runRelease(args []string, latest, allMine bool, reason, result string) erro
 		}
 		if err := rt.Append(ev); err != nil {
 			return err
-		}
-		if isArbitrated {
-			fmt.Printf("Released @%s's claim %s (arbitrated by @%s, reason: %s)\n", c.Actor, c.ID[:6], rt.Actor, reason)
-		} else {
-			fmt.Printf("Released claim %s (%s)\n", c.ID[:6], c.Scope.String())
 		}
 	}
 	return nil

@@ -74,7 +74,7 @@ func policyTemplate() []byte {
 }
 
 func gitignoreContent() []byte {
-	return []byte(`# Sidecar editor locks from `+"`comms doc <slug> --edit`"+`.
+	return []byte(`# Sidecar editor locks from ` + "`comms doc <slug> --edit`" + `.
 # These are transient flock targets, not content.
 docs/.*.lock
 `)

@@ -50,6 +50,7 @@ type Session struct {
 	BaseName string
 	Hostname string
 	TTY      string
+	Leader   bool
 }
 
 // Finding is a `comms find` event.
@@ -59,6 +60,7 @@ type Finding struct {
 	Actor    string
 	Category string
 	Summary  string
+	Priority bool
 	Refs     []Ref
 }
 
@@ -70,10 +72,11 @@ type Ref struct {
 
 // Note is a short FYI.
 type Note struct {
-	ID    string
-	TS    time.Time
-	Actor string
-	Body  string
+	ID       string
+	TS       time.Time
+	Actor    string
+	Body     string
+	Priority bool
 }
 
 // Fold replays events in chronological order to produce the current state.
@@ -100,6 +103,7 @@ func Fold(events []event.Event) *State {
 				BaseName: stringOf(ev.Data, "base_name"),
 				Hostname: stringOf(ev.Data, "hostname"),
 				TTY:      stringOf(ev.Data, "tty"),
+				Leader:   boolOf(ev.Data, "leader"),
 			}
 		case event.TypeClaim:
 			c, err := claimFromEvent(ev)
@@ -126,14 +130,16 @@ func Fold(events []event.Event) *State {
 				Actor:    ev.Actor,
 				Category: stringOf(ev.Data, "category"),
 				Summary:  stringOf(ev.Data, "summary"),
+				Priority: boolOf(ev.Data, "priority"),
 				Refs:     parseRefs(ev.Data),
 			})
 		case event.TypeNote:
 			s.Notes = append(s.Notes, &Note{
-				ID:    ev.ID,
-				TS:    ev.TS,
-				Actor: ev.Actor,
-				Body:  stringOf(ev.Data, "body"),
+				ID:       ev.ID,
+				TS:       ev.TS,
+				Actor:    ev.Actor,
+				Body:     stringOf(ev.Data, "body"),
+				Priority: boolOf(ev.Data, "priority"),
 			})
 		}
 	}
@@ -262,6 +268,18 @@ func stringOf(m map[string]interface{}, key string) string {
 		}
 	}
 	return ""
+}
+
+func boolOf(m map[string]interface{}, key string) bool {
+	if m == nil {
+		return false
+	}
+	if v, ok := m[key]; ok {
+		if b, ok := v.(bool); ok {
+			return b
+		}
+	}
+	return false
 }
 
 func refList(m map[string]interface{}, key string) []string {

@@ -90,14 +90,27 @@ func TestReadDuplicateIDs(t *testing.T) {
 	}
 }
 
+func TestReadRejectsOversizedLine(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "log.jsonl", strings.Repeat("x", maxLineBytes+1)+"\n")
+	_, err := Read(path)
+	if err == nil {
+		t.Fatalf("expected ErrCorrupt")
+	}
+	var ec *ErrCorrupt
+	if !errors.As(err, &ec) {
+		t.Fatalf("expected *ErrCorrupt, got %T: %v", err, err)
+	}
+}
+
 func TestAppendReadRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "log.jsonl")
 	now := time.Now().UTC()
 	for i := 0; i < 5; i++ {
 		ev := Event{
-			TS: now.Add(time.Duration(i) * time.Second),
-			ID: NewID(now.Add(time.Duration(i) * time.Second)),
+			TS:    now.Add(time.Duration(i) * time.Second),
+			ID:    NewID(now.Add(time.Duration(i) * time.Second)),
 			Actor: "agent-" + string(rune('a'+i)),
 			Type:  TypeHello,
 		}

@@ -46,16 +46,20 @@ func runHello(args []string) error {
 	hostname, _ := os.Hostname()
 	tty := readTTY()
 	baseName := baseNameOfActor(rt.Actor)
+	now := time.Now().UTC()
+	activeLeader := activeLeaderActor(rt.State, now.Add(-4*time.Hour))
+	isLeader := activeLeader == "" || activeLeader == rt.Actor
 
 	ev := event.Event{
-		TS:    time.Now().UTC(),
-		ID:    event.NewID(time.Now()),
+		TS:    now,
+		ID:    event.NewID(now),
 		Actor: rt.Actor,
 		Type:  event.TypeHello,
 		Data: map[string]interface{}{
 			"base_name": baseName,
 			"hostname":  hostname,
 			"tty":       tty,
+			"leader":    isLeader,
 		},
 	}
 	if err := rt.Append(ev); err != nil {
@@ -76,6 +80,9 @@ func runHello(args []string) error {
 
 	// FIRST LINE: actor name. Visible even when output scrolls.
 	fmt.Printf("@%s registered.\n", rt.Actor)
+	if isLeader {
+		fmt.Println("  Role:    leader (can post priority notes/findings)")
+	}
 	fmt.Printf("  (%d %s session%s active right now.)\n", activeForBase, baseName, pluralS(activeForBase))
 	fmt.Printf("  Project: %s  (hash: %s)\n", rt.Repo.Name, rt.Repo.Hash)
 	fmt.Printf("  Log:     %s\n", rt.Paths.Log)
