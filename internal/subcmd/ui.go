@@ -398,6 +398,9 @@ func buildUISnapshot(rt *Runtime, staleAfter time.Duration) uiSnapshot {
 	if out.Docs == nil {
 		out.Docs = []string{}
 	}
+	if out.Lessons == nil {
+		out.Lessons = []string{}
+	}
 	if a, err := actor.Resolve(actor.Mutating); err == nil {
 		out.Project.Actor = a
 		out.Project.MutationsEnabled = true
@@ -412,6 +415,9 @@ func buildUISnapshot(rt *Runtime, staleAfter time.Duration) uiSnapshot {
 		})
 	}
 	out.Current, out.CommsSessions = buildCommsSessionViews(rt.Events)
+	if out.CommsSessions == nil {
+		out.CommsSessions = []uiCommsSession{}
+	}
 	for _, c := range sortedClaims(rt.State) {
 		out.Claims = append(out.Claims, uiClaim{
 			ID: c.ID, Actor: c.Actor, Scope: c.Scope.String(), Intent: c.Intent,
@@ -1136,9 +1142,11 @@ function applyTheme(theme) {
 applyTheme(preferredTheme());
 function empty(label) { return '<div class="empty">' + label + '</div>'; }
 function renderRows(items, fn, label) {
+  items = items || [];
   return items.length ? items.map(fn).join('') : empty(label);
 }
 function renderTable(items, headers, fn, label) {
+  items = items || [];
   if (!items.length) return empty(label);
   return '<table><thead><tr>' + headers.map(h => '<th>' + h + '</th>').join('') + '</tr></thead><tbody>' + items.map(fn).join('') + '</tbody></table>';
 }
