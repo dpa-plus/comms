@@ -90,46 +90,56 @@ func TestFoldClaimAndRelease(t *testing.T) {
 	}
 }
 
-func TestFoldSessionEndArchivesSessionAndReleasesClaims(t *testing.T) {
+func TestFoldCommsSessionEndArchivesWindowAndReleasesAllClaims(t *testing.T) {
 	now := time.Now().UTC()
 	hello := mkEvent(t, now, "claude-1", event.TypeHello, nil, map[string]interface{}{"leader": true})
 	claim := mkEvent(t, now.Add(time.Second), "claude-1", event.TypeClaim, []string{"src/foo.ts"}, map[string]interface{}{"intent": "fix bug"})
+	otherHello := mkEvent(t, now.Add(1500*time.Millisecond), "codex-1", event.TypeHello, nil, map[string]interface{}{"hostname": "host"})
+	otherClaim := mkEvent(t, now.Add(1800*time.Millisecond), "codex-1", event.TypeClaim, []string{"src/bar.ts"}, map[string]interface{}{"intent": "review bar"})
+	note := mkEvent(t, now.Add(1900*time.Millisecond), "codex-1", event.TypeNote, nil, map[string]interface{}{"body": "watch auth"})
 	end := mkEvent(t, now.Add(2*time.Second), "human-eli", event.TypeRelease, nil, map[string]interface{}{
-		"refs":        []interface{}{claim.ID},
-		"session_end": true,
-		"ended_actor": "claude-1",
-		"reason":      "project done",
+		"refs":              []interface{}{claim.ID, otherClaim.ID},
+		"comms_session_end": true,
+		"reason":            "project done",
 	})
-	s := Fold([]event.Event{hello, claim, end})
+	s := Fold([]event.Event{hello, claim, otherHello, otherClaim, note, end})
 	if len(s.Claims) != 0 {
-		t.Fatalf("session end should release claims, got %+v", s.Claims)
+		t.Fatalf("comms session end should release claims, got %+v", s.Claims)
 	}
-	if _, ok := s.Sessions["claude-1"]; ok {
-		t.Fatalf("ended session should not remain active")
+	if len(s.Sessions) != 0 {
+		t.Fatalf("comms session end should clear active sessions, got %+v", s.Sessions)
 	}
-	ended := s.EndedSessions["claude-1"]
-	if ended == nil {
-		t.Fatalf("ended session not archived")
+	if len(s.EndedCommsSessions) != 1 {
+		t.Fatalf("ended comms sessions = %d, want 1", len(s.EndedCommsSessions))
 	}
-	if ended.EndedBy != "human-eli" || ended.Reason != "project done" || len(ended.ReleasedRefs) != 1 {
+	ended := s.EndedCommsSessions[0]
+	if ended.EndedBy != "human-eli" || ended.Reason != "project done" || len(ended.ReleasedRefs) != 2 {
 		t.Fatalf("bad archive: %+v", ended)
+	}
+	if ended.EventCount != 6 || ended.ClaimCount != 2 || ended.NoteCount != 1 {
+		t.Fatalf("bad archive counts: %+v", ended)
+	}
+	wantActors := []string{"claude-1", "codex-1", "human-eli"}
+	for i, want := range wantActors {
+		if i >= len(ended.Actors) || ended.Actors[i] != want {
+			t.Fatalf("actors = %+v, want %+v", ended.Actors, wantActors)
+		}
 	}
 }
 
-func TestFoldHelloReactivatesEndedSession(t *testing.T) {
+func TestFoldHelloStartsNewWindowAfterCommsSessionEnd(t *testing.T) {
 	now := time.Now().UTC()
 	end := mkEvent(t, now, "human-eli", event.TypeRelease, nil, map[string]interface{}{
-		"session_end": true,
-		"ended_actor": "claude-1",
-		"reason":      "done",
+		"comms_session_end": true,
+		"reason":            "done",
 	})
 	hello := mkEvent(t, now.Add(time.Second), "claude-1", event.TypeHello, nil, map[string]interface{}{"hostname": "host"})
 	s := Fold([]event.Event{end, hello})
-	if s.EndedSessions["claude-1"] != nil {
-		t.Fatalf("new hello should remove ended archive while active")
+	if len(s.EndedCommsSessions) != 1 {
+		t.Fatalf("ended archive should remain available, got %+v", s.EndedCommsSessions)
 	}
 	if s.Sessions["claude-1"] == nil {
-		t.Fatalf("session should be active after new hello")
+		t.Fatalf("new hello should create a fresh active comms window")
 	}
 }
 

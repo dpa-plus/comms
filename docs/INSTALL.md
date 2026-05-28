@@ -67,11 +67,17 @@ The UI is intentionally not a replacement for the CLI. Agents still use
 UI is for watching the repo and ending whole sessions when you are done with
 them.
 
-If you start the UI with `COMMS_ACTOR` set, active session rows include an
-**End Session** button. Ending a session appends one normal `release` event
-with `session_end=true`, releases every active claim held by that actor, moves
-the actor out of **Active Sessions**, and keeps an **Ended Sessions** archive
-for later analysis. It does not delete old JSONL rows.
+If you start the UI with `COMMS_ACTOR` set, the header includes an
+**End Comms Session** button. Use it when the project work window is over. It
+appends one normal `release` event with `comms_session_end=true`, releases
+every active claim, clears all active sessions, and adds a **Comms Session
+Archive** summary for later analysis. It does not delete old JSONL rows.
+
+The archive boundary means everything from the previous
+`comms_session_end=true` event up to the new one belongs to one completed
+communication session. Later analysis can read the JSONL log directly and
+reconstruct the full history, while the UI shows the compact counts: actors,
+events, claims, findings, notes, released refs, end time, and reason.
 
 If the repo has no events yet, the log table will be empty. To preview the UI
 with sample sessions, claims, findings, notes, docs, and raw events:
