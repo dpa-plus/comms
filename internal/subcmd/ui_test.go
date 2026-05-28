@@ -62,6 +62,43 @@ func TestBuildDemoUISnapshotMarksStaleAndShowsCommsArchive(t *testing.T) {
 	}
 }
 
+func TestBuildUISnapshotUsesEmptySlicesForMissingArchiveAndLessons(t *testing.T) {
+	repo := setupUITestRepo(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("COMMS_ACTOR", "human-eli")
+	t.Setenv("USER", "eli")
+	t.Chdir(repo)
+
+	rt, err := Open(OpenOpts{Mutating: true})
+	if err != nil {
+		t.Fatalf("open runtime: %v", err)
+	}
+	if err := rt.Append(event.Event{
+		TS:    time.Now().UTC(),
+		ID:    "01JX2Q3Y7W5B6N9P0R1S2T3N0A",
+		Actor: "claude-dev",
+		Type:  event.TypeHello,
+		Data:  map[string]interface{}{"base_name": "claude"},
+	}); err != nil {
+		t.Fatalf("append hello: %v", err)
+	}
+	snap := buildUISnapshot(rt, 90*time.Minute)
+	if err := rt.Close(); err != nil {
+		t.Fatalf("close runtime: %v", err)
+	}
+
+	body, err := json.Marshal(snap)
+	if err != nil {
+		t.Fatalf("marshal snapshot: %v", err)
+	}
+	if strings.Contains(string(body), `"comms_sessions":null`) {
+		t.Fatalf("comms_sessions should encode as [], got %s", body)
+	}
+	if strings.Contains(string(body), `"lessons":null`) {
+		t.Fatalf("lessons should encode as [], got %s", body)
+	}
+}
+
 func TestUIServeEndCommsSessionArchivesAndReleasesAllClaims(t *testing.T) {
 	repo := setupUITestRepo(t)
 	t.Setenv("HOME", t.TempDir())
