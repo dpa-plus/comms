@@ -64,20 +64,31 @@ comms ui --stale-after 45m
 
 The UI is intentionally not a replacement for the CLI. Agents still use
 `comms hello`, `claim`, `release`, `note`, `find`, and `doc` themselves. The
-UI is for watching the repo and ending whole sessions when you are done with
-them.
+UI is for watching the repo, starting a clean project-level communication
+window, and ending that whole window when you are done with it.
 
-If you start the UI with `COMMS_ACTOR` set, the header includes an
-**End Comms Session** button. Use it when the project work window is over. It
-appends one normal `release` event with `comms_session_end=true`, releases
-every active claim, clears all active sessions, and adds a **Comms Session
-Archive** summary for later analysis. It does not delete old JSONL rows.
+If you start the UI with `COMMS_ACTOR` set, the header includes **Start Comms
+Session** and **End Comms Session** buttons. **Start Comms Session** appends a
+normal `hello` event with `comms_session_start=true`; this is useful when you
+want a clean archive boundary before asking Claude/Codex to join. You can also
+skip the button and let the first agent's `comms hello` implicitly start a
+session.
+
+Use **End Comms Session** when the project work window is over. It appends one
+normal `release` event with `comms_session_end=true`, releases every active
+claim, clears all active sessions, and adds a **Comms Session Archive** summary
+for later analysis. It does not delete old JSONL rows.
 
 The archive boundary means everything from the previous
 `comms_session_end=true` event up to the new one belongs to one completed
 communication session. Later analysis can read the JSONL log directly and
 reconstruct the full history, while the UI shows the compact counts: actors,
 events, claims, findings, notes, released refs, end time, and reason.
+
+The **Session Event Log** selector shows logs per communication session. It is
+not a separate file per session; it is a filtered view over the same append-only
+`log.jsonl`, so the audit trail stays complete while the UI avoids mixing old
+sessions into the current one.
 
 If the repo has no events yet, the log table will be empty. To preview the UI
 with sample sessions, claims, findings, notes, docs, and raw events:
