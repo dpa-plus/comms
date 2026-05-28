@@ -6,7 +6,7 @@ Lightweight multi-agent coordination CLI: per-session claims, JSONL event log, `
 - **`mcp-agent-mail`** (heavy MCP server, severity ladders, 7 identities) — too much ceremony; agents kept forgetting protocol steps.
 - **A 1632-line `COMMS.md` append-only markdown** — worked OK but grew unbounded, no targeted reads, agents had to remember to update it, iCloud sync forked the file.
 
-`comms` is the small version. 10 commands, 5 event types, JSONL log + `flock`, a 80-line Claude Code skill, a 3-line `AGENTS.md` block for Codex.
+`comms` is the small version. 11 commands, 5 event types, JSONL log + `flock`, a 80-line Claude Code skill, a 3-line `AGENTS.md` block for Codex.
 
 The first active session is shown as the repo's lightweight **leader**. The
 leader has one extra privilege: posting `--priority` notes/findings that pin
@@ -42,6 +42,9 @@ comms find [--priority] <bug|fix|ship|decision|gotcha> "<summary>" [--ref kind:v
 comms doc --list                              # wiki: list slugs
 comms doc <slug>                              # wiki: print
 comms doc <slug> --edit                       # wiki: open $EDITOR under sidecar flock
+comms lesson --list                           # global lessons: list slugs
+comms lesson <slug>                           # global lessons: print
+comms lesson <slug> --edit                    # global lessons: edit under sidecar flock
 comms ui [--demo] [--stale-after 90m] [--addr 127.0.0.1:7878] # local dashboard
 ```
 
@@ -52,6 +55,10 @@ ending releases every active claim, clears active sessions, and appends one
 archive-boundary event to the JSONL log. The UI shows per-session logs by
 slicing the append-only JSONL into current and archived comms sessions. Demo
 mode remains read-only.
+
+Global lessons are carefully curated cross-project operating knowledge for
+agents. They live under the user's comms data directory, not in any one repo.
+Project docs remain under `.comms/docs`.
 
 ## License
 

@@ -194,6 +194,29 @@ Per-session logs are returned as `current_session.events` and
 `comms_sessions[].events`; they are filtered views over the same append-only
 JSONL log, not separate log files.
 
+`/api/status` also includes `lessons`, the list of global lesson slugs loaded
+from the user's comms data directory.
+
+## Global lessons
+
+`comms lesson` is the global counterpart to project-local `comms doc`.
+
+| Command                      | Purpose                                      |
+| ---------------------------- | -------------------------------------------- |
+| `comms lesson --list`        | List curated global lesson slugs.            |
+| `comms lesson <slug>`        | Print one lesson.                            |
+| `comms lesson <slug> --edit` | Edit/create one lesson under a sidecar flock. |
+
+Storage:
+
+```text
+~/Library/Application Support/comms/global/lessons/*.md
+```
+
+Lessons are not JSONL events and are not tied to a repo hash. They are
+cross-project operating knowledge for agents, so they should be added rarely:
+only when the user explicitly asks or approves a leader's proposed lesson.
+
 ## Recovery rules for `comms` reading the log
 
 | Input                                  | Behavior                                                                  |
