@@ -38,6 +38,11 @@ COMMS_ACTOR=codex-20260527-a comms find gotcha "..." --ref path:src/auth.ts
 COMMS_ACTOR=codex-20260527-a comms find ship "..." --ref pr:#123
 ```
 
+**Global lessons:**
+Use `comms lesson --list` and `comms lesson <slug>` for curated cross-project
+agent lessons. Do not add a lesson unless the user explicitly asks or approves
+the proposed lesson.
+
 Do not install hooks or edit shell startup files unless the user explicitly asks.
 
 <!-- END COMMS PROTOCOL -->

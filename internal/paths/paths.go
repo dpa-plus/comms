@@ -38,7 +38,7 @@ func For(repoRoot, repoHash string) (Paths, error) {
 	if !filepath.IsAbs(repoRoot) {
 		return Paths{}, fmt.Errorf("paths: repoRoot must be absolute, got %q", repoRoot)
 	}
-	dataHome, err := userDataHome()
+	dataHome, err := UserDataHome()
 	if err != nil {
 		return Paths{}, err
 	}
@@ -70,7 +70,17 @@ func (p Paths) DocFilePath(slug string) string {
 	return filepath.Join(p.Docs, slug+".md")
 }
 
-func userDataHome() (string, error) {
+// GlobalLessonsDir returns the cross-project lesson directory.
+func GlobalLessonsDir() (string, error) {
+	dataHome, err := UserDataHome()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dataHome, "comms", "global", "lessons"), nil
+}
+
+// UserDataHome returns the per-user application-data root used by comms.
+func UserDataHome() (string, error) {
 	switch runtime.GOOS {
 	case "darwin":
 		home, err := os.UserHomeDir()

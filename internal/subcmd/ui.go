@@ -224,6 +224,7 @@ type uiSnapshot struct {
 	Findings      []uiFinding      `json:"findings"`
 	Notes         []uiNote         `json:"notes"`
 	Docs          []string         `json:"docs"`
+	Lessons       []string         `json:"lessons"`
 	Events        []uiEvent        `json:"events"`
 	Updated       time.Time        `json:"updated"`
 }
@@ -327,6 +328,7 @@ func buildUISnapshot(rt *Runtime, staleAfter time.Duration) uiSnapshot {
 		Findings:      []uiFinding{},
 		Notes:         []uiNote{},
 		Docs:          listDocs(rt.Paths.Docs),
+		Lessons:       listGlobalLessons(),
 		Events:        []uiEvent{},
 		Updated:       now.UTC(),
 	}
@@ -440,6 +442,7 @@ func buildDemoUISnapshot(staleAfter time.Duration) uiSnapshot {
 			{ID: "01JX2Q3P0Q5B6N9P0R1S2T3U4V", Actor: "codex-9b2c", Body: "@claude-20260527-a can I take src/auth/token.ts when you're done?", TS: base.Add(-14 * time.Minute)},
 		},
 		Docs:    []string{"lead-counting", "tracker-architecture", "ui"},
+		Lessons: []string{"verify-data-before-ui", "claim-smallest-scope", "capture-filter-context"},
 		Events:  currentEvents,
 		Updated: base.Add(18 * time.Second),
 	}
@@ -1013,6 +1016,10 @@ th {
       <h2>Docs</h2>
       <div id="docs"></div>
     </section>
+    <section class="panel">
+      <h2>Global Lessons</h2>
+      <div id="lessons"></div>
+    </section>
   </div>
   <section class="panel events">
     <div class="panel-title">
@@ -1095,6 +1102,9 @@ async function load() {
   el('docs').innerHTML = renderRows(data.docs, d =>
     '<div class="row"><span class="scope">' + esc(d) + '</span><div class="copy">comms doc ' + esc(d) + '</div></div>',
     'No docs yet.');
+  el('lessons').innerHTML = renderRows(data.lessons || [], d =>
+    '<div class="row"><span class="scope">' + esc(d) + '</span><div class="copy">comms lesson ' + esc(d) + '</div></div>',
+    'No global lessons yet.');
   renderSessionChoices(data);
 }
 function allSessionChoices(data) {

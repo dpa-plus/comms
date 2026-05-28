@@ -90,6 +90,24 @@ not a separate file per session; it is a filtered view over the same append-only
 `log.jsonl`, so the audit trail stays complete while the UI avoids mixing old
 sessions into the current one.
 
+Global lessons live outside any single project:
+
+```text
+~/Library/Application Support/comms/global/lessons/*.md
+```
+
+Use them for carefully curated cross-project agent operating knowledge:
+
+```bash
+comms lesson --list
+comms lesson verify-data-before-ui
+COMMS_ACTOR=human-eli comms lesson verify-data-before-ui --edit
+```
+
+Project docs (`comms doc`) explain this repo. Global lessons (`comms lesson`)
+explain durable patterns that should apply across repos. Add lessons rarely:
+only when the user explicitly asks or approves a leader's proposed lesson.
+
 If the repo has no events yet, the log table will be empty. To preview the UI
 with sample sessions, claims, findings, notes, docs, and raw events:
 

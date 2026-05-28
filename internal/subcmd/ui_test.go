@@ -30,6 +30,9 @@ func TestBuildDemoUISnapshotMarksStaleAndShowsCommsArchive(t *testing.T) {
 	if len(snap.Claims) != 3 {
 		t.Fatalf("demo claims len = %d, want 3", len(snap.Claims))
 	}
+	if len(snap.Lessons) != 3 {
+		t.Fatalf("demo lessons len = %d, want 3", len(snap.Lessons))
+	}
 	if !snap.Sessions[0].Leader {
 		t.Fatalf("first demo session should be leader")
 	}

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dpa-plus/comms/internal/paths"
 	"github.com/dpa-plus/comms/internal/state"
 	"github.com/spf13/cobra"
 )
@@ -55,12 +56,14 @@ func emitStatusHuman(rt *Runtime, cutoff time.Time, since string) {
 	allSessions := collectActiveSessions(rt.State, time.Now().Add(-4*time.Hour))
 	allClaims := sortedClaims(rt.State)
 	allDocs := listDocs(rt.Paths.Docs)
+	allLessons := listGlobalLessons()
 	sessions, omittedSessions := limitSlice(allSessions, 10)
 	claims, omittedClaims := limitSlice(allClaims, 15)
 	findings := recentFindings(rt.State, cutoff, 5)
 	notes := recentNotes(rt.State, cutoff, 3)
 	docs, omittedDocs := limitSlice(allDocs, 10)
-	omitted := omittedSessions + omittedClaims + omittedDocs
+	lessons, omittedLessons := limitSlice(allLessons, 8)
+	omitted := omittedSessions + omittedClaims + omittedDocs + omittedLessons
 
 	fmt.Printf("ACTIVE SESSIONS (hello'd in last 4h)\n")
 	if len(sessions) == 0 {
@@ -121,6 +124,10 @@ func emitStatusHuman(rt *Runtime, cutoff time.Time, since string) {
 		fmt.Println()
 		fmt.Printf("DOCS (%d): %s\n", len(docs), strings.Join(docs, ", "))
 	}
+	if len(lessons) > 0 {
+		fmt.Println()
+		fmt.Printf("GLOBAL LESSONS (%d): %s\n", len(lessons), strings.Join(lessons, ", "))
+	}
 	if omitted > 0 {
 		fmt.Printf("\n... %d more; run `comms log --since %s` for details\n", omitted, since)
 	}
@@ -133,6 +140,7 @@ type statusJSONShape struct {
 	Findings []statusFinding `json:"findings"`
 	Notes    []statusNote    `json:"notes"`
 	Docs     []string        `json:"docs"`
+	Lessons  []string        `json:"lessons"`
 }
 
 type statusSession struct {
@@ -192,6 +200,7 @@ func emitStatusJSON(rt *Runtime, cutoff time.Time) error {
 		})
 	}
 	out.Docs = listDocs(rt.Paths.Docs)
+	out.Lessons = listGlobalLessons()
 
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
@@ -369,4 +378,18 @@ func limitSlice[T any](in []T, max int) ([]T, int) {
 		return in, 0
 	}
 	return in[:max], len(in) - max
+}
+
+func listGlobalLessons() []string {
+	dir, err := paths.GlobalLessonsDir()
+	if err != nil {
+		return nil
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	slugs := markdownSlugs(entries)
+	sort.Strings(slugs)
+	return slugs
 }

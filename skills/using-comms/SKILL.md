@@ -106,6 +106,23 @@ COMMS_ACTOR=claude-20260527-a comms doc tracker-architecture
 COMMS_ACTOR=claude-20260527-a comms doc tracker-architecture --edit
 ```
 
+## Global Lessons
+
+Lessons are curated cross-project operating knowledge for agents. They are
+global, not repo-local. Read them when relevant:
+
+```bash
+comms lesson --list
+comms lesson verify-data-before-ui
+```
+
+Only add or edit a lesson when the user explicitly asks or approves a proposed
+lesson:
+
+```bash
+COMMS_ACTOR=claude-20260527-a comms lesson verify-data-before-ui --edit
+```
+
 ## Conflict Handling
 
 If `comms claim` exits 1, stop and surface the conflict to the user.
