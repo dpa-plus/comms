@@ -27,7 +27,7 @@ type Paths struct {
 	LogDir   string // ~/Library/Application Support/comms/<hash>/
 	Log      string // <logdir>/log.jsonl
 	Lock     string // <logdir>/.lock
-	RepoPath string // <logdir>/repo-path.txt — collision canary for --repo-id
+	RepoPath string // <logdir>/repo-path.txt — collision canary for repo hash reuse
 }
 
 // For computes all paths for the given repo root + hash.

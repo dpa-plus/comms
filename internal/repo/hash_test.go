@@ -105,4 +105,10 @@ func TestDiscoverFailsOutsideGit(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for non-git dir without override")
 	}
+	if strings.Contains(err.Error(), "--repo-id") {
+		t.Fatalf("error should not recommend deprecated --repo-id: %v", err)
+	}
+	if !strings.Contains(err.Error(), "--repo") {
+		t.Fatalf("error should recommend --repo: %v", err)
+	}
 }
