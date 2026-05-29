@@ -247,23 +247,51 @@ func appendSessionRetire(rt *Runtime, target, reason string) (int, error) {
 	for _, c := range claims {
 		refs = append(refs, c.ID)
 	}
+	data := map[string]interface{}{
+		"refs":           refs,
+		"session_retire": true,
+		"retired_actor":  target,
+		"reason":         reason,
+	}
+	if sessionID, sessionName := sessionMetadataForRetire(rt.State, target, claims); sessionID != "" {
+		data["comms_session_id"] = sessionID
+		data["comms_session_name"] = sessionName
+	}
 	now := time.Now().UTC()
 	ev := event.Event{
 		TS:    now,
 		ID:    event.NewID(now),
 		Actor: rt.Actor,
 		Type:  event.TypeRelease,
-		Data: map[string]interface{}{
-			"refs":           refs,
-			"session_retire": true,
-			"retired_actor":  target,
-			"reason":         reason,
-		},
+		Data:  data,
 	}
 	if err := rt.Append(ev); err != nil {
 		return 0, err
 	}
 	return len(refs), nil
+}
+
+func sessionMetadataForRetire(s *state.State, target string, claims []*state.Claim) (string, string) {
+	if s == nil {
+		return "", ""
+	}
+	if sess := s.Sessions[target]; sess != nil && sess.SessionID != "" {
+		return sess.SessionID, sess.SessionName
+	}
+	var sessionID, sessionName string
+	for _, claim := range claims {
+		if claim == nil || claim.SessionID == "" {
+			continue
+		}
+		if sessionID == "" {
+			sessionID, sessionName = claim.SessionID, claim.SessionName
+			continue
+		}
+		if claim.SessionID != sessionID {
+			return "", ""
+		}
+	}
+	return sessionID, sessionName
 }
 
 func appendLeaderTransfer(rt *Runtime, target, reason string) error {
