@@ -34,6 +34,45 @@ func TestPrintEventHumanSummarizesSessionRetire(t *testing.T) {
 	}
 }
 
+func TestRunReleaseRejectsPositionalIDWithLatest(t *testing.T) {
+	repo := setupUITestRepo(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("COMMS_ACTOR", "codex-dev")
+	t.Setenv("USER", "eli")
+	t.Chdir(repo)
+
+	rt, err := Open(OpenOpts{Mutating: true})
+	if err != nil {
+		t.Fatalf("open runtime: %v", err)
+	}
+	claimID := "01JX2Q3Y7W5B6N9P0R1S2T3R5A"
+	if err := rt.Append(event.Event{
+		TS:    time.Now().Add(-10 * time.Minute).UTC(),
+		ID:    claimID,
+		Actor: "codex-dev",
+		Type:  event.TypeClaim,
+		Scope: []string{"src/foo.ts"},
+		Data:  map[string]interface{}{"intent": "work"},
+	}); err != nil {
+		t.Fatalf("append claim: %v", err)
+	}
+	if err := rt.Close(); err != nil {
+		t.Fatalf("close runtime: %v", err)
+	}
+
+	err = runRelease([]string{claimID[:10]}, true, false, "", "")
+	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("release should reject positional id with --latest, got %v", err)
+	}
+}
+
+func TestRunReleaseRejectsPositionalIDWithAllMine(t *testing.T) {
+	err := runRelease([]string{"01JX2Q3Y7W"}, false, true, "", "")
+	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("release should reject positional id with --all-mine, got %v", err)
+	}
+}
+
 func captureLogStdout(t *testing.T, fn func()) string {
 	t.Helper()
 	old := os.Stdout
