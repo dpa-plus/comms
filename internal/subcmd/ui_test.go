@@ -214,6 +214,64 @@ func TestUIServeEndCommsSessionArchivesAndReleasesAllClaims(t *testing.T) {
 	}
 }
 
+func TestUIServeEndCurrentSessionIDArchivesLegacyCurrentSession(t *testing.T) {
+	repo := setupUITestRepo(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("COMMS_ACTOR", "human-eli")
+	t.Setenv("USER", "eli")
+	t.Chdir(repo)
+
+	rt, err := Open(OpenOpts{Mutating: true})
+	if err != nil {
+		t.Fatalf("open runtime: %v", err)
+	}
+	err = rt.Append(event.Event{
+		TS:    time.Now().Add(-8 * time.Minute).UTC(),
+		ID:    "01JX2Q3Y7W5B6N9P0R1S2T3U9B",
+		Actor: "claude-dev",
+		Type:  event.TypeHello,
+		Data:  map[string]interface{}{"base_name": "claude", "hostname": "host"},
+	})
+	if err == nil {
+		err = rt.Append(event.Event{
+			TS:    time.Now().Add(-7 * time.Minute).UTC(),
+			ID:    "01JX2Q3Y7W5B6N9P0R1S2T3U9A",
+			Actor: "claude-dev",
+			Type:  event.TypeClaim,
+			Scope: []string{"src/current.ts"},
+			Data:  map[string]interface{}{"intent": "legacy current work"},
+		})
+	}
+	if closeErr := rt.Close(); closeErr != nil {
+		t.Fatalf("close runtime: %v", closeErr)
+	}
+	if err != nil {
+		t.Fatalf("append setup events: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/comms-session/end", strings.NewReader(`{"reason":"done","session_id":"current","name":"Current session"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	uiServer{staleAfter: 90 * time.Minute}.serveEndCommsSession(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var snap uiSnapshot
+	if err := json.Unmarshal(rec.Body.Bytes(), &snap); err != nil {
+		t.Fatalf("decode snapshot: %v", err)
+	}
+	if len(snap.Claims) != 0 {
+		t.Fatalf("current-session claim should be released: %+v", snap.Claims)
+	}
+	if len(snap.CommsSessions) != 1 {
+		t.Fatalf("legacy current session should be archived: %+v", snap.CommsSessions)
+	}
+	if snap.CommsSessions[0].Reason != "done" || snap.CommsSessions[0].ReleasedRefs != 1 {
+		t.Fatalf("bad legacy current archive summary: %+v", snap.CommsSessions[0])
+	}
+}
+
 func TestUIServeStartCommsSessionCreatesCurrentSession(t *testing.T) {
 	repo := setupUITestRepo(t)
 	t.Setenv("HOME", t.TempDir())
@@ -247,6 +305,65 @@ func TestUIServeStartCommsSessionCreatesCurrentSession(t *testing.T) {
 	}
 	if got := actionByIDForTest(snap.Actions, "end_comms_session"); !got.Enabled {
 		t.Fatalf("end should be enabled while session active: %+v", got)
+	}
+}
+
+func TestUIServeStartCommsSessionReleasesActorPriorClaims(t *testing.T) {
+	repo := setupUITestRepo(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("COMMS_ACTOR", "human-eli")
+	t.Setenv("USER", "eli")
+	t.Chdir(repo)
+
+	mine := "01JX2Q3Y7W5B6N9P0R1S2T3V0A"
+	other := "01JX2Q3Y7W5B6N9P0R1S2T3V0B"
+	rt, err := Open(OpenOpts{Mutating: true})
+	if err != nil {
+		t.Fatalf("open runtime: %v", err)
+	}
+	err = rt.Append(event.Event{
+		TS:    time.Now().Add(-9 * time.Minute).UTC(),
+		ID:    mine,
+		Actor: "human-eli",
+		Type:  event.TypeClaim,
+		Scope: []string{"src/mine.ts"},
+		Data:  map[string]interface{}{"intent": "old personal work"},
+	})
+	if err == nil {
+		err = rt.Append(event.Event{
+			TS:    time.Now().Add(-8 * time.Minute).UTC(),
+			ID:    other,
+			Actor: "claude-dev",
+			Type:  event.TypeClaim,
+			Scope: []string{"src/other.ts"},
+			Data:  map[string]interface{}{"intent": "other actor work"},
+		})
+	}
+	if closeErr := rt.Close(); closeErr != nil {
+		t.Fatalf("close runtime: %v", closeErr)
+	}
+	if err != nil {
+		t.Fatalf("append setup events: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/comms-session/start", strings.NewReader(`{"name":"fresh UI session"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	uiServer{staleAfter: 90 * time.Minute}.serveStartCommsSession(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	rt, err = Open(OpenOpts{Mutating: false})
+	if err != nil {
+		t.Fatalf("reopen runtime: %v", err)
+	}
+	defer rt.Close()
+	if got := rt.State.ClaimByID(mine); got != nil {
+		t.Fatalf("starting a UI session should release actor's prior claim: %+v", got)
+	}
+	if got := rt.State.ClaimByID(other); got == nil {
+		t.Fatalf("starting a UI session should not release other actors' claims")
 	}
 }
 
