@@ -271,7 +271,8 @@ func appendLeaderTransfer(rt *Runtime, target, reason string) error {
 	if target == "" {
 		target = rt.Actor
 	}
-	if rt.State.Sessions[target] == nil {
+	session := rt.State.Sessions[target]
+	if session == nil || !session.TS.After(time.Now().Add(-4*time.Hour)) {
 		return fmt.Errorf("session lead: @%s is not active; run `COMMS_ACTOR=%s comms hello --label \"...\"` first", target, target)
 	}
 	if reason = strings.TrimSpace(reason); reason == "" {
