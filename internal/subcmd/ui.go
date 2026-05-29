@@ -860,9 +860,8 @@ const uiHTML = `<!doctype html>
   --red: #b42318;
   --red-soft: #fff1f0;
   --blue: #2563eb;
-  --shadow: 0 14px 36px rgba(17, 24, 39, 0.08);
-  --header-h: 72px;
-  --stats-h: 50px;
+  --shadow: 0 12px 28px rgba(17, 24, 39, 0.06);
+  --content-max: 1680px;
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
@@ -890,23 +889,23 @@ body {
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 14px;
   letter-spacing: 0;
-  overflow: hidden;
+  overflow: auto;
 }
 header {
-  height: var(--header-h);
+  min-height: 78px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 18px;
-  padding: 0 18px;
+  gap: 24px;
+  padding: 14px 24px;
   background: var(--surface);
   border-bottom: 1px solid var(--line);
-  position: relative;
+  position: sticky;
   top: 0;
-  z-index: 2;
+  z-index: 5;
 }
-h1 { margin: 0; font-size: 18px; font-weight: 720; }
-.sub { color: var(--muted); font-size: 12px; margin-top: 3px; }
+h1 { margin: 0; font-size: 19px; font-weight: 740; }
+.sub { color: var(--muted); font-size: 12px; margin-top: 5px; }
 .log-path {
   color: var(--muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -968,22 +967,26 @@ button:disabled {
   background: var(--red-soft);
 }
 .stats {
-  height: var(--stats-h);
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 1px;
-  padding: 0 18px;
-  background: var(--line);
-  border-bottom: 1px solid var(--line);
+  max-width: var(--content-max);
+  margin: 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 16px 24px 4px;
+  background: transparent;
 }
 .stat {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  min-width: 0;
-  padding: 8px 12px;
+  gap: 16px;
+  min-width: 150px;
+  height: 48px;
+  padding: 8px 14px;
   background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
 }
 .stat-label {
   color: var(--muted);
@@ -1007,17 +1010,16 @@ button:disabled {
   margin-right: 7px;
 }
 main {
-  height: calc(100vh - var(--header-h) - var(--stats-h));
-  min-height: 0;
-  padding: 12px 14px 14px;
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: 12px 24px 28px;
   display: grid;
-  grid-template-columns: 280px minmax(520px, 1fr) 350px;
-  grid-template-rows: minmax(260px, 52fr) minmax(240px, 48fr);
+  grid-template-columns: minmax(260px, 300px) minmax(680px, 1fr) minmax(300px, 360px);
+  grid-template-rows: minmax(560px, 62vh) minmax(420px, auto);
   grid-template-areas:
     "roster claims signals"
     "events events events";
-  gap: 12px;
-  overflow: hidden;
+  gap: 18px;
 }
 .panel {
   background: var(--surface);
@@ -1031,7 +1033,7 @@ main {
 }
 .panel h2 {
   margin: 0;
-  padding: 10px 12px;
+  padding: 14px 16px;
   font-size: 12px;
   text-transform: uppercase;
   color: var(--muted);
@@ -1042,8 +1044,8 @@ main {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 9px 12px;
+  gap: 14px;
+  padding: 13px 16px;
   border-bottom: 1px solid var(--line);
   flex: 0 0 auto;
 }
@@ -1061,28 +1063,43 @@ main {
 .filter-input {
   min-width: 180px;
   max-width: 100%;
-  height: 30px;
+  height: 34px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--surface);
   color: var(--text);
   font: inherit;
   font-size: 12px;
-  padding: 0 9px;
+  padding: 0 11px;
 }
 .filter-input { width: 220px; }
 .roster { grid-area: roster; }
-.claims { grid-area: claims; }
+.roster,
+.claims {
+  height: 100%;
+}
+.claims {
+  grid-area: claims;
+}
 .signals {
   grid-area: signals;
-  display: grid;
-  grid-template-rows: minmax(0, 1.15fr) minmax(0, .85fr) auto auto;
-  gap: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+.signals .panel {
+  box-shadow: var(--shadow);
   min-height: 0;
 }
-.signals .panel { box-shadow: none; }
+.signals .panel:nth-child(1) { flex: 1.25 1 0; }
+.signals .panel:nth-child(2) { flex: .9 1 0; }
+.signals .panel:nth-child(3),
+.signals .panel:nth-child(4) { flex: .8 1 0; }
 .row {
-  padding: 10px 12px;
+  padding: 14px 16px;
   border-bottom: 1px solid var(--soft);
 }
 .row:last-child { border-bottom: 0; }
@@ -1098,7 +1115,7 @@ main {
 .intent { margin-top: 5px; }
 .empty { padding: 16px 14px; color: var(--muted); }
 .hint {
-  padding: 9px 12px;
+  padding: 12px 16px;
   color: var(--muted);
   border-bottom: 1px solid var(--soft);
   font-size: 12px;
@@ -1108,16 +1125,40 @@ main {
   min-height: 0;
   overflow: auto;
 }
-.claims table, .events table {
+.claims > .scroll,
+.events > .scroll,
+.signals .scroll {
+  flex: 1 1 auto;
+}
+.claims table,
+.events table {
   width: 100%;
-  border-collapse: collapse;
   table-layout: fixed;
+}
+.events table {
+  border-collapse: collapse;
+}
+.claims table {
+  border-collapse: separate;
+  border-spacing: 0 8px;
+  padding: 0 12px 12px;
 }
 th, td {
   text-align: left;
-  padding: 9px 10px;
+  padding: 14px 12px;
   border-bottom: 1px solid var(--soft);
   vertical-align: top;
+  line-height: 1.32;
+}
+.claims td {
+  background: var(--surface-2);
+  border-bottom: 0;
+}
+.claims td:first-child {
+  border-radius: 8px 0 0 8px;
+}
+.claims td:last-child {
+  border-radius: 0 8px 8px 0;
 }
 th {
   position: sticky;
@@ -1168,6 +1209,7 @@ th {
 .events {
   grid-area: events;
   grid-column: 1 / -1;
+  min-height: 420px;
 }
 .session-row {
   display: grid;
@@ -1188,11 +1230,11 @@ th {
 }
 @media (max-width: 1180px) {
   body { overflow: auto; }
-  header { height: auto; min-height: var(--header-h); align-items: flex-start; padding-top: 10px; padding-bottom: 10px; }
-  .stats { height: auto; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  header { height: auto; min-height: 76px; align-items: flex-start; padding-top: 12px; padding-bottom: 12px; }
+  .stats { padding: 14px 16px 2px; }
+  .stat { flex: 1 1 160px; }
   main {
     height: auto;
-    min-height: calc(100vh - 140px);
     grid-template-columns: 1fr;
     grid-template-rows: auto;
     grid-template-areas:
@@ -1201,10 +1243,11 @@ th {
       "signals"
       "events";
     overflow: visible;
+    padding: 12px 16px 24px;
   }
   .events { grid-column: auto; }
-  .signals { grid-template-rows: none; }
-  .scroll { max-height: 420px; }
+  .claims { min-height: 0; }
+  .scroll { max-height: 520px; }
 }
 @media (max-width: 620px) {
   body { overflow: auto; }
@@ -1218,8 +1261,9 @@ th {
   }
   h1 { font-size: 17px; }
   .top-actions { justify-content: flex-start; margin-top: 10px; }
-  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 0 10px; }
-  main { padding: 10px; gap: 12px; }
+  .stats { padding: 12px 10px 2px; gap: 8px; }
+  .stat { flex: 1 1 calc(50% - 8px); min-width: 0; height: 44px; padding: 7px 10px; }
+  main { padding: 10px; gap: 14px; }
   .panel-title {
     display: block;
   }
@@ -1322,11 +1366,11 @@ th {
     </section>
     <section class="panel">
       <h2>Docs</h2>
-      <div id="docs"></div>
+      <div id="docs" class="scroll"></div>
     </section>
     <section class="panel">
       <h2>Global Lessons</h2>
-      <div id="lessons"></div>
+      <div id="lessons" class="scroll"></div>
     </section>
   </div>
   <section class="panel events">
