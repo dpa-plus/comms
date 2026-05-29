@@ -742,7 +742,6 @@ func buildGlobalUISnapshot(staleAfter time.Duration) (uiSnapshot, error) {
 				if os.IsNotExist(err) {
 					continue
 				}
-				continue
 			}
 		}
 		repoName := hash
