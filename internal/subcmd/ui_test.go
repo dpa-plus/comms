@@ -108,6 +108,10 @@ func TestBuildGlobalUISnapshotAttachesLegacyClaimsToProjectCurrentSession(t *tes
 	t.Setenv("HOME", home)
 
 	hash := "abc123legacy"
+	repoRoot := filepath.Join(home, "example-project")
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatalf("mkdir repo root: %v", err)
+	}
 	dataHome, err := paths.UserDataHome()
 	if err != nil {
 		t.Fatalf("user data home: %v", err)
@@ -116,7 +120,7 @@ func TestBuildGlobalUISnapshotAttachesLegacyClaimsToProjectCurrentSession(t *tes
 	if err := os.MkdirAll(logDir, 0o700); err != nil {
 		t.Fatalf("mkdir log dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(logDir, "repo-path.txt"), []byte("/tmp/example-project\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(logDir, "repo-path.txt"), []byte(repoRoot+"\n"), 0o600); err != nil {
 		t.Fatalf("write repo path: %v", err)
 	}
 	now := time.Now().UTC()
@@ -138,6 +142,42 @@ func TestBuildGlobalUISnapshotAttachesLegacyClaimsToProjectCurrentSession(t *tes
 	}
 	if len(snap.Active[0].Claims) != 1 || snap.Active[0].Claims[0].Scope != "src/current.ts" {
 		t.Fatalf("legacy claim should attach to prefixed current session: active=%+v claims=%+v", snap.Active, snap.Claims)
+	}
+}
+
+func TestBuildGlobalUISnapshotSkipsOrphanedRepoPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	hash := "abc123orphan"
+	dataHome, err := paths.UserDataHome()
+	if err != nil {
+		t.Fatalf("user data home: %v", err)
+	}
+	logDir := filepath.Join(dataHome, "comms", hash)
+	if err := os.MkdirAll(logDir, 0o700); err != nil {
+		t.Fatalf("mkdir log dir: %v", err)
+	}
+	orphanedRepoRoot := filepath.Join(home, "missing", "002")
+	if err := os.WriteFile(filepath.Join(logDir, "repo-path.txt"), []byte(orphanedRepoRoot+"\n"), 0o600); err != nil {
+		t.Fatalf("write repo path: %v", err)
+	}
+	now := time.Now().UTC()
+	for _, ev := range []event.Event{
+		{TS: now.Add(-10 * time.Minute), ID: event.NewID(now.Add(-10 * time.Minute)), Actor: "agent-a", Type: event.TypeHello, Data: map[string]interface{}{"base_name": "codex"}},
+		{TS: now.Add(-9 * time.Minute), ID: event.NewID(now.Add(-9 * time.Minute)), Actor: "agent-a", Type: event.TypeClaim, Scope: []string{"src/current.ts"}, Data: map[string]interface{}{"intent": "deleted temp repo work"}},
+	} {
+		if err := event.Append(filepath.Join(logDir, "log.jsonl"), ev); err != nil {
+			t.Fatalf("append event: %v", err)
+		}
+	}
+
+	snap, err := buildGlobalUISnapshot(90 * time.Minute)
+	if err != nil {
+		t.Fatalf("build global snapshot: %v", err)
+	}
+	if len(snap.Active) != 0 || len(snap.Claims) != 0 || len(snap.Sessions) != 0 {
+		t.Fatalf("orphaned repo log should be hidden: active=%+v claims=%+v sessions=%+v", snap.Active, snap.Claims, snap.Sessions)
 	}
 }
 

@@ -60,12 +60,18 @@ func setupTestRepo(t *testing.T) string {
 	return dir
 }
 
+func childEnv(home, actor string) []string {
+	env := os.Environ()
+	return append(env, "HOME="+home, "COMMS_ACTOR="+actor)
+}
+
 // TestConcurrentClaim spawns N processes that all try to claim the same
 // scope at the same instant. Exactly ONE must win.
 func TestConcurrentClaim(t *testing.T) {
 	const N = 5
 	bin := buildCommsBinary(t)
 	repo := setupTestRepo(t)
+	home := t.TempDir()
 
 	var wg sync.WaitGroup
 	results := make([]error, N)
@@ -78,7 +84,7 @@ func TestConcurrentClaim(t *testing.T) {
 			defer wg.Done()
 			time.Sleep(time.Until(startBarrier))
 			cmd := exec.Command(bin, "claim", "src/race.ts", "--intent", fmt.Sprintf("agent-%d", idx))
-			cmd.Env = append(os.Environ(), "COMMS_ACTOR=agent-"+strconv.Itoa(idx))
+			cmd.Env = childEnv(home, "agent-"+strconv.Itoa(idx))
 			cmd.Dir = repo
 			out, err := cmd.CombinedOutput()
 			results[idx] = err
@@ -107,6 +113,7 @@ func TestConcurrentDifferentScopes(t *testing.T) {
 	const N = 5
 	bin := buildCommsBinary(t)
 	repo := setupTestRepo(t)
+	home := t.TempDir()
 
 	var wg sync.WaitGroup
 	results := make([]error, N)
@@ -118,7 +125,7 @@ func TestConcurrentDifferentScopes(t *testing.T) {
 			defer wg.Done()
 			time.Sleep(time.Until(startBarrier))
 			cmd := exec.Command(bin, "claim", fmt.Sprintf("src/path%d.ts", idx), "--intent", "x")
-			cmd.Env = append(os.Environ(), "COMMS_ACTOR=agent-"+strconv.Itoa(idx))
+			cmd.Env = childEnv(home, "agent-"+strconv.Itoa(idx))
 			cmd.Dir = repo
 			results[idx] = cmd.Run()
 		}(i)
