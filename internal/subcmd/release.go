@@ -40,8 +40,18 @@ func runRelease(args []string, latest, allMine bool, reason, result string) erro
 	if (len(args) == 0) && !latest && !allMine {
 		Fatalf(2, "release: must supply <id>, --latest, or --all-mine")
 	}
-	if latest && allMine {
-		Fatalf(2, "release: --latest and --all-mine are mutually exclusive")
+	modes := 0
+	if len(args) == 1 {
+		modes++
+	}
+	if latest {
+		modes++
+	}
+	if allMine {
+		modes++
+	}
+	if modes > 1 {
+		return fmt.Errorf("release: <id>, --latest, and --all-mine are mutually exclusive")
 	}
 
 	rt, err := Open(OpenOpts{Mutating: true})
