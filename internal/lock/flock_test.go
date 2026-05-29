@@ -38,6 +38,39 @@ func TestTryAcquireBlocked(t *testing.T) {
 	}
 }
 
+func TestTryAcquireOK(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.lock")
+
+	// First acquire succeeds.
+	h, ok, err := TryAcquireOK(path)
+	if err != nil || !ok || h == nil {
+		t.Fatalf("first TryAcquireOK: handle=%v ok=%v err=%v", h, ok, err)
+	}
+
+	// While held, repeated attempts report ok=false with no error, and must
+	// NOT leak file descriptors: this loop opens+closes an FD per call, so a
+	// leak would exhaust the per-process FD limit and surface as an open error.
+	for i := 0; i < 4096; i++ {
+		h2, ok2, err2 := TryAcquireOK(path)
+		if err2 != nil {
+			t.Fatalf("TryAcquireOK while held (iter %d): unexpected error %v (FD leak?)", i, err2)
+		}
+		if ok2 || h2 != nil {
+			t.Fatalf("TryAcquireOK while held (iter %d): got ok=%v handle=%v, want ok=false handle=nil", i, ok2, h2)
+		}
+	}
+
+	// After release, the lock is obtainable again.
+	if err := h.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	h3, ok3, err3 := TryAcquireOK(path)
+	if err3 != nil || !ok3 || h3 == nil {
+		t.Fatalf("TryAcquireOK after release: handle=%v ok=%v err=%v", h3, ok3, err3)
+	}
+	_ = h3.Close()
+}
+
 func TestSerializeTwoGoroutines(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "test.lock")
 

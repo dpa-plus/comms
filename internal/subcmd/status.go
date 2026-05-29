@@ -391,6 +391,9 @@ func parseDuration(s string) (time.Duration, error) {
 	if err != nil {
 		return 0, fmt.Errorf("invalid --since %q (use 1h, 30m, 168h, etc.)", s)
 	}
+	if d < 0 {
+		return 0, fmt.Errorf("--since must not be negative (got %q)", s)
+	}
 	return d, nil
 }
 

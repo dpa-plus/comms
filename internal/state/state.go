@@ -112,13 +112,17 @@ type Note struct {
 
 // Fold replays events in chronological order to produce the current state.
 //
-// Events MUST be sorted by ID (which is ULID — time-prefixed and monotonic).
-// If they aren't, Fold sorts a copy first.
+// Ordering policy: events are replayed in timestamp order, and events that
+// share a timestamp keep their original (append) order via a STABLE sort. The
+// log is append-only under a per-repo flock, so the input order is already the
+// causal order; sorting by timestamp only re-seats anything written out of
+// wall-clock order while preserving append order for ties. We deliberately do
+// NOT order by ULID string: same-millisecond ULIDs are not guaranteed to sort
+// in causal order, which would silently reorder a claim vs. its steal/release.
 func Fold(events []event.Event) *State {
-	// Sort defensively.
 	sorted := make([]event.Event, len(events))
 	copy(sorted, events)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].ID < sorted[j].ID })
+	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].TS.Before(sorted[j].TS) })
 
 	s := &State{
 		Claims:   make(map[string]*Claim),

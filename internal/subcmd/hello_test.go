@@ -2,8 +2,35 @@ package subcmd
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestValidateLabel(t *testing.T) {
+	tests := []struct {
+		name    string
+		label   string
+		wantErr bool
+	}{
+		{"empty ok", "", false},
+		{"plain ok", "Claude Dev", false},
+		{"unicode ok", "Cläude — Dev ✨", false},
+		{"max length ok", strings.Repeat("x", maxLabelRunes), false},
+		{"newline rejected", "Claude\nFAKE: line", true},
+		{"carriage return rejected", "Claude\rDev", true},
+		{"escape rejected", "Claude\x1b[31mDev", true},
+		{"del rejected", "Claude\x7fDev", true},
+		{"too long rejected", strings.Repeat("x", maxLabelRunes+1), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateLabel(tt.label)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateLabel(%q) error = %v, wantErr %v", tt.label, err, tt.wantErr)
+			}
+		})
+	}
+}
 
 func TestRunHelloKeepsLeaderOnReentry(t *testing.T) {
 	repo := setupUITestRepo(t)

@@ -75,6 +75,123 @@ func TestPathsOverlap_AdditionalEdgeCases(t *testing.T) {
 	}
 }
 
+// TestPathsOverlap_InteriorLiteralFragments covers BUG 1: the old
+// prefix/suffix-anchor heuristic ignored interior literal fragments, reporting
+// false-positive overlaps. The DP intersection test must honor required
+// characters and minimum length imposed by literals between stars.
+func TestPathsOverlap_InteriorLiteralFragments(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want bool
+	}{
+		// "a*a" needs at least two 'a's; the plain literal "a" cannot satisfy
+		// the trailing 'a'. Old code returned true (anchors a/a matched).
+		{"a*a", "a", false},
+		{"a", "a*a", false},
+		// "aa" is the shortest match for "a*a"; it must overlap.
+		{"a*a", "aa", true},
+		{"a*a", "aba", true},
+		// Mandatory interior 'b' is absent from "axc".
+		{"a*b*c", "axc", false},
+		{"a*b*c", "abc", true},
+		{"a*b*c", "axbyc", true},
+		// Suffix anchors match ("c"/"c") but the interior 'b' is required.
+		{"ab*c", "axc", false},
+		{"ab*c", "abxc", true},
+		// Pure star still matches anything in-segment.
+		{"*", "anything", true},
+		{"a*", "abc", true},
+		{"*c", "abc", true},
+		// Two globs whose anchors look compatible but lengths conflict.
+		{"x*y*z", "xz", false},
+		{"x*y*z", "xyz", true},
+		// Star against star with mandatory literals on both sides.
+		{"a*c", "a*x", false}, // one demands trailing c, other trailing x
+		{"a*c", "a*c", true},
+		{"ab*", "a*c", true}, // "abc" matches both
+	}
+	for _, c := range cases {
+		t.Run(c.a+" ∩ "+c.b, func(t *testing.T) {
+			got := PathsOverlap(c.a, c.b)
+			if got != c.want {
+				t.Fatalf("PathsOverlap(%q,%q) = %v, want %v", c.a, c.b, got, c.want)
+			}
+			// Single-segment intersection must be symmetric.
+			if rev := PathsOverlap(c.b, c.a); rev != c.want {
+				t.Fatalf("PathsOverlap not symmetric for (%q,%q): %v vs %v", c.a, c.b, got, rev)
+			}
+		})
+	}
+}
+
+// TestParse_SymbolAnchorsThatLookLikeRanges covers BUG 2: symbol names that
+// start with 'L' and contain '-' must parse as SYMBOL anchors, not be rejected
+// as malformed line ranges.
+func TestParse_SymbolAnchorsThatLookLikeRanges(t *testing.T) {
+	symbols := []string{"List-impl", "Loader-2", "L-value", "Linked-list", "L-5", "Lo-fi"}
+	for _, name := range symbols {
+		t.Run(name, func(t *testing.T) {
+			s, err := Parse("src/foo.ts#" + name)
+			if err != nil {
+				t.Fatalf("Parse symbol-like anchor %q: unexpected error %v", name, err)
+			}
+			if s.Anchor.Kind != AnchorSymbol {
+				t.Fatalf("anchor %q: kind = %v, want AnchorSymbol", name, s.Anchor.Kind)
+			}
+			if s.Anchor.Symbol != name {
+				t.Fatalf("anchor %q: symbol = %q, want %q", name, s.Anchor.Symbol, name)
+			}
+		})
+	}
+	// Genuine ranges must still parse as line ranges.
+	if s, err := Parse("src/foo.ts#L1-10"); err != nil || s.Anchor.Kind != AnchorLine {
+		t.Fatalf("L1-10 should be a line range: kind=%v err=%v", s.Anchor.Kind, err)
+	}
+}
+
+// TestParse_RejectsControlCharacters covers BUG 3: C0/C1/DEL control bytes in
+// either the path or the anchor must be rejected so terminal-escape sequences
+// can never be persisted.
+func TestParse_RejectsControlCharacters(t *testing.T) {
+	bad := []struct {
+		name, in string
+	}{
+		{"esc-in-path", "src/\x1bfoo.ts"},
+		{"nul-in-path", "src/\x00foo.ts"},
+		{"bell-in-path", "src/foo\x07.ts"},
+		{"del-in-path", "src/foo\x7f.ts"},
+		{"tab-in-path", "src/foo\t.ts"},
+		{"esc-in-symbol", "src/foo.ts#ba\x1br"},
+		{"nul-in-symbol", "src/foo.ts#ba\x00r"},
+		{"del-in-symbol", "src/foo.ts#ba\x7fr"},
+		{"newline-in-symbol", "src/foo.ts#ba\nr"},
+		// C1 CSI (U+009B) is valid UTF-8 (bytes 0xC2 0x9B) yet many terminals
+		// interpret it like ESC[, so it must be rejected in BOTH a path and a
+		// symbol anchor. Built as a real code point — not a raw byte — so it
+		// survives the symbol branch's utf8.ValidString check and would slip
+		// past a C0/DEL-only predicate.
+		{"c1-csi-in-path", "src/foo" + string(rune(0x9b)) + "2K.ts"},
+		{"c1-csi-in-symbol", "src/foo.ts#foo" + string(rune(0x9b)) + "2K"},
+	}
+	for _, c := range bad {
+		t.Run(c.name, func(t *testing.T) {
+			if _, err := Parse(c.in); err == nil {
+				t.Fatalf("Parse(%q) = nil error, want rejection of control character", c.in)
+			}
+		})
+	}
+	// NormalizePath (used by the policy loader) must reject them too.
+	if _, err := NormalizePath("src/\x1bfoo.ts"); err == nil {
+		t.Fatalf("NormalizePath should reject control characters")
+	}
+	// Sanity: normal printable Unicode must NOT be rejected.
+	for _, ok := range []string{"src/Café.ts", "src/файл.ts", "src/foo.ts#Café"} {
+		if _, err := Parse(ok); err != nil {
+			t.Fatalf("Parse(%q) rejected legitimate Unicode: %v", ok, err)
+		}
+	}
+}
+
 func TestScopes_LineRanges(t *testing.T) {
 	parse := func(s string) Scope {
 		x, err := Parse(s)
@@ -117,11 +234,6 @@ func TestScopes_Symbols(t *testing.T) {
 	// Case-sensitive.
 	if Scopes(parse("src/foo.ts#Bar"), parse("src/foo.ts#bar")) {
 		t.Errorf("symbol comparison must be case-sensitive")
-	}
-	// NFC-normalized: precomposed "é" and decomposed "e"+"´" should
-	// canonicalize to the same symbol.
-	if !Scopes(parse("src/foo.ts#Café"), parse("src/foo.ts#Cafe\u0301")) {
-		t.Errorf("symbols must be NFC-normalized before comparison")
 	}
 }
 
@@ -198,7 +310,7 @@ func TestParse_AnchorValidation(t *testing.T) {
 		{"src/foo.ts#L5-5", false}, // single line OK
 		{"src/foo.ts#L10-5", true}, // inverted
 		{"src/foo.ts#L0-10", true}, // zero
-		{"src/foo.ts#L-5", true},   // missing start
+		{"src/foo.ts#L-5", false},  // not a range shape → valid SYMBOL "L-5"
 		{"src/foo.ts#bar", false},
 		{"src/foo.ts#", true},  // empty anchor
 		{"src/foo.ts# ", true}, // whitespace-only

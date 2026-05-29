@@ -43,27 +43,32 @@ func WriteConflict(w io.Writer, c Conflict) {
 	primary := c.Holders[0]
 	since := time.Since(primary.TS).Round(time.Minute)
 
-	fmt.Fprintf(w, "BLOCKED: %s is claimed.\n", c.AttemptedScope)
-	fmt.Fprintf(w, "  Holder:  @%s\n", primary.Actor)
-	fmt.Fprintf(w, "  Claim:   %s\n", primary.ID)
+	// Every field below can originate from the append-only log (holder
+	// actors/scopes/intents are only validated for non-emptiness at decode
+	// time), so sanitize each one before it reaches the terminal to neutralize
+	// ESC/C0/C1/DEL escape-sequence injection.
+	primaryActor := EscapeActor(primary.Actor)
+	fmt.Fprintf(w, "BLOCKED: %s is claimed.\n", EscapeScope(c.AttemptedScope))
+	fmt.Fprintf(w, "  Holder:  @%s\n", primaryActor)
+	fmt.Fprintf(w, "  Claim:   %s\n", EscapeScope(primary.ID))
 	if primary.Intent != "" {
-		fmt.Fprintf(w, "  Intent:  %q\n", primary.Intent)
+		fmt.Fprintf(w, "  Intent:  %q\n", EscapeScope(primary.Intent))
 	}
 	fmt.Fprintf(w, "  Since:   %s (%s ago)\n", primary.TS.UTC().Format(time.RFC3339), formatDuration(since))
 
 	if len(c.Holders) > 1 {
 		fmt.Fprintf(w, "\nAdditional holders:\n")
 		for _, h := range c.Holders[1:] {
-			fmt.Fprintf(w, "  @%-12s %s\n", h.Actor, h.Scope.String())
+			fmt.Fprintf(w, "  @%-12s %s\n", EscapeActor(h.Actor), EscapeScope(h.Scope.String()))
 		}
 	}
 
-	fmt.Fprintf(w, "\nSurface this to the user. Ask whether @%s's session is still active.\n", primary.Actor)
+	fmt.Fprintf(w, "\nSurface this to the user. Ask whether @%s's session is still active.\n", primaryActor)
 	fmt.Fprintf(w, "\nIf user confirms the prior session ended:\n")
 	fmt.Fprintf(w, "  comms claim %q --intent %q --steal %s --reason \"user verified prior session ended\"\n",
-		c.AttemptedScope, intentOr(c.AttemptedIntent, "<your-intent>"), shortID(primary.ID))
+		EscapeScope(c.AttemptedScope), EscapeScope(intentOr(c.AttemptedIntent, "<your-intent>")), EscapeScope(shortID(primary.ID)))
 	fmt.Fprintf(w, "\nIf session is still active:\n")
-	fmt.Fprintf(w, "  Choose a different scope, or `comms note \"@%s can I take this when you're done?\"`\n", primary.Actor)
+	fmt.Fprintf(w, "  Choose a different scope, or `comms note \"@%s can I take this when you're done?\"`\n", primaryActor)
 }
 
 func intentOr(s, fallback string) string {
@@ -96,17 +101,35 @@ func formatDuration(d time.Duration) string {
 	}
 }
 
-// EscapeActor renders an actor name for terminal output, stripping any
-// shenanigans like ANSI escapes or newlines. The actor package already
-// validates these at resolve-time, but be defensive on read paths.
-func EscapeActor(actor string) string {
+// sanitizeControl replaces every C0 control rune (< 0x20), DEL (0x7F), and C1
+// control rune (U+0080–U+009F) with a visible '?' placeholder so
+// attacker-controlled strings read back from the append-only log can't smuggle
+// ANSI/terminal escape sequences (ESC, CSI — including the single-code-point C1
+// CSI U+009B — newlines, carriage returns, etc.) into terminal output.
+func sanitizeControl(s string) string {
 	var b strings.Builder
-	for _, r := range actor {
-		if r < 0x20 || r == 0x7f {
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
 			b.WriteRune('?')
 			continue
 		}
 		b.WriteRune(r)
 	}
 	return b.String()
+}
+
+// EscapeActor renders an actor name for terminal output, stripping any
+// shenanigans like ANSI escapes or newlines. The actor package already
+// validates these at resolve-time, but be defensive on read paths.
+func EscapeActor(actor string) string {
+	return sanitizeControl(actor)
+}
+
+// EscapeScope renders a scope string (or any other attacker-controlled field
+// such as an intent) for terminal output, neutralizing control characters.
+// Scopes are rejected at parse time, but they are read back from the
+// append-only log where holder entries are only validated for non-emptiness,
+// so keep this defense on the render path.
+func EscapeScope(scope string) string {
+	return sanitizeControl(scope)
 }

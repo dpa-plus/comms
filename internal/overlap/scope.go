@@ -6,7 +6,7 @@
 //	scope  := path ('#' anchor)?
 //	path   := POSIX path, optionally globbed with * or **
 //	anchor := L<n>-<m>          (line range, inclusive, n ≤ m, both ≥ 1)
-//	        | <symbol-name>      (NFC-normalized opaque identifier)
+//	        | <symbol-name>      (opaque identifier)
 //
 // The `#` is escaped as `\#` when it appears in a filename. We never
 // expand globs against the real filesystem — overlap is computed
@@ -16,12 +16,17 @@ package overlap
 import (
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"unicode/utf8"
-
-	"golang.org/x/text/unicode/norm"
 )
+
+// lineRangeRe matches the exact line-range anchor shape `L<n>-<m>` and nothing
+// else. Anchors that merely start with 'L' and contain '-' (e.g. "List-impl",
+// "Loader-2", "L-value", "Linked-list") must NOT be treated as ranges — they
+// are legitimate symbol names and have to fall through to the SYMBOL branch.
+var lineRangeRe = regexp.MustCompile(`^L([0-9]+)-([0-9]+)$`)
 
 // Scope is the parsed form of a `path[#anchor]` string.
 type Scope struct {
@@ -118,9 +123,32 @@ func NormalizePath(raw string) (string, error) {
 	return normalizePath(raw)
 }
 
+// isControlRune reports whether r is a C0 control character (< 0x20), DEL
+// (0x7F), or a C1 control character (U+0080–U+009F). These code points can
+// carry terminal-escape sequences — notably C1 CSI (U+009B), which many
+// terminals interpret exactly like the two-byte ESC[ introducer — so we
+// refuse to persist any scope path or anchor that contains them.
+//
+// We deliberately check by rune rather than by raw byte so that normal
+// printable Unicode — whose multi-byte UTF-8 encodings contain continuation
+// bytes in the 0x80–0xBF range — is never rejected: legitimate code points
+// (Café, файл, 日本語) decode to runes ≥ 0x100 and pass cleanly. A C1 control,
+// by contrast, is a single code point in 0x80–0x9F (e.g. valid-UTF-8 U+009B is
+// bytes 0xC2 0x9B) and is caught here regardless of how it was encoded.
+func isControlRune(r rune) bool {
+	return r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f)
+}
+
 func normalizePath(raw string) (string, error) {
 	if raw == "" {
 		return "", fmt.Errorf("scope: empty path")
+	}
+	// Reject control characters (C0, C1, and DEL) before any other processing so
+	// a scope carrying terminal-escape bytes can never be normalized/persisted.
+	for _, r := range raw {
+		if isControlRune(r) {
+			return "", fmt.Errorf("scope: path contains control character")
+		}
 	}
 	// Reject absolute paths.
 	if strings.HasPrefix(raw, "/") {
@@ -149,17 +177,21 @@ func parseAnchor(s string) (Anchor, error) {
 	if s == "" {
 		return Anchor{}, fmt.Errorf("scope: anchor after `#` is empty")
 	}
-	// Line range form: L<n>-<m>
-	if strings.HasPrefix(s, "L") && strings.Contains(s, "-") {
-		body := s[1:]
-		dash := strings.Index(body, "-")
-		startStr, endStr := body[:dash], body[dash+1:]
-		start, err1 := strconv.Atoi(startStr)
-		end, err2 := strconv.Atoi(endStr)
+	// Line range form: strictly `L<n>-<m>` with both halves all digits.
+	// Anything else (including symbol names that merely start with 'L' and
+	// contain '-', like "List-impl" or "L-value") falls through to the SYMBOL
+	// branch below rather than erroring. Once a string DOES match the range
+	// shape we still validate the numbers, so genuinely malformed ranges such
+	// as L0-10 (zero) or L10-5 (inverted) remain hard errors.
+	if m := lineRangeRe.FindStringSubmatch(s); m != nil {
+		// Groups are guaranteed to be non-empty digit runs by the regexp, so
+		// Atoi only fails on overflow; treat that as a bad range.
+		start, err1 := strconv.Atoi(m[1])
+		end, err2 := strconv.Atoi(m[2])
 		if err1 != nil || err2 != nil {
 			return Anchor{}, fmt.Errorf("scope: bad line range %q (want L<n>-<m>)", s)
 		}
-		if start < 1 || end < 1 {
+		if start < 1 {
 			return Anchor{}, fmt.Errorf("scope: line numbers must be ≥ 1, got L%d-%d", start, end)
 		}
 		if start > end {
@@ -173,15 +205,15 @@ func parseAnchor(s string) (Anchor, error) {
 		return Anchor{}, fmt.Errorf("scope: symbol is empty after trimming whitespace")
 	}
 	for _, r := range sym {
-		// Reject control bytes and newlines.
-		if r < 0x20 || r == 0x7f {
+		// Reject control bytes (C0/C1/DEL) and newlines — same hardening as the
+		// path side, so anchors can't smuggle terminal-escape sequences either.
+		if isControlRune(r) {
 			return Anchor{}, fmt.Errorf("scope: symbol contains control character")
 		}
 	}
 	if !utf8.ValidString(sym) {
 		return Anchor{}, fmt.Errorf("scope: symbol is not valid UTF-8")
 	}
-	sym = norm.NFC.String(sym)
 	return Anchor{Kind: AnchorSymbol, Symbol: sym}, nil
 }
 

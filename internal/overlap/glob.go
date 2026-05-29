@@ -70,71 +70,89 @@ func segmentsOverlap(a, b []string) bool {
 
 // singleSegmentOverlap reports whether two single-segment patterns can match
 // the same segment name. Both patterns must NOT contain `**` (caller's job).
+//
+// Within a segment, `*` matches any run of zero or more characters (it never
+// crosses `/`, but there are no `/` here anyway). All other characters —
+// including `?`, `[`, `]` — are treated as literals, matching only themselves.
 func singleSegmentOverlap(a, b string) bool {
 	// Fast path: both literal.
 	if !containsStar(a) && !containsStar(b) {
 		return a == b
 	}
-	// Both are simple glob patterns over a single segment. Strip out `*` runs
-	// to obtain anchored literal fragments, then verify A's fragments can be
-	// found in B and vice versa. Simplest correct approach: bidirectional
-	// pattern-match.
-	return globMatch(a, b) && globMatch(b, a)
+	return globsCanIntersect(a, b)
 }
 
-// globMatch reports whether the single-segment glob `pattern` (containing
-// `*` but NOT `**`) could match the same string as the (possibly globby)
-// `other`. We implement this via the standard recursive glob algorithm,
-// substituting each `*` in `pattern` with the runs of characters from
-// `other` — but since `other` might itself be globby, we treat its
-// non-star segments as literal anchors and require pattern to be at least
-// permissive enough to contain them.
+// globsCanIntersect reports whether some concrete string is matched by BOTH
+// single-segment glob patterns `a` and `b`, where `*` matches any run of zero
+// or more characters and every other byte is a literal.
 //
-// Because both inputs are single-segment patterns over the same alphabet,
-// this collapses to: split both on `*`, then check that the fragments of
-// the more-specific pattern appear in order within the less-specific one.
-func globMatch(pattern, other string) bool {
-	pParts := strings.Split(pattern, "*")
-	oParts := strings.Split(other, "*")
+// This is an intersection-emptiness test, NOT a "does a match b" test. The
+// old code only compared the leading and trailing literal anchors and assumed
+// anything between two compatible anchors could be reconciled. That produced
+// false positives whenever interior literals imposed required characters or a
+// minimum length — e.g. "a*a" vs "a" (the second has no room for the trailing
+// 'a'), or "a*b*c" vs "axc" (the 'b' is mandatory but absent from "axc").
+//
+// We instead run a dynamic program over byte positions (i, j) where i indexes
+// `a` and j indexes `b`. dp[i][j] is true when the unconsumed suffixes a[i:]
+// and b[j:] can be made to match a common remaining string. Transitions:
+//
+//   - a[i] == '*': the star may consume one byte of the opposing pattern
+//     (advance j, star stays) or be skipped, consuming zero (advance i).
+//   - b[j] == '*': symmetric — advance i (star stays) or skip it (advance j).
+//   - both literals: they must be the equal byte; advance both.
+//
+// The accept state is dp[len(a)][len(b)] == true (both fully consumed). We
+// build the table bottom-up from that anchor so each cell only depends on
+// cells with a larger i or j, which are already filled.
+//
+// Both inputs are ASCII-or-UTF-8 byte strings; matching byte-wise is correct
+// here because identical literals compare equal byte-for-byte and a literal
+// never needs to align against a partial multi-byte rune of a star run.
+func globsCanIntersect(a, b string) bool {
+	la, lb := len(a), len(b)
 
-	// Both must respect their first/last anchors.
-	if !canPrefixMatch(pParts[0], oParts[0]) {
-		return false
+	// dp[i][j] == both suffixes a[i:] and b[j:] can match a common string.
+	dp := make([][]bool, la+1)
+	for i := range dp {
+		dp[i] = make([]bool, lb+1)
 	}
-	if !canSuffixMatch(pParts[len(pParts)-1], oParts[len(oParts)-1]) {
-		return false
-	}
-	// For the middle parts, we just need them to be non-conflicting. In a
-	// single-segment context where stars match any char run, any two
-	// patterns whose anchors are compatible can match at least one common
-	// string by inserting enough characters between them. So if anchors
-	// match, we're done.
-	return true
-}
 
-// canPrefixMatch reports whether two pattern-prefixes (the part before the
-// first `*`) can both be the start of a common string. If both are
-// literals, they must match by prefix in one direction or the other.
-func canPrefixMatch(p, o string) bool {
-	if p == o {
-		return true
-	}
-	if strings.HasPrefix(p, o) || strings.HasPrefix(o, p) {
-		return true
-	}
-	return false
-}
+	// Anchor: both patterns fully consumed.
+	dp[la][lb] = true
 
-// canSuffixMatch is the analogous check for the trailing anchor (the part
-// after the last `*`).
-func canSuffixMatch(p, o string) bool {
-	if p == o {
-		return true
+	// A trailing run of `*` in either pattern can still match the empty
+	// remainder of the other, so propagate the accept state back along the
+	// last row/column through stars.
+	for i := la - 1; i >= 0; i-- {
+		if a[i] == '*' {
+			dp[i][lb] = dp[i+1][lb]
+		}
 	}
-	if strings.HasSuffix(p, o) || strings.HasSuffix(o, p) {
-		return true
+	for j := lb - 1; j >= 0; j-- {
+		if b[j] == '*' {
+			dp[la][j] = dp[la][j+1]
+		}
 	}
-	return false
+
+	for i := la - 1; i >= 0; i-- {
+		for j := lb - 1; j >= 0; j-- {
+			switch {
+			case a[i] == '*':
+				// Skip the star (consume zero of b) or let it eat one byte of b.
+				dp[i][j] = dp[i+1][j] || dp[i][j+1]
+			case b[j] == '*':
+				// Symmetric: skip it, or let it eat one byte of a.
+				dp[i][j] = dp[i][j+1] || dp[i+1][j]
+			case a[i] == b[j]:
+				// Matching literals: consume one byte from each.
+				dp[i][j] = dp[i+1][j+1]
+			default:
+				dp[i][j] = false
+			}
+		}
+	}
+	return dp[0][0]
 }
 
 func containsStar(s string) bool { return strings.Contains(s, "*") }

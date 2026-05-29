@@ -48,12 +48,16 @@ func Discover(start, gitTopLevelOverride string) (Identity, error) {
 	resolved, err := filepath.EvalSymlinks(abs)
 	if err != nil {
 		// On macOS, /tmp resolves to /private/tmp via symlink — that's expected.
-		// If EvalSymlinks fails for another reason, fall back to abs.
-		if !errors.Is(err, os.ErrNotExist) {
-			resolved = abs
-		} else {
+		if errors.Is(err, os.ErrNotExist) {
 			return Identity{}, fmt.Errorf("repo: resolve %q: %w", abs, err)
 		}
+		// A non-ENOENT failure (EPERM/EACCES on a TCC-protected leaf) must not
+		// change the hash: falling back to the unresolved `abs` would hash a
+		// different string than a successful resolve whenever any component is
+		// a symlink, orphaning the per-machine log. Instead resolve the deepest
+		// reachable ancestor and re-append the unresolved tail, so the hashed
+		// path is identical whether or not the leaf is reachable.
+		resolved = resolveDeepestAncestor(abs)
 	}
 	sum := sha256.Sum256([]byte(resolved))
 	return Identity{
@@ -88,6 +92,13 @@ func findGitRootByWalking(path string) (string, error) {
 	if strings.TrimSpace(path) == "" {
 		return "", fmt.Errorf("repo: --repo path is required")
 	}
+	// This is the macOS-TCC escape hatch (see DiscoverExplicit): it must work
+	// without depending on the process cwd. filepath.Abs calls os.Getwd for any
+	// relative input, which is exactly what fails under a lost-TCC cwd. Require
+	// an absolute path so a relative --repo/COMMS_REPO can't defeat the hatch.
+	if !filepath.IsAbs(path) {
+		return "", fmt.Errorf("repo: --repo/COMMS_REPO must be an absolute path, got %q%s", path, cwdRecoveryHint())
+	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return "", fmt.Errorf("repo: abs %q: %w", path, err)
@@ -113,6 +124,35 @@ func findGitRootByWalking(path string) (string, error) {
 		dir = parent
 	}
 	return "", fmt.Errorf("repo: cannot find git root from explicit path %q", abs)
+}
+
+// resolveDeepestAncestor walks up from abs until filepath.EvalSymlinks
+// succeeds on an ancestor, then re-attaches the unresolved tail. This mirrors
+// resolveExistingAncestor in internal/subcmd/check.go: it makes the resulting
+// path identical to a fully-successful EvalSymlinks(abs) whenever the only
+// obstacle is an unresolvable leaf (e.g. an EPERM/EACCES TCC-protected final
+// component), keeping the repo hash deterministic. abs must be absolute.
+func resolveDeepestAncestor(abs string) string {
+	cur := abs
+	var tail []string
+	for {
+		if resolved, err := filepath.EvalSymlinks(cur); err == nil {
+			cur = resolved
+			break
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			// Reached the filesystem root with nothing resolvable; fall back to
+			// the unresolved absolute path (the best we can do deterministically).
+			return abs
+		}
+		tail = append([]string{filepath.Base(cur)}, tail...)
+		cur = parent
+	}
+	if len(tail) == 0 {
+		return cur
+	}
+	return filepath.Join(append([]string{cur}, tail...)...)
 }
 
 func cwdRecoveryHint() string {

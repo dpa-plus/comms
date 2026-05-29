@@ -40,6 +40,9 @@ func runHello(args []string, label string) error {
 		os.Setenv(actor.EnvVar, args[0])
 	}
 	label = strings.TrimSpace(label)
+	if err := validateLabel(label); err != nil {
+		return err
+	}
 	rt, err := Open(OpenOpts{Mutating: true})
 	if err != nil {
 		return err
@@ -106,6 +109,24 @@ func runHello(args []string, label string) error {
 	fmt.Println("If this is the wrong actor name, set $COMMS_ACTOR and re-run `comms hello`.")
 	fmt.Println("Use `comms hello --label \"Claude Dev\"` to change only the UI display name.")
 	return nil
+}
+
+// maxLabelRunes caps the --label display string so a pathological value can't
+// flood status/UI output.
+const maxLabelRunes = 120
+
+// validateLabel rejects labels that could forge output lines or inject
+// terminal-escape sequences. The label is rendered raw via %s in human output
+// (here and in `comms status`), so refuse any control character (C0 < 0x20, DEL
+// 0x7F, or the C1 range 0x80–0x9f — this includes newline, carriage return, and
+// ESC) and cap the length. Called on the trimmed value before it is stored in
+// the event. Delegates to the shared rejectControlText helper so the label gets
+// the same C1 coverage as note bodies and finding summaries.
+func validateLabel(label string) error {
+	if label == "" {
+		return nil
+	}
+	return rejectControlText("--label", label, maxLabelRunes)
 }
 
 // baseNameOfActor returns everything before the first `-` — `claude-3a1f`

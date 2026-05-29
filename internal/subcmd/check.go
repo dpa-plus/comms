@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/dpa-plus/comms/internal/actor"
 	"github.com/dpa-plus/comms/internal/overlap"
 	"github.com/dpa-plus/comms/internal/render"
 	"github.com/spf13/cobra"
@@ -87,7 +88,18 @@ func runCheck(args []string, stdinJSON bool) error {
 		Fatalf(2, "check: %v", err)
 	}
 
-	conflicts := rt.State.ConflictsFor(scope, rt.Actor)
+	// Fail-safe actor handling: ConflictsFor excludes claims held by the
+	// caller. A generic ("eli"/"claude"/…) or empty COMMS_ACTOR cannot
+	// legitimately hold a claim (mutating commands reject generic names), so we
+	// must NOT exclude by it — otherwise two agents both running with
+	// COMMS_ACTOR=eli would treat each other's claims as their own and check
+	// would wave through a conflicting edit. Use a sentinel that matches no
+	// real actor so every overlapping claim is reported.
+	checkActor := rt.Actor
+	if checkActor == "" || actor.IsGeneric(checkActor) {
+		checkActor = "\x00not-a-real-actor"
+	}
+	conflicts := rt.State.ConflictsFor(scope, checkActor)
 	if len(conflicts) == 0 {
 		return nil // exit 0: clear
 	}
