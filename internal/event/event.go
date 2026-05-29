@@ -86,8 +86,17 @@ func Decode(line []byte) (Event, error) {
 	if err := json.Unmarshal(line, &e); err != nil {
 		return Event{}, fmt.Errorf("event: unmarshal: %w", err)
 	}
+	if e.ID == "" {
+		return Event{}, fmt.Errorf("event: missing id")
+	}
+	if e.Actor == "" {
+		return Event{}, fmt.Errorf("event: missing actor")
+	}
 	if !e.Type.Valid() {
 		return Event{}, fmt.Errorf("event: invalid type %q", e.Type)
+	}
+	if e.TS.IsZero() {
+		return Event{}, fmt.Errorf("event: missing ts")
 	}
 	return e, nil
 }
