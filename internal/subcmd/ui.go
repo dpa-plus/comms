@@ -285,7 +285,7 @@ func (s uiServer) serveStartCommsSession(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "comms session name is required", http.StatusBadRequest)
 		return
 	}
-	if id, _ := activeCommsSessionByName(rt.State, name); id != "" {
+	if id, _ := activeCommsSessionByName(rt.State, name, time.Now().Add(-4*time.Hour)); id != "" {
 		http.Error(w, "a comms session named "+name+" is already active", http.StatusConflict)
 		return
 	}
@@ -332,7 +332,7 @@ func (s uiServer) serveEndCommsSession(w http.ResponseWriter, r *http.Request) {
 	sessionID := strings.TrimSpace(req.SessionID)
 	sessionName := strings.TrimSpace(req.Name)
 	if sessionID == "" && sessionName != "" {
-		sessionID, sessionName = activeCommsSessionByName(rt.State, sessionName)
+		sessionID, sessionName = activeCommsSessionByName(rt.State, sessionName, time.Now().Add(-4*time.Hour))
 		if sessionID == "" {
 			http.Error(w, "no active comms session named "+strings.TrimSpace(req.Name), http.StatusConflict)
 			return

@@ -599,6 +599,39 @@ func TestActiveCommsSessionViewsIgnoreStaleHelloOnlyActors(t *testing.T) {
 	}
 }
 
+func TestActiveCommsSessionByNameIgnoresStaleHelloOnlySession(t *testing.T) {
+	now := time.Now().UTC()
+	events := []event.Event{
+		{TS: now.Add(-6 * time.Hour), ID: event.NewID(now.Add(-6 * time.Hour)), Actor: "claude-old", Type: event.TypeHello, Data: map[string]interface{}{
+			"comms_session_start": true, "comms_session_id": "sess-old", "comms_session_name": "shared name",
+		}},
+	}
+	st := state.Fold(events)
+
+	id, name := activeCommsSessionByName(st, "shared name", now.Add(-4*time.Hour))
+	if id != "" || name != "" {
+		t.Fatalf("stale hello-only session should not resolve as active: id=%q name=%q", id, name)
+	}
+}
+
+func TestActiveCommsSessionByNameKeepsStaleSessionWithOpenClaim(t *testing.T) {
+	now := time.Now().UTC()
+	events := []event.Event{
+		{TS: now.Add(-6 * time.Hour), ID: event.NewID(now.Add(-6 * time.Hour)), Actor: "claude-old", Type: event.TypeHello, Data: map[string]interface{}{
+			"comms_session_start": true, "comms_session_id": "sess-old", "comms_session_name": "shared name",
+		}},
+		{TS: now.Add(-5 * time.Hour), ID: event.NewID(now.Add(-5 * time.Hour)), Actor: "claude-old", Type: event.TypeClaim, Scope: []string{"src/old.ts"}, Data: map[string]interface{}{
+			"intent": "finish old session work", "comms_session_id": "sess-old", "comms_session_name": "shared name",
+		}},
+	}
+	st := state.Fold(events)
+
+	id, name := activeCommsSessionByName(st, "shared name", now.Add(-4*time.Hour))
+	if id != "sess-old" || name != "shared name" {
+		t.Fatalf("session with open claim should remain active by name: id=%q name=%q", id, name)
+	}
+}
+
 func setupUITestRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
