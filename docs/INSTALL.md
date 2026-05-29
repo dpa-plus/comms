@@ -130,6 +130,11 @@ findings, or event logs mixing. Later analysis can read the JSONL log directly
 and reconstruct the full history, while the UI shows compact counts: actors,
 events, claims, findings, notes, released refs, end time, and reason.
 
+One actor can only be in one named session at a time. If that actor starts or
+joins another named session, comms first releases that actor's active claims
+from the old session with an audit event, then registers the actor in the new
+session.
+
 The **Session Event Log** selector shows logs per communication session. It is
 not a separate file per session; it is a filtered view over the same append-only
 `log.jsonl`, so the audit trail stays complete while the UI avoids mixing old

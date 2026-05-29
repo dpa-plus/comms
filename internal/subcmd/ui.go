@@ -476,6 +476,7 @@ type uiCommsSession struct {
 	FindingCount int       `json:"finding_count"`
 	NoteCount    int       `json:"note_count"`
 	Events       []uiEvent `json:"events,omitempty"`
+	Claims       []uiClaim `json:"claims,omitempty"`
 }
 
 type uiClaim struct {
@@ -565,6 +566,7 @@ func buildUISnapshot(rt *Runtime, staleAfter time.Duration) uiSnapshot {
 		})
 	}
 	out.Active, out.CommsSessions = buildCommsSessionViews(rt.Events)
+	out.Active = filterActiveCommsSessionViews(out.Active, rt.State)
 	if len(out.Active) > 0 {
 		out.Current = &out.Active[0]
 	}
@@ -590,6 +592,7 @@ func buildUISnapshot(rt *Runtime, staleAfter time.Duration) uiSnapshot {
 	for _, n := range recentNotes(rt.State, now.Add(-24*time.Hour), 8) {
 		out.Notes = append(out.Notes, uiNote{ID: n.ID, Actor: n.Actor, Body: n.Body, Priority: n.Priority, TS: n.TS, SessionID: n.SessionID, SessionName: n.SessionName})
 	}
+	attachClaimsToActiveSessions(&out)
 	if out.Current != nil {
 		out.Events = out.Current.Events
 	} else if len(out.CommsSessions) > 0 {
@@ -626,7 +629,7 @@ func buildDemoUISnapshot(staleAfter time.Duration) uiSnapshot {
 	}
 	current := uiCommsSession{
 		ID: "01JX2Q3Z5V6B6N9P0R1S2T3U4V", Name: "demo preview", StartedAt: base.Add(-13 * time.Minute), Actors: []string{"claude-dev", "codex-dev", "human-eli"},
-		Reason: "demo preview", EventCount: len(currentEvents), ClaimCount: 3, FindingCount: 3, NoteCount: 2, Events: currentEvents,
+		Reason: "demo preview", EventCount: len(currentEvents), ClaimCount: 3, FindingCount: 3, NoteCount: 2, Events: currentEvents, Claims: claims,
 	}
 	return uiSnapshot{
 		Project: uiProject{
@@ -734,6 +737,7 @@ func buildGlobalUISnapshot(staleAfter time.Duration) (uiSnapshot, error) {
 		}
 		st := state.Fold(events)
 		active, archived := buildCommsSessionViews(events)
+		active = filterActiveCommsSessionViews(active, st)
 		for i := range active {
 			active[i] = prefixCommsSessionForProject(active[i], repoName, hash)
 			out.Active = append(out.Active, active[i])
@@ -799,6 +803,7 @@ func buildGlobalUISnapshot(staleAfter time.Duration) (uiSnapshot, error) {
 	} else if len(out.CommsSessions) > 0 {
 		out.Events = out.CommsSessions[0].Events
 	}
+	attachClaimsToActiveSessions(&out)
 	out.Actions = buildUIActions(out)
 	return out, nil
 }
@@ -828,6 +833,73 @@ func projectSessionName(repoName, sessionName string) string {
 		return repoName + " / legacy"
 	}
 	return repoName + " / " + sessionName
+}
+
+func attachClaimsToActiveSessions(snap *uiSnapshot) {
+	if snap == nil || len(snap.Active) == 0 {
+		return
+	}
+	for i := range snap.Active {
+		snap.Active[i].Claims = nil
+		for _, claim := range snap.Claims {
+			if claimMatchesSessionID(claim, snap.Active[i].ID) {
+				snap.Active[i].Claims = append(snap.Active[i].Claims, claim)
+			}
+		}
+	}
+	if len(snap.Active) > 0 {
+		snap.Current = &snap.Active[0]
+	}
+}
+
+func claimMatchesSessionID(claim uiClaim, sessionID string) bool {
+	if sessionID == "current" {
+		return claim.SessionID == ""
+	}
+	return claim.SessionID == sessionID
+}
+
+func filterActiveCommsSessionViews(in []uiCommsSession, st *state.State) []uiCommsSession {
+	if len(in) == 0 || st == nil {
+		return in
+	}
+	actors := map[string]map[string]bool{}
+	for _, sess := range st.Sessions {
+		key := sess.SessionID
+		if key == "" {
+			key = "current"
+		}
+		if actors[key] == nil {
+			actors[key] = map[string]bool{}
+		}
+		actors[key][sess.Actor] = true
+	}
+	claims := map[string]int{}
+	for _, claim := range st.Claims {
+		key := claim.SessionID
+		if key == "" {
+			key = "current"
+		}
+		claims[key]++
+		if actors[key] == nil {
+			actors[key] = map[string]bool{}
+		}
+		actors[key][claim.Actor] = true
+	}
+	out := make([]uiCommsSession, 0, len(in))
+	for _, view := range in {
+		key := view.ID
+		if key == "" {
+			key = "current"
+		}
+		view.Actors = sortedStringSet(actors[key])
+		view.ClaimCount = claims[key]
+		if len(view.Actors) == 0 && view.ClaimCount == 0 {
+			continue
+		}
+		out = append(out, view)
+	}
+	return out
 }
 
 func buildUIActions(snap uiSnapshot) []uiAction {
@@ -1798,6 +1870,7 @@ async function load() {
   el('commsSessions').innerHTML = renderRows(data.comms_sessions, s =>
     '<div class="row"><div class="actor">' + esc(s.name || 'Archived session') + '</div><div class="meta">' + fmtTime(s.started_at) + ' → ' + fmtTime(s.ended_at) + '</div><div class="meta">ended by @' + esc(s.ended_by) + ' · ' + esc(s.reason || 'comms session ended') + '</div><div class="meta">' + esc(s.event_count) + ' event(s) · ' + esc(s.claim_count) + ' claim(s) · ' + esc(s.finding_count) + ' finding(s) · ' + esc(s.note_count) + ' note(s)</div><div class="meta">' + esc((s.actors || []).map(a => '@' + a).join(', ')) + '</div></div>',
     'No archived comms sessions yet. Use End Comms Session when the project work window is done.');
+  renderSessionChoices(data);
   renderClaims(data);
   el('findings').innerHTML = renderRows(data.findings, f =>
     '<div class="row">' + (f.priority ? '<span class="pill priority">priority</span> ' : '') + '<span class="pill finding">' + esc(f.category) + '</span><div class="intent">' + esc(f.summary) + '</div><div class="meta">@' + esc(f.actor) + ' · ' + fmtTime(f.ts) + '</div></div>',
@@ -1811,14 +1884,17 @@ async function load() {
   el('lessons').innerHTML = renderRows(data.lessons || [], d =>
     '<div class="row"><span class="scope">' + esc(d) + '</span><div class="copy">comms lesson ' + esc(d) + '</div></div>',
     'No global lessons yet.');
-  renderSessionChoices(data);
 }
 function renderClaims(data) {
   const releaseAction = actionByID(data, 'release_claim');
   const retireAction = actionByID(data, 'retire_session_actor');
   const claimFilter = filterText('claimFilter');
-  const claims = (data.claims || []).filter(c => includesFilter([c.actor, c.scope, c.intent, c.age, c.id], claimFilter));
-  el('claims').innerHTML = '<div class="hint">Claims older than ' + esc(data.project.stale_after) + ' are marked stale. ' + esc(mutationHelp(data)) + '</div>' +
+  const chosen = allSessionChoices(data).find(c => c.id === selectedSessionID);
+  const sourceClaims = chosen && chosen.active ? (chosen.session.claims || []) : (chosen ? [] : (data.claims || []));
+  const claims = sourceClaims
+    .filter(c => includesFilter([c.actor, c.session_name, c.scope, c.intent, c.age, c.id], claimFilter));
+  const scopeText = chosen ? (chosen.active ? 'Showing active claims for "' + (chosen.session.name || chosen.session.id) + '". ' : 'Archived sessions have no active claims. ') : 'Showing all active claims. ';
+  el('claims').innerHTML = '<div class="hint">' + esc(scopeText) + 'Claims older than ' + esc(data.project.stale_after) + ' are marked stale. ' + esc(mutationHelp(data)) + '</div>' +
     renderTable(claims, ['Actor', 'Session', 'Scope', 'Intent', 'Age', 'Action'], c => {
       const actions = [];
       if (releaseAction.enabled) {
@@ -1830,7 +1906,7 @@ function renderClaims(data) {
       const action = actions.length ? actions.join(' ') : (c.stale ? '<span class="pill stale">stale</span>' : '<span class="meta">active</span>');
       return '<tr class="' + (c.stale ? 'claim-stale' : '') + '"><td><span class="actor">@' + esc(c.actor) + '</span></td><td>' + esc(c.session_name || 'legacy') + '</td><td><div class="scope">' + esc(c.scope) + '</div><div class="copy">' + esc(c.id.slice(0, 10)) + '</div></td><td>' + esc(c.intent) + '</td><td>' + esc(c.age) + (c.stale ? '<div><span class="pill stale">stale</span></div>' : '') + '</td><td>' + action + '</td></tr>';
     },
-    claimFilter ? 'No claims match this filter.' : 'No active claims.');
+    claimFilter ? 'No claims match this filter.' : (chosen && !chosen.active ? 'No active claims in archived sessions.' : 'No active claims in this session.'));
   document.querySelectorAll('[data-release-claim]').forEach(button => {
     button.addEventListener('click', () => releaseClaim(button.getAttribute('data-release-claim'), button.getAttribute('data-release-actor'), button.getAttribute('data-release-scope')));
   });
@@ -1948,6 +2024,7 @@ el('sessionSelect').addEventListener('change', () => {
   selectedSessionID = el('sessionSelect').value;
   localStorage.setItem('selectedSessionID', selectedSessionID);
   if (latestData) renderSelectedSessionLog(latestData);
+  if (latestData) renderClaims(latestData);
 });
 el('claimFilter').addEventListener('input', () => {
   if (latestData) renderClaims(latestData);

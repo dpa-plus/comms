@@ -528,6 +528,54 @@ func TestBuildCommsSessionViewsGroupsNamedSessionsIndependently(t *testing.T) {
 	}
 }
 
+func TestSessionSwitchReleasesPriorActorClaimsAndHidesDormantSession(t *testing.T) {
+	repo := setupUITestRepo(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("COMMS_ACTOR", "claude-dev")
+	t.Setenv("USER", "eli")
+	t.Chdir(repo)
+
+	if err := runSessionStart("old session", "Claude Dev"); err != nil {
+		t.Fatalf("start old session: %v", err)
+	}
+	if err := runClaim("src/old.ts", "old work", "", ""); err != nil {
+		t.Fatalf("claim old work: %v", err)
+	}
+	if err := runSessionStart("new session", "Claude Dev"); err != nil {
+		t.Fatalf("start new session: %v", err)
+	}
+	if err := runClaim("src/new.ts", "new work", "", ""); err != nil {
+		t.Fatalf("claim new work: %v", err)
+	}
+
+	rt, err := Open(OpenOpts{Mutating: false})
+	if err != nil {
+		t.Fatalf("open runtime: %v", err)
+	}
+	defer rt.Close()
+	if len(rt.State.Claims) != 1 {
+		t.Fatalf("only the new-session claim should remain active, got %+v", rt.State.Claims)
+	}
+	for _, claim := range rt.State.Claims {
+		if claim.Scope.String() != "src/new.ts" || claim.SessionName != "new session" {
+			t.Fatalf("wrong active claim after session switch: %+v", claim)
+		}
+	}
+	snap := buildUISnapshot(rt, 90*time.Minute)
+	if len(snap.Active) != 1 || snap.Active[0].Name != "new session" {
+		t.Fatalf("only new session should be active in UI: %+v", snap.Active)
+	}
+	if len(snap.Claims) != 1 || snap.Claims[0].SessionName != "new session" {
+		t.Fatalf("UI claims should only include active new-session claim: %+v", snap.Claims)
+	}
+	if len(snap.Active[0].Claims) != 1 || snap.Active[0].Claims[0].Scope != "src/new.ts" {
+		t.Fatalf("active session should carry only its own claims: %+v", snap.Active[0].Claims)
+	}
+	if len(snap.Active[0].Actors) != 1 || snap.Active[0].Actors[0] != "claude-dev" {
+		t.Fatalf("old session actor should not remain active elsewhere: %+v", snap.Active[0].Actors)
+	}
+}
+
 func setupUITestRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()

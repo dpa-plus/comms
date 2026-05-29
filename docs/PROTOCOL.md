@@ -47,6 +47,12 @@ and `finding` events are stamped with the same `comms_session_id` and
 `comms_session_name`. Untagged legacy events are still supported and are shown
 as a legacy/current window by the UI.
 
+An actor may be active in only one named session at a time. When the same actor
+starts or joins a different named session, comms first appends a release/retire
+audit event for that actor's prior-session claims, then appends the new `hello`.
+This keeps old claims and old session membership from following the actor into
+the new session.
+
 ### `claim`
 ```json
 {

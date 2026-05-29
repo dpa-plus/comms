@@ -151,9 +151,12 @@ func runSessionStart(name, label string) error {
 	if id, _ := activeCommsSessionByName(rt.State, name); id != "" {
 		return fmt.Errorf("session start: %q is already active; use `comms session join %q`", name, name)
 	}
-	now := time.Now().UTC()
-	id := event.NewID(now)
-	if err := appendSessionHello(rt, now, id, name, label, true); err != nil {
+	helloAt := time.Now().UTC().Add(time.Millisecond)
+	id := event.NewID(helloAt)
+	if err := releaseActorClaimsBeforeSessionSwitch(rt, id, name, helloAt.Add(-time.Millisecond)); err != nil {
+		return err
+	}
+	if err := appendSessionHello(rt, helloAt, id, name, label, true); err != nil {
 		return err
 	}
 	fmt.Printf("@%s started and joined comms session %q.\n  Session ID: %s\n", rt.Actor, name, id)
@@ -174,7 +177,11 @@ func runSessionJoin(name, label string) error {
 	if id == "" {
 		return fmt.Errorf("session join: no active comms session named %q; create it with `comms session start %q`", name, name)
 	}
-	if err := appendSessionHello(rt, time.Now().UTC(), id, canonicalName, label, false); err != nil {
+	helloAt := time.Now().UTC().Add(time.Millisecond)
+	if err := releaseActorClaimsBeforeSessionSwitch(rt, id, canonicalName, helloAt.Add(-time.Millisecond)); err != nil {
+		return err
+	}
+	if err := appendSessionHello(rt, helloAt, id, canonicalName, label, false); err != nil {
 		return err
 	}
 	fmt.Printf("@%s joined comms session %q.\n  Session ID: %s\n", rt.Actor, canonicalName, id)
@@ -299,6 +306,14 @@ func activeCommsSessionByName(s *state.State, name string) (string, string) {
 			return sess.SessionID, sess.SessionName
 		}
 	}
+	for _, claim := range s.Claims {
+		if claim.SessionID == "" {
+			continue
+		}
+		if strings.EqualFold(claim.SessionName, name) {
+			return claim.SessionID, claim.SessionName
+		}
+	}
 	return "", ""
 }
 
@@ -328,6 +343,41 @@ func stampActiveCommsSession(rt *Runtime, data map[string]interface{}) {
 	}
 	data["comms_session_id"] = sess.SessionID
 	data["comms_session_name"] = sess.SessionName
+}
+
+func releaseActorClaimsBeforeSessionSwitch(rt *Runtime, targetSessionID, targetSessionName string, releaseAt time.Time) error {
+	if rt == nil || rt.State == nil {
+		return nil
+	}
+	var refs []interface{}
+	for _, claim := range rt.State.ActiveClaimsByActor(rt.Actor) {
+		if claim.SessionID == targetSessionID {
+			continue
+		}
+		refs = append(refs, claim.ID)
+	}
+	current := rt.State.Sessions[rt.Actor]
+	if len(refs) == 0 && (current == nil || current.SessionID == "" || current.SessionID == targetSessionID) {
+		return nil
+	}
+	reason := fmt.Sprintf("actor moved to comms session %q", targetSessionName)
+	data := map[string]interface{}{
+		"refs":           refs,
+		"session_retire": true,
+		"retired_actor":  rt.Actor,
+		"reason":         reason,
+	}
+	if current != nil && current.SessionID != "" && current.SessionID != targetSessionID {
+		data["comms_session_id"] = current.SessionID
+		data["comms_session_name"] = current.SessionName
+	}
+	return rt.Append(event.Event{
+		TS:    releaseAt,
+		ID:    event.NewID(releaseAt),
+		Actor: rt.Actor,
+		Type:  event.TypeRelease,
+		Data:  data,
+	})
 }
 
 func appendSessionHello(rt *Runtime, now time.Time, sessionID, sessionName, label string, start bool) error {

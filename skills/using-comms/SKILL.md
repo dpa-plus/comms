@@ -40,6 +40,10 @@ agent already created one. After joining, claims, notes, findings, and releases
 are automatically tagged with that named session so the UI can show separate
 logs for simultaneous project windows.
 
+If you start or join a different named session, comms releases your active
+claims from the previous session with an audit event before registering you in
+the new one. Claims do not follow an actor into a new session.
+
 Mention the chosen actor and joined session name in your reply so the user can
 see both.
 
