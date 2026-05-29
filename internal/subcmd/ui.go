@@ -737,6 +737,14 @@ func buildGlobalUISnapshot(staleAfter time.Duration) (uiSnapshot, error) {
 		hash := entry.Name()
 		logDir := filepath.Join(root, hash)
 		repoRoot := strings.TrimSpace(readSmallFile(filepath.Join(logDir, "repo-path.txt")))
+		if repoRoot != "" {
+			if _, err := os.Stat(repoRoot); err != nil {
+				if os.IsNotExist(err) {
+					continue
+				}
+				continue
+			}
+		}
 		repoName := hash
 		if repoRoot != "" {
 			repoName = filepath.Base(repoRoot)
