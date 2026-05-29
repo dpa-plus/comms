@@ -11,6 +11,7 @@ import (
 
 	"github.com/dpa-plus/comms/internal/actor"
 	"github.com/dpa-plus/comms/internal/event"
+	"github.com/dpa-plus/comms/internal/state"
 	"github.com/spf13/cobra"
 )
 
@@ -56,6 +57,7 @@ func runUI(addr string, demo bool, staleAfter time.Duration) error {
 	mux.HandleFunc("/api/comms-session/end", server.serveEndCommsSession)
 	mux.HandleFunc("/api/session/retire", server.serveRetireSessionActor)
 	mux.HandleFunc("/api/session/lead", server.serveTransferLeader)
+	mux.HandleFunc("/api/claim/release", server.serveReleaseClaim)
 
 	fmt.Printf("comms ui listening on http://%s\n", addr)
 	fmt.Printf("Claims older than %s are marked stale. Press Ctrl-C to stop.\n", staleAfter)
@@ -129,6 +131,59 @@ func (s uiServer) serveRetireSessionActor(w http.ResponseWriter, r *http.Request
 	}
 	defer rt.Close()
 	if _, err := appendSessionRetire(rt, req.Actor, req.Reason); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	s.writeSnapshot(w, rt)
+}
+
+func (s uiServer) serveReleaseClaim(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.demo {
+		http.Error(w, "demo mode is read-only; no claim release event is written", http.StatusConflict)
+		return
+	}
+	var req struct {
+		ID      string `json:"id"`
+		ClaimID string `json:"claim_id"`
+		Reason  string `json:"reason"`
+		Result  string `json:"result"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+	id := strings.TrimSpace(req.ClaimID)
+	if id == "" {
+		id = strings.TrimSpace(req.ID)
+	}
+	if id == "" {
+		http.Error(w, "claim id is required", http.StatusBadRequest)
+		return
+	}
+	rt, err := Open(OpenOpts{Mutating: true})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer rt.Close()
+	claim := rt.State.ClaimByID(id)
+	if claim == nil {
+		http.Error(w, "no active claim matches "+id, http.StatusConflict)
+		return
+	}
+	reason := strings.TrimSpace(req.Reason)
+	result := strings.TrimSpace(req.Result)
+	if claim.Actor != rt.Actor && reason == "" {
+		reason = "released from UI by @" + rt.Actor
+	}
+	if claim.Actor == rt.Actor && result == "" {
+		result = "released from UI"
+	}
+	if err := appendReleaseEvent(rt, []*state.Claim{claim}, reason, result); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
@@ -479,6 +534,7 @@ func buildDemoUISnapshot(staleAfter time.Duration) uiSnapshot {
 		Actions: []uiAction{
 			{ID: "start_comms_session", Label: "Start Comms Session", Method: http.MethodPost, Path: "/api/comms-session/start", Enabled: false, Reason: "demo mode is read-only"},
 			{ID: "end_comms_session", Label: "End Comms Session", Method: http.MethodPost, Path: "/api/comms-session/end", Enabled: false, Reason: "demo mode is read-only"},
+			{ID: "release_claim", Label: "Release Claim", Method: http.MethodPost, Path: "/api/claim/release", Enabled: false, Reason: "demo mode is read-only"},
 			{ID: "retire_session_actor", Label: "Retire Session Actor", Method: http.MethodPost, Path: "/api/session/retire", Enabled: false, Reason: "demo mode is read-only"},
 			{ID: "transfer_leader", Label: "Transfer Leader", Method: http.MethodPost, Path: "/api/session/lead", Enabled: false, Reason: "demo mode is read-only"},
 			{ID: "select_session_log", Label: "Select Session Event Log", Enabled: true, Reason: "client-side filtered view over current_session/events and comms_sessions/events"},
@@ -522,6 +578,7 @@ func buildDemoUISnapshot(staleAfter time.Duration) uiSnapshot {
 func buildUIActions(snap uiSnapshot) []uiAction {
 	start := uiAction{ID: "start_comms_session", Label: "Start Comms Session", Method: http.MethodPost, Path: "/api/comms-session/start"}
 	end := uiAction{ID: "end_comms_session", Label: "End Comms Session", Method: http.MethodPost, Path: "/api/comms-session/end"}
+	releaseClaim := uiAction{ID: "release_claim", Label: "Release Claim", Method: http.MethodPost, Path: "/api/claim/release"}
 	retire := uiAction{ID: "retire_session_actor", Label: "Retire Session Actor", Method: http.MethodPost, Path: "/api/session/retire"}
 	lead := uiAction{ID: "transfer_leader", Label: "Transfer Leader", Method: http.MethodPost, Path: "/api/session/lead"}
 	logs := uiAction{ID: "select_session_log", Label: "Select Session Event Log", Enabled: true, Reason: "client-side filtered view over current_session/events and comms_sessions/events"}
@@ -529,9 +586,10 @@ func buildUIActions(snap uiSnapshot) []uiAction {
 	if snap.Project.Demo {
 		start.Reason = "demo mode is read-only"
 		end.Reason = "demo mode is read-only"
+		releaseClaim.Reason = "demo mode is read-only"
 		retire.Reason = "demo mode is read-only"
 		lead.Reason = "demo mode is read-only"
-		return []uiAction{start, end, retire, lead, logs}
+		return []uiAction{start, end, releaseClaim, retire, lead, logs}
 	}
 	if !snap.Project.MutationsEnabled {
 		reason := snap.Project.MutationMessage
@@ -540,9 +598,10 @@ func buildUIActions(snap uiSnapshot) []uiAction {
 		}
 		start.Reason = reason
 		end.Reason = reason
+		releaseClaim.Reason = reason
 		retire.Reason = reason
 		lead.Reason = reason
-		return []uiAction{start, end, retire, lead, logs}
+		return []uiAction{start, end, releaseClaim, retire, lead, logs}
 	}
 	if snap.Current == nil && len(snap.Sessions) == 0 && len(snap.Claims) == 0 {
 		start.Enabled = true
@@ -555,13 +614,21 @@ func buildUIActions(snap uiSnapshot) []uiAction {
 		end.Reason = "no active comms session to end"
 	}
 	if len(snap.Sessions) > 0 {
-		retire.Enabled = true
 		lead.Enabled = true
 	} else {
-		retire.Reason = "no active session actor to retire"
 		lead.Reason = "no active session actor can become leader"
 	}
-	return []uiAction{start, end, retire, lead, logs}
+	if len(snap.Claims) > 0 {
+		releaseClaim.Enabled = true
+	} else {
+		releaseClaim.Reason = "no active claim to release"
+	}
+	if len(snap.Sessions) > 0 || len(snap.Claims) > 0 {
+		retire.Enabled = true
+	} else {
+		retire.Reason = "no active session or claim actor to retire"
+	}
+	return []uiAction{start, end, releaseClaim, retire, lead, logs}
 }
 
 func buildCommsSessionViews(events []event.Event) (*uiCommsSession, []uiCommsSession) {
@@ -1178,6 +1245,7 @@ async function load() {
   latestData = data;
   const startAction = actionByID(data, 'start_comms_session');
   const endAction = actionByID(data, 'end_comms_session');
+  const releaseAction = actionByID(data, 'release_claim');
   const retireAction = actionByID(data, 'retire_session_actor');
   el('startComms').disabled = !startAction.enabled;
   el('startComms').title = startAction.reason || mutationHelp(data);
@@ -1196,12 +1264,20 @@ async function load() {
     'No archived comms sessions yet. Use End Comms Session when the project work window is done.');
   el('claims').innerHTML = '<div class="hint">Claims older than ' + esc(data.project.stale_after) + ' are marked stale. ' + esc(mutationHelp(data)) + '</div>' +
     renderTable(data.claims, ['Actor', 'Scope', 'Intent', 'Age', 'Action'], c => {
-      const action = c.stale && retireAction.enabled
-        ? '<button class="small danger" type="button" data-retire-actor="' + esc(c.actor) + '">Retire actor</button>'
-        : (c.stale ? '<span class="pill stale">stale</span>' : '<span class="meta">active</span>');
+      const actions = [];
+      if (releaseAction.enabled) {
+        actions.push('<button class="small" type="button" data-release-claim="' + esc(c.id) + '" data-release-actor="' + esc(c.actor) + '" data-release-scope="' + esc(c.scope) + '">Release claim</button>');
+      }
+      if (c.stale && retireAction.enabled) {
+        actions.push('<button class="small danger" type="button" data-retire-actor="' + esc(c.actor) + '">Retire actor</button>');
+      }
+      const action = actions.length ? actions.join(' ') : (c.stale ? '<span class="pill stale">stale</span>' : '<span class="meta">active</span>');
       return '<tr class="' + (c.stale ? 'claim-stale' : '') + '"><td><span class="actor">@' + esc(c.actor) + '</span></td><td><div class="scope">' + esc(c.scope) + '</div><div class="copy">' + esc(c.id.slice(0, 10)) + '</div></td><td>' + esc(c.intent) + '</td><td>' + esc(c.age) + (c.stale ? '<div><span class="pill stale">stale</span></div>' : '') + '</td><td>' + action + '</td></tr>';
     },
     'No active claims.');
+  document.querySelectorAll('[data-release-claim]').forEach(button => {
+    button.addEventListener('click', () => releaseClaim(button.getAttribute('data-release-claim'), button.getAttribute('data-release-actor'), button.getAttribute('data-release-scope')));
+  });
   document.querySelectorAll('[data-retire-actor]').forEach(button => {
     button.addEventListener('click', () => retireActor(button.getAttribute('data-retire-actor')));
   });
@@ -1289,6 +1365,18 @@ async function retireActor(actor) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ actor, reason })
+  });
+  if (!res.ok) throw new Error(await res.text());
+  hideError();
+  await load();
+}
+async function releaseClaim(claimID, actor, scope) {
+  const result = window.prompt('Release claim ' + claimID.slice(0, 10) + ' held by @' + actor + ' on ' + scope + '?', 'done');
+  if (result === null) return;
+  const res = await fetch('/api/claim/release', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ claim_id: claimID, result, reason: result })
   });
   if (!res.ok) throw new Error(await res.text());
   hideError();
