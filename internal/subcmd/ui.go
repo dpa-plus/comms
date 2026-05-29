@@ -289,8 +289,13 @@ func (s uiServer) serveStartCommsSession(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "a comms session named "+name+" is already active", http.StatusConflict)
 		return
 	}
-	now := time.Now().UTC()
-	if err := appendSessionHello(rt, now, event.NewID(now), name, req.Label, true); err != nil {
+	helloAt := time.Now().UTC().Add(time.Millisecond)
+	id := event.NewID(helloAt)
+	if err := releaseActorClaimsBeforeSessionSwitch(rt, id, name, helloAt.Add(-time.Millisecond)); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := appendSessionHello(rt, helloAt, id, name, req.Label, true); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -331,6 +336,10 @@ func (s uiServer) serveEndCommsSession(w http.ResponseWriter, r *http.Request) {
 	}
 	sessionID := strings.TrimSpace(req.SessionID)
 	sessionName := strings.TrimSpace(req.Name)
+	if sessionID == "current" {
+		sessionID = ""
+		sessionName = ""
+	}
 	if sessionID == "" && sessionName != "" {
 		sessionID, sessionName = activeCommsSessionByName(rt.State, sessionName, time.Now().Add(-4*time.Hour))
 		if sessionID == "" {
