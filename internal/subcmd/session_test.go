@@ -130,3 +130,53 @@ func TestRunSessionLeadTransfersLeader(t *testing.T) {
 		t.Fatalf("old leader should not remain leader: %+v", rt.State.Sessions)
 	}
 }
+
+func TestRunSessionLeadStampsTargetCommsSession(t *testing.T) {
+	repo := setupUITestRepo(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("COMMS_ACTOR", "claude-dev")
+	t.Setenv("USER", "eli")
+	t.Chdir(repo)
+
+	rt, err := Open(OpenOpts{Mutating: true})
+	if err != nil {
+		t.Fatalf("open runtime: %v", err)
+	}
+	setup := []event.Event{
+		{TS: time.Now().Add(-10 * time.Minute).UTC(), ID: "01JX2Q3Y7W5B6N9P0R1S2T3M0A", Actor: "claude-dev", Type: event.TypeHello, Data: map[string]interface{}{
+			"base_name":          "claude",
+			"leader":             true,
+			"comms_session_id":   "sess-a",
+			"comms_session_name": "frontend work",
+		}},
+		{TS: time.Now().Add(-9 * time.Minute).UTC(), ID: "01JX2Q3Y7W5B6N9P0R1S2T3M1A", Actor: "codex-dev", Type: event.TypeHello, Data: map[string]interface{}{
+			"base_name":          "codex",
+			"comms_session_id":   "sess-b",
+			"comms_session_name": "backend work",
+		}},
+	}
+	for _, ev := range setup {
+		if err := rt.Append(ev); err != nil {
+			t.Fatalf("append setup: %v", err)
+		}
+	}
+	if err := rt.Close(); err != nil {
+		t.Fatalf("close runtime: %v", err)
+	}
+
+	if err := runSessionLead("codex-dev", "backend lead owns the next decision"); err != nil {
+		t.Fatalf("lead: %v", err)
+	}
+	rt, err = Open(OpenOpts{Mutating: false})
+	if err != nil {
+		t.Fatalf("reopen runtime: %v", err)
+	}
+	defer rt.Close()
+	last := rt.Events[len(rt.Events)-1]
+	if got := last.Data["comms_session_id"]; got != "sess-b" {
+		t.Fatalf("leader transfer session id = %v, want target session sess-b; event=%+v", got, last)
+	}
+	if got := last.Data["comms_session_name"]; got != "backend work" {
+		t.Fatalf("leader transfer session name = %v, want backend work; event=%+v", got, last)
+	}
+}

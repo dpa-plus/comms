@@ -284,7 +284,10 @@ func appendLeaderTransfer(rt *Runtime, target, reason string) error {
 		"leader_actor":    target,
 		"reason":          reason,
 	}
-	stampActiveCommsSession(rt, data)
+	if session.SessionID != "" {
+		data["comms_session_id"] = session.SessionID
+		data["comms_session_name"] = session.SessionName
+	}
 	return rt.Append(event.Event{
 		TS:    now,
 		ID:    event.NewID(now),
