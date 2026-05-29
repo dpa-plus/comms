@@ -187,13 +187,18 @@ func parseAnchor(s string) (Anchor, error) {
 
 // String renders a Scope back to its canonical (post-normalization) form.
 func (s Scope) String() string {
+	path := escapeHash(s.Path)
 	switch s.Anchor.Kind {
 	case AnchorWhole:
-		return s.Path
+		return path
 	case AnchorLine:
-		return fmt.Sprintf("%s#L%d-%d", s.Path, s.Anchor.LineStart, s.Anchor.LineEnd)
+		return fmt.Sprintf("%s#L%d-%d", path, s.Anchor.LineStart, s.Anchor.LineEnd)
 	case AnchorSymbol:
-		return s.Path + "#" + s.Anchor.Symbol
+		return path + "#" + s.Anchor.Symbol
 	}
-	return s.Path
+	return path
+}
+
+func escapeHash(s string) string {
+	return strings.ReplaceAll(s, "#", `\#`)
 }
