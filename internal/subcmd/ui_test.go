@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/dpa-plus/comms/internal/event"
+	"github.com/dpa-plus/comms/internal/state"
 )
 
 func TestBuildDemoUISnapshotMarksStaleAndShowsCommsArchive(t *testing.T) {
@@ -573,6 +574,28 @@ func TestSessionSwitchReleasesPriorActorClaimsAndHidesDormantSession(t *testing.
 	}
 	if len(snap.Active[0].Actors) != 1 || snap.Active[0].Actors[0] != "claude-dev" {
 		t.Fatalf("old session actor should not remain active elsewhere: %+v", snap.Active[0].Actors)
+	}
+}
+
+func TestActiveCommsSessionViewsIgnoreStaleHelloOnlyActors(t *testing.T) {
+	now := time.Now().UTC()
+	events := []event.Event{
+		{TS: now.Add(-6 * time.Hour), ID: "01JX2Q3Y7W5B6N9P0R1S2T3W1A", Actor: "claude-old", Type: event.TypeHello, Data: map[string]interface{}{
+			"comms_session_start": true, "comms_session_id": "sess-old", "comms_session_name": "old session",
+		}},
+		{TS: now.Add(-10 * time.Minute), ID: "01JX2Q3Y7W5B6N9P0R1S2T3W1B", Actor: "codex-new", Type: event.TypeHello, Data: map[string]interface{}{
+			"comms_session_start": true, "comms_session_id": "sess-new", "comms_session_name": "new session",
+		}},
+	}
+	st := state.Fold(events)
+	active, _ := buildCommsSessionViews(events)
+	filtered := filterActiveCommsSessionViews(active, st, now.Add(-4*time.Hour))
+
+	if len(filtered) != 1 || filtered[0].ID != "sess-new" {
+		t.Fatalf("only fresh hello-only session should remain active: %+v", filtered)
+	}
+	if filtered[0].Actors[0] != "codex-new" {
+		t.Fatalf("fresh actor should be preserved: %+v", filtered[0].Actors)
 	}
 }
 

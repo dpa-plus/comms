@@ -566,7 +566,7 @@ func buildUISnapshot(rt *Runtime, staleAfter time.Duration) uiSnapshot {
 		})
 	}
 	out.Active, out.CommsSessions = buildCommsSessionViews(rt.Events)
-	out.Active = filterActiveCommsSessionViews(out.Active, rt.State)
+	out.Active = filterActiveCommsSessionViews(out.Active, rt.State, now.Add(-4*time.Hour))
 	if len(out.Active) > 0 {
 		out.Current = &out.Active[0]
 	}
@@ -737,7 +737,7 @@ func buildGlobalUISnapshot(staleAfter time.Duration) (uiSnapshot, error) {
 		}
 		st := state.Fold(events)
 		active, archived := buildCommsSessionViews(events)
-		active = filterActiveCommsSessionViews(active, st)
+		active = filterActiveCommsSessionViews(active, st, now.Add(-4*time.Hour))
 		for i := range active {
 			active[i] = prefixCommsSessionForProject(active[i], repoName, hash)
 			out.Active = append(out.Active, active[i])
@@ -859,12 +859,12 @@ func claimMatchesSessionID(claim uiClaim, sessionID string) bool {
 	return claim.SessionID == sessionID
 }
 
-func filterActiveCommsSessionViews(in []uiCommsSession, st *state.State) []uiCommsSession {
+func filterActiveCommsSessionViews(in []uiCommsSession, st *state.State, sessionCutoff time.Time) []uiCommsSession {
 	if len(in) == 0 || st == nil {
 		return in
 	}
 	actors := map[string]map[string]bool{}
-	for _, sess := range st.Sessions {
+	for _, sess := range collectActiveSessions(st, sessionCutoff) {
 		key := sess.SessionID
 		if key == "" {
 			key = "current"
@@ -1705,10 +1705,11 @@ th {
     font-weight: 650;
   }
   .claims td:nth-child(1)::before { content: "Actor"; }
-  .claims td:nth-child(2)::before { content: "Scope"; }
-  .claims td:nth-child(3)::before { content: "Intent"; }
-  .claims td:nth-child(4)::before { content: "Age"; }
-  .claims td:nth-child(5)::before { content: "Action"; }
+  .claims td:nth-child(2)::before { content: "Session"; }
+  .claims td:nth-child(3)::before { content: "Scope"; }
+  .claims td:nth-child(4)::before { content: "Intent"; }
+  .claims td:nth-child(5)::before { content: "Age"; }
+  .claims td:nth-child(6)::before { content: "Action"; }
   .events td:nth-child(1)::before { content: "When"; }
   .events td:nth-child(2)::before { content: "Type"; }
   .events td:nth-child(3)::before { content: "Actor"; }
