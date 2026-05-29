@@ -847,33 +847,42 @@ const uiHTML = `<!doctype html>
 <style>
 :root {
   color-scheme: light;
-  --bg: #f7f8fa;
+  --bg: #f4f6f8;
   --surface: #ffffff;
-  --line: #dfe4ea;
-  --text: #17202a;
-  --muted: #667280;
-  --soft: #eef2f5;
+  --surface-2: #f8fafc;
+  --line: #d9e0e8;
+  --text: #16202b;
+  --muted: #667789;
+  --soft: #eef3f7;
   --teal: #0f766e;
+  --teal-soft: #e4f7f4;
   --amber: #b45309;
   --red: #b42318;
   --red-soft: #fff1f0;
-  --shadow: 0 10px 30px rgba(23, 32, 42, 0.07);
+  --blue: #2563eb;
+  --shadow: 0 14px 36px rgba(17, 24, 39, 0.08);
+  --header-h: 72px;
+  --stats-h: 50px;
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #0f1419;
-  --surface: #151b22;
-  --line: #2c3642;
-  --text: #e7edf3;
-  --muted: #9aa8b6;
-  --soft: #202833;
+  --bg: #0b1116;
+  --surface: #121922;
+  --surface-2: #16202a;
+  --line: #263241;
+  --text: #e8eef5;
+  --muted: #9aa9b8;
+  --soft: #1d2733;
   --teal: #4fd1c5;
+  --teal-soft: #113a37;
   --amber: #f6ad55;
   --red: #ff6b6b;
   --red-soft: #3b1b1b;
+  --blue: #7aa7ff;
   --shadow: 0 12px 32px rgba(0, 0, 0, 0.34);
 }
 * { box-sizing: border-box; }
+html, body { height: 100%; }
 body {
   margin: 0;
   background: var(--bg);
@@ -881,20 +890,22 @@ body {
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 14px;
   letter-spacing: 0;
+  overflow: hidden;
 }
 header {
-  height: 64px;
+  height: var(--header-h);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 24px;
+  gap: 18px;
+  padding: 0 18px;
   background: var(--surface);
   border-bottom: 1px solid var(--line);
-  position: sticky;
+  position: relative;
   top: 0;
   z-index: 2;
 }
-h1 { margin: 0; font-size: 18px; font-weight: 680; }
+h1 { margin: 0; font-size: 18px; font-weight: 720; }
 .sub { color: var(--muted); font-size: 12px; margin-top: 3px; }
 .log-path {
   color: var(--muted);
@@ -903,11 +914,18 @@ h1 { margin: 0; font-size: 18px; font-weight: 680; }
   margin-top: 4px;
   overflow-wrap: anywhere;
 }
+.header-main { min-width: 0; }
 .demo-mark {
   color: var(--amber);
   font-weight: 700;
 }
-.top-actions { display: flex; gap: 8px; align-items: center; }
+.top-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
 button {
   border: 1px solid var(--line);
   background: var(--surface);
@@ -916,17 +934,24 @@ button {
   padding: 0 12px;
   border-radius: 6px;
   font: inherit;
+  font-size: 13px;
+  font-weight: 650;
   cursor: pointer;
 }
-button:hover { border-color: #aab4c0; }
+button:hover { border-color: #aab4c0; background: var(--surface-2); }
 :root[data-theme="dark"] button:hover { border-color: #586679; }
 button.danger {
   border-color: var(--red);
   color: var(--red);
 }
+button.primary {
+  border-color: var(--teal);
+  background: var(--teal-soft);
+  color: var(--teal);
+}
 button.small {
-  height: 28px;
-  padding: 0 9px;
+  height: 26px;
+  padding: 0 8px;
   font-size: 12px;
 }
 button:disabled {
@@ -942,6 +967,37 @@ button:disabled {
   color: var(--red);
   background: var(--red-soft);
 }
+.stats {
+  height: var(--stats-h);
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 1px;
+  padding: 0 18px;
+  background: var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.stat {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 12px;
+  background: var(--surface);
+}
+.stat-label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.stat-value {
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 760;
+  font-variant-numeric: tabular-nums;
+}
+.stat.warn .stat-value { color: var(--red); }
 .status-dot {
   width: 9px;
   height: 9px;
@@ -951,10 +1007,17 @@ button:disabled {
   margin-right: 7px;
 }
 main {
-  padding: 18px;
+  height: calc(100vh - var(--header-h) - var(--stats-h));
+  min-height: 0;
+  padding: 12px 14px 14px;
   display: grid;
-  grid-template-columns: 280px minmax(420px, 1fr) 360px;
-  gap: 14px;
+  grid-template-columns: 280px minmax(520px, 1fr) 350px;
+  grid-template-rows: minmax(260px, 52fr) minmax(240px, 48fr);
+  grid-template-areas:
+    "roster claims signals"
+    "events events events";
+  gap: 12px;
+  overflow: hidden;
 }
 .panel {
   background: var(--surface);
@@ -962,11 +1025,14 @@ main {
   border-radius: 8px;
   box-shadow: var(--shadow);
   overflow: hidden;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 .panel h2 {
   margin: 0;
-  padding: 12px 14px;
-  font-size: 13px;
+  padding: 10px 12px;
+  font-size: 12px;
   text-transform: uppercase;
   color: var(--muted);
   border-bottom: 1px solid var(--line);
@@ -977,57 +1043,99 @@ main {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 14px;
+  padding: 9px 12px;
   border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
 }
 .panel-title h2 {
   padding: 0;
   border: 0;
 }
-.panel-title select {
-  min-width: 250px;
+.panel-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.panel-title select,
+.filter-input {
+  min-width: 180px;
   max-width: 100%;
-  height: 32px;
+  height: 30px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--surface);
   color: var(--text);
   font: inherit;
   font-size: 12px;
+  padding: 0 9px;
 }
-.stack { display: grid; gap: 14px; }
+.filter-input { width: 220px; }
+.roster { grid-area: roster; }
+.claims { grid-area: claims; }
+.signals {
+  grid-area: signals;
+  display: grid;
+  grid-template-rows: minmax(0, 1.15fr) minmax(0, .85fr) auto auto;
+  gap: 12px;
+  min-height: 0;
+}
+.signals .panel { box-shadow: none; }
 .row {
-  padding: 12px 14px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--soft);
 }
 .row:last-child { border-bottom: 0; }
 .actor { font-weight: 680; }
 .meta-inline { color: var(--muted); font-size: 12px; font-weight: 520; }
 .meta { color: var(--muted); font-size: 12px; margin-top: 4px; overflow-wrap: anywhere; }
-.scope { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; font-weight: 650; }
+.scope {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
 .intent { margin-top: 5px; }
 .empty { padding: 16px 14px; color: var(--muted); }
 .hint {
-  padding: 10px 14px;
+  padding: 9px 12px;
   color: var(--muted);
   border-bottom: 1px solid var(--soft);
   font-size: 12px;
+  flex: 0 0 auto;
+}
+.scroll {
+  min-height: 0;
+  overflow: auto;
 }
 .claims table, .events table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
 }
 th, td {
   text-align: left;
-  padding: 10px 12px;
+  padding: 9px 10px;
   border-bottom: 1px solid var(--soft);
   vertical-align: top;
 }
 th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
   font-size: 12px;
   color: var(--muted);
   font-weight: 650;
 }
+.claims th:nth-child(1), .claims td:nth-child(1) { width: 120px; }
+.claims th:nth-child(2), .claims td:nth-child(2) { width: 32%; }
+.claims th:nth-child(4), .claims td:nth-child(4) { width: 78px; }
+.claims th:nth-child(5), .claims td:nth-child(5) { width: 112px; }
+.events th:nth-child(1), .events td:nth-child(1) { width: 120px; }
+.events th:nth-child(2), .events td:nth-child(2) { width: 86px; }
+.events th:nth-child(3), .events td:nth-child(3) { width: 128px; }
+.events th:nth-child(4), .events td:nth-child(4) { width: 26%; }
 .pill {
   display: inline-flex;
   align-items: center;
@@ -1039,6 +1147,7 @@ th {
   font-size: 12px;
   font-weight: 620;
 }
+.pill.hello { color: var(--teal); background: var(--teal-soft); }
 .pill.claim { color: var(--teal); background: #def7f2; }
 .pill.release { color: var(--amber); background: #fff0d6; }
 .pill.note { color: #475467; background: #eef2f5; }
@@ -1047,6 +1156,7 @@ th {
 .pill.priority { color: #7c2d12; background: #ffedd5; }
 .pill.leader { color: var(--teal); background: #def7f2; margin-left: 6px; }
 :root[data-theme="dark"] .pill.claim { color: #7ddbd3; background: #123d3a; }
+:root[data-theme="dark"] .pill.hello { color: #7ddbd3; background: #123d3a; }
 :root[data-theme="dark"] .pill.release { color: #ffd39b; background: #4b310f; }
 :root[data-theme="dark"] .pill.note { color: #c3ccd6; background: #28323d; }
 :root[data-theme="dark"] .pill.finding { color: #9fc4ff; background: #18345c; }
@@ -1056,6 +1166,7 @@ th {
   background: var(--red-soft);
 }
 .events {
+  grid-area: events;
   grid-column: 1 / -1;
 }
 .session-row {
@@ -1070,28 +1181,54 @@ th {
   color: var(--muted);
   white-space: nowrap;
 }
-@media (max-width: 1050px) {
-  main { grid-template-columns: 1fr; }
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 1180px) {
+  body { overflow: auto; }
+  header { height: auto; min-height: var(--header-h); align-items: flex-start; padding-top: 10px; padding-bottom: 10px; }
+  .stats { height: auto; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  main {
+    height: auto;
+    min-height: calc(100vh - 140px);
+    grid-template-columns: 1fr;
+    grid-template-rows: auto;
+    grid-template-areas:
+      "roster"
+      "claims"
+      "signals"
+      "events";
+    overflow: visible;
+  }
   .events { grid-column: auto; }
+  .signals { grid-template-rows: none; }
+  .scroll { max-height: 420px; }
 }
 @media (max-width: 620px) {
+  body { overflow: auto; }
   header {
     height: auto;
     min-height: 64px;
-    padding: 12px 18px;
+    padding: 12px;
     gap: 10px;
     align-items: flex-start;
+    display: block;
   }
   h1 { font-size: 17px; }
+  .top-actions { justify-content: flex-start; margin-top: 10px; }
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 0 10px; }
   main { padding: 10px; gap: 12px; }
-  .top-actions { align-items: flex-start; }
   .panel-title {
     display: block;
   }
-  .panel-title select {
+  .panel-title select,
+  .filter-input {
     width: 100%;
     margin-top: 8px;
   }
+  .panel-tools { display: block; }
   .claims table,
   .claims thead,
   .claims tbody,
@@ -1143,7 +1280,7 @@ th {
 </head>
 <body>
 <header>
-  <div>
+  <div class="header-main">
     <h1 id="project">comms dashboard</h1>
     <div class="sub" id="projectMeta">Loading project state...</div>
     <div class="log-path" id="logPath"></div>
@@ -1156,28 +1293,32 @@ th {
     <button id="refresh" type="button">Refresh</button>
   </div>
 </header>
+<section id="stats" class="stats" aria-label="Comms summary"></section>
 <div id="error" class="error-banner"></div>
 <main>
-  <section class="panel">
-    <h2>Active Sessions</h2>
-    <div id="sessions"></div>
+  <section class="panel roster">
+    <h2>Team Roster</h2>
+    <div id="sessions" class="scroll"></div>
     <h2>Current Comms Session</h2>
     <div id="currentSession"></div>
     <h2>Comms Session Archive</h2>
-    <div id="commsSessions"></div>
+    <div id="commsSessions" class="scroll"></div>
   </section>
   <section class="panel claims">
-    <h2>Active Claims</h2>
-    <div id="claims"></div>
+    <div class="panel-title">
+      <h2>Active Claims</h2>
+      <input id="claimFilter" class="filter-input" type="search" placeholder="Filter claims">
+    </div>
+    <div id="claims" class="scroll"></div>
   </section>
-  <div class="stack">
+  <div class="signals">
     <section class="panel">
       <h2>Recent Findings</h2>
-      <div id="findings"></div>
+      <div id="findings" class="scroll"></div>
     </section>
     <section class="panel">
       <h2>Recent Notes</h2>
-      <div id="notes"></div>
+      <div id="notes" class="scroll"></div>
     </section>
     <section class="panel">
       <h2>Docs</h2>
@@ -1191,10 +1332,13 @@ th {
   <section class="panel events">
     <div class="panel-title">
       <h2>Session Event Log</h2>
-      <select id="sessionSelect" aria-label="Choose comms session log"></select>
+      <div class="panel-tools">
+        <input id="eventFilter" class="filter-input" type="search" placeholder="Filter events">
+        <select id="sessionSelect" aria-label="Choose comms session log"></select>
+      </div>
     </div>
     <div class="hint" id="eventHint">Choose a session to see only that session's log rows. The physical JSONL remains append-only.</div>
-    <div id="events"></div>
+    <div id="events" class="scroll"></div>
   </section>
 </main>
 <script>
@@ -1233,6 +1377,28 @@ function actionByID(data, id) {
 }
 let selectedSessionID = localStorage.getItem('selectedSessionID') || 'current';
 let latestData = null;
+function filterText(id) {
+  return (el(id)?.value || '').trim().toLowerCase();
+}
+function includesFilter(values, filter) {
+  if (!filter) return true;
+  return values.join(' ').toLowerCase().includes(filter);
+}
+function renderStats(data) {
+  const claims = data.claims || [];
+  const findings = data.findings || [];
+  const notes = data.notes || [];
+  const archive = data.comms_sessions || [];
+  const stat = (label, value, warn) => '<div class="stat ' + (warn ? 'warn' : '') + '"><span class="stat-label">' + label + '</span><span class="stat-value">' + esc(value) + '</span></div>';
+  el('stats').innerHTML = [
+    stat('sessions', (data.sessions || []).length, false),
+    stat('claims', claims.length, false),
+    stat('stale', claims.filter(c => c.stale).length, claims.some(c => c.stale)),
+    stat('findings', findings.length, false),
+    stat('notes', notes.length, false),
+    stat('archives', archive.length, false)
+  ].join('');
+}
 async function load() {
   const res = await fetch('/api/status', { cache: 'no-store' });
   if (!res.ok) throw new Error(await res.text());
@@ -1243,6 +1409,7 @@ async function load() {
   el('logPath').textContent = 'Log: ' + data.project.log_path;
   el('updated').textContent = 'updated ' + fmtTime(data.updated);
   latestData = data;
+  renderStats(data);
   const startAction = actionByID(data, 'start_comms_session');
   const endAction = actionByID(data, 'end_comms_session');
   const releaseAction = actionByID(data, 'release_claim');
@@ -1262,25 +1429,7 @@ async function load() {
   el('commsSessions').innerHTML = renderRows(data.comms_sessions, s =>
     '<div class="row"><div class="actor">' + fmtTime(s.started_at) + ' → ' + fmtTime(s.ended_at) + '</div><div class="meta">ended by @' + esc(s.ended_by) + ' · ' + esc(s.reason || 'comms session ended') + '</div><div class="meta">' + esc(s.event_count) + ' event(s) · ' + esc(s.claim_count) + ' claim(s) · ' + esc(s.finding_count) + ' finding(s) · ' + esc(s.note_count) + ' note(s)</div><div class="meta">' + esc((s.actors || []).map(a => '@' + a).join(', ')) + '</div></div>',
     'No archived comms sessions yet. Use End Comms Session when the project work window is done.');
-  el('claims').innerHTML = '<div class="hint">Claims older than ' + esc(data.project.stale_after) + ' are marked stale. ' + esc(mutationHelp(data)) + '</div>' +
-    renderTable(data.claims, ['Actor', 'Scope', 'Intent', 'Age', 'Action'], c => {
-      const actions = [];
-      if (releaseAction.enabled) {
-        actions.push('<button class="small" type="button" data-release-claim="' + esc(c.id) + '" data-release-actor="' + esc(c.actor) + '" data-release-scope="' + esc(c.scope) + '">Release claim</button>');
-      }
-      if (c.stale && retireAction.enabled) {
-        actions.push('<button class="small danger" type="button" data-retire-actor="' + esc(c.actor) + '">Retire actor</button>');
-      }
-      const action = actions.length ? actions.join(' ') : (c.stale ? '<span class="pill stale">stale</span>' : '<span class="meta">active</span>');
-      return '<tr class="' + (c.stale ? 'claim-stale' : '') + '"><td><span class="actor">@' + esc(c.actor) + '</span></td><td><div class="scope">' + esc(c.scope) + '</div><div class="copy">' + esc(c.id.slice(0, 10)) + '</div></td><td>' + esc(c.intent) + '</td><td>' + esc(c.age) + (c.stale ? '<div><span class="pill stale">stale</span></div>' : '') + '</td><td>' + action + '</td></tr>';
-    },
-    'No active claims.');
-  document.querySelectorAll('[data-release-claim]').forEach(button => {
-    button.addEventListener('click', () => releaseClaim(button.getAttribute('data-release-claim'), button.getAttribute('data-release-actor'), button.getAttribute('data-release-scope')));
-  });
-  document.querySelectorAll('[data-retire-actor]').forEach(button => {
-    button.addEventListener('click', () => retireActor(button.getAttribute('data-retire-actor')));
-  });
+  renderClaims(data);
   el('findings').innerHTML = renderRows(data.findings, f =>
     '<div class="row">' + (f.priority ? '<span class="pill priority">priority</span> ' : '') + '<span class="pill finding">' + esc(f.category) + '</span><div class="intent">' + esc(f.summary) + '</div><div class="meta">@' + esc(f.actor) + ' · ' + fmtTime(f.ts) + '</div></div>',
     'No findings in the last 24h.');
@@ -1294,6 +1443,31 @@ async function load() {
     '<div class="row"><span class="scope">' + esc(d) + '</span><div class="copy">comms lesson ' + esc(d) + '</div></div>',
     'No global lessons yet.');
   renderSessionChoices(data);
+}
+function renderClaims(data) {
+  const releaseAction = actionByID(data, 'release_claim');
+  const retireAction = actionByID(data, 'retire_session_actor');
+  const claimFilter = filterText('claimFilter');
+  const claims = (data.claims || []).filter(c => includesFilter([c.actor, c.scope, c.intent, c.age, c.id], claimFilter));
+  el('claims').innerHTML = '<div class="hint">Claims older than ' + esc(data.project.stale_after) + ' are marked stale. ' + esc(mutationHelp(data)) + '</div>' +
+    renderTable(claims, ['Actor', 'Scope', 'Intent', 'Age', 'Action'], c => {
+      const actions = [];
+      if (releaseAction.enabled) {
+        actions.push('<button class="small primary" type="button" data-release-claim="' + esc(c.id) + '" data-release-actor="' + esc(c.actor) + '" data-release-scope="' + esc(c.scope) + '">Release</button>');
+      }
+      if (c.stale && retireAction.enabled) {
+        actions.push('<button class="small danger" type="button" data-retire-actor="' + esc(c.actor) + '">Retire</button>');
+      }
+      const action = actions.length ? actions.join(' ') : (c.stale ? '<span class="pill stale">stale</span>' : '<span class="meta">active</span>');
+      return '<tr class="' + (c.stale ? 'claim-stale' : '') + '"><td><span class="actor">@' + esc(c.actor) + '</span></td><td><div class="scope">' + esc(c.scope) + '</div><div class="copy">' + esc(c.id.slice(0, 10)) + '</div></td><td>' + esc(c.intent) + '</td><td>' + esc(c.age) + (c.stale ? '<div><span class="pill stale">stale</span></div>' : '') + '</td><td>' + action + '</td></tr>';
+    },
+    claimFilter ? 'No claims match this filter.' : 'No active claims.');
+  document.querySelectorAll('[data-release-claim]').forEach(button => {
+    button.addEventListener('click', () => releaseClaim(button.getAttribute('data-release-claim'), button.getAttribute('data-release-actor'), button.getAttribute('data-release-scope')));
+  });
+  document.querySelectorAll('[data-retire-actor]').forEach(button => {
+    button.addEventListener('click', () => retireActor(button.getAttribute('data-retire-actor')));
+  });
 }
 function allSessionChoices(data) {
   const out = [];
@@ -1326,9 +1500,11 @@ function renderSelectedSessionLog(data) {
   const s = chosen.session;
   const range = chosen.id === 'current' ? 'Current session started ' + fmtTime(s.started_at) : 'Archived session ' + fmtTime(s.started_at) + ' → ' + fmtTime(s.ended_at);
   el('eventHint').textContent = range + ' · ' + s.event_count + ' event(s). The physical JSONL remains append-only; this table is filtered to the selected session.';
-  el('events').innerHTML = renderTable(s.events || [], ['When', 'Type', 'Actor', 'Scope', 'Summary'], ev =>
+  const eventFilter = filterText('eventFilter');
+  const events = (s.events || []).filter(ev => includesFilter([fmtTime(ev.ts), ev.type, ev.actor, (ev.scope || []).join(', '), ev.summary], eventFilter));
+  el('events').innerHTML = renderTable(events, ['When', 'Type', 'Actor', 'Scope', 'Summary'], ev =>
     '<tr><td>' + fmtTime(ev.ts) + '</td><td><span class="pill ' + esc(ev.type) + '">' + esc(ev.type) + '</span></td><td>@' + esc(ev.actor) + '</td><td><span class="scope">' + esc((ev.scope || []).join(', ')) + '</span></td><td>' + esc(ev.summary) + '</td></tr>',
-    'No log events in this session.');
+    eventFilter ? 'No events match this filter.' : 'No log events in this session.');
 }
 async function startCommsSession() {
   const reason = window.prompt('Start a new comms session? This creates the first log row for a new coordination window.', 'project work session started');
@@ -1399,6 +1575,12 @@ el('endComms').addEventListener('click', () => {
 el('sessionSelect').addEventListener('change', () => {
   selectedSessionID = el('sessionSelect').value;
   localStorage.setItem('selectedSessionID', selectedSessionID);
+  if (latestData) renderSelectedSessionLog(latestData);
+});
+el('claimFilter').addEventListener('input', () => {
+  if (latestData) renderClaims(latestData);
+});
+el('eventFilter').addEventListener('input', () => {
   if (latestData) renderSelectedSessionLog(latestData);
 });
 el('theme').addEventListener('click', () => {
