@@ -2,6 +2,7 @@ package subcmd
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/dpa-plus/comms/internal/repo"
 	"github.com/spf13/cobra"
@@ -16,7 +17,7 @@ func NewRepoHashCmd() *cobra.Command {
 		Hidden: true,
 		Args:   cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := repo.DiscoverFromCWD("")
+			id, err := repoIdentityForHelper()
 			if err != nil {
 				return err
 			}
@@ -25,4 +26,17 @@ func NewRepoHashCmd() *cobra.Command {
 		},
 	}
 	return cmd
+}
+
+func repoIdentityForHelper() (repo.Identity, error) {
+	if globalRepoRoot != "" {
+		return repo.DiscoverExplicit(globalRepoRoot)
+	}
+	if envRepo := os.Getenv("COMMS_REPO"); envRepo != "" {
+		return repo.DiscoverExplicit(envRepo)
+	}
+	if globalRepoID != "" {
+		return repo.Identity{}, fmt.Errorf("--repo-id is no longer used for repo selection; use --repo /absolute/repo/path instead")
+	}
+	return repo.DiscoverFromCWD("")
 }

@@ -11,6 +11,13 @@ COMMS_ACTOR=codex-20260527-a comms status
 ```
 Pick one concrete per-session actor and reuse it for this conversation.
 
+If cwd discovery fails with `operation not permitted`, run from a safe cwd and
+target the repo explicitly:
+```bash
+cd /tmp
+COMMS_ACTOR=codex-20260527-a comms --repo /absolute/repo/path status
+```
+
 **UI / session archive:**
 The user may open `comms ui` to watch the workflow. The UI can start/end the
 whole project-level comms session and exposes backend metadata at

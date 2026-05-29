@@ -87,6 +87,39 @@ This scans `~/Library/Application Support/comms/*/repo-path.txt` and
 Use the repo-specific UI or CLI when you need to start/end sessions or release
 claims.
 
+### macOS Desktop/Document permission recovery
+
+If Claude/Codex reports `repo: getwd: operation not permitted`,
+`uv_cwd operation not permitted`, or `fatal: Unable to read current working
+directory` while the repo lives under Desktop, Documents, or Downloads, the repo
+is usually not broken. The app process has lost macOS privacy access to that
+protected folder.
+
+Preferred fix for long-running/background projects: move the repo outside the
+protected folder, for example:
+
+```bash
+mkdir -p ~/code
+mv ~/Desktop/"Projects"/Projects/0003-my-project ~/code/my-project
+```
+
+Then reopen the agent in `/Users/you/code/my-project`.
+
+Short-term recovery: run `comms` from a readable directory and point it at the
+repo explicitly:
+
+```bash
+cd /tmp
+COMMS_ACTOR=claude-dev comms --repo /Users/you/code/my-project status
+
+export COMMS_REPO=/Users/you/code/my-project
+COMMS_ACTOR=claude-dev comms session join "my-project" --label "Claude Dev"
+```
+
+`--repo` bypasses cwd and git discovery by walking the supplied path upward to
+`.git`. If the app has no read access to that absolute path at all, grant Full
+Disk Access to the app and restart it, or move the repo to `~/code`.
+
 Claims older than 90 minutes are highlighted as stale. That default fits
 short-lived agent work: enough time for a real debugging pass, but short
 enough to flag abandoned sessions quickly. To use a different threshold:

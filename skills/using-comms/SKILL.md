@@ -58,6 +58,27 @@ The user may run `comms ui --all` for a read-only dashboard across every repo
 that has a comms log. Do not use `--all` for mutations; start/join/end named
 sessions from the repo-specific CLI/UI so events land in the correct repo log.
 
+## Repo Path Recovery
+
+If `comms`, `git`, or Node fails with `repo: getwd: operation not permitted`,
+`uv_cwd operation not permitted`, or `fatal: Unable to read current working
+directory`, do not assume the repo is broken. On macOS this usually means the
+desktop app process lost privacy access to a protected Desktop/Documents/
+Downloads path.
+
+Use one of these recovery patterns:
+
+```bash
+cd /tmp
+COMMS_ACTOR=claude-dev comms --repo /absolute/repo/path status
+
+export COMMS_REPO=/absolute/repo/path
+COMMS_ACTOR=claude-dev comms session join "session name" --label "Claude Dev"
+```
+
+Prefer moving long-running/background-service repos to `~/code/<project>` so
+agents and launchd jobs avoid macOS protected-folder access problems.
+
 Agents still use the CLI for coordination. Do not click UI controls or call the
 UI mutation endpoints unless the user explicitly asks. If asked to inspect the
 UI backend, use:

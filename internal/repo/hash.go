@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -63,13 +64,63 @@ func Discover(start, gitTopLevelOverride string) (Identity, error) {
 	}, nil
 }
 
+// DiscoverExplicit resolves a user-supplied repo path without depending on the
+// process current working directory or spawning git. This is useful on macOS
+// when a desktop app process loses TCC access to its cwd but can still read an
+// absolute repo path.
+func DiscoverExplicit(path string) (Identity, error) {
+	root, err := findGitRootByWalking(path)
+	if err != nil {
+		return Identity{}, err
+	}
+	return Discover(root, root)
+}
+
 // DiscoverFromCWD is a convenience wrapper.
 func DiscoverFromCWD(gitTopLevelOverride string) (Identity, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
-		return Identity{}, fmt.Errorf("repo: getwd: %w", err)
+		return Identity{}, fmt.Errorf("repo: getwd: %w%s", err, cwdRecoveryHint())
 	}
 	return Discover(cwd, gitTopLevelOverride)
+}
+
+func findGitRootByWalking(path string) (string, error) {
+	if strings.TrimSpace(path) == "" {
+		return "", fmt.Errorf("repo: --repo path is required")
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("repo: abs %q: %w", path, err)
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return "", fmt.Errorf("repo: stat %q: %w", abs, err)
+	}
+	dir := abs
+	if !info.IsDir() {
+		dir = filepath.Dir(abs)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			return dir, nil
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("repo: stat %q: %w", filepath.Join(dir, ".git"), err)
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return "", fmt.Errorf("repo: cannot find git root from explicit path %q", abs)
+}
+
+func cwdRecoveryHint() string {
+	if runtime.GOOS != "darwin" {
+		return " (try `comms --repo /absolute/repo/path ...` from a readable directory)"
+	}
+	return " (on macOS this can happen when a desktop app loses Privacy & Security access to Desktop, Documents, or Downloads; try `comms --repo /absolute/repo/path ...` from a readable directory, move the repo outside protected folders such as ~/code, or grant Full Disk Access and restart the app)"
 }
 
 func runGit(dir string, args ...string) (string, error) {
