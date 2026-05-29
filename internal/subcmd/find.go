@@ -77,19 +77,21 @@ func runFind(category, summary string, refs []string, priority bool) error {
 	}
 
 	now := time.Now().UTC()
+	data := map[string]interface{}{
+		"category": category,
+		"summary":  summary,
+		"refs":     refsForJSON,
+	}
+	if priority {
+		data["priority"] = true
+	}
+	stampActiveCommsSession(rt, data)
 	ev := event.Event{
 		TS:    now,
 		ID:    event.NewID(now),
 		Actor: rt.Actor,
 		Type:  event.TypeFinding,
-		Data: map[string]interface{}{
-			"category": category,
-			"summary":  summary,
-			"refs":     refsForJSON,
-		},
-	}
-	if priority {
-		ev.Data["priority"] = true
+		Data:  data,
 	}
 	if err := rt.Append(ev); err != nil {
 		return err

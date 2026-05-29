@@ -29,18 +29,26 @@ Do not use generic names like `eli`, `claude`, `codex`, `agent`, or `user`.
 ## Session Start
 
 ```bash
-COMMS_ACTOR=claude-dev comms hello --label "Claude Dev"
+COMMS_ACTOR=claude-dev comms session start "ad-dashboard tracking fixes" --label "Claude Dev"
+COMMS_ACTOR=codex-dev comms session join "ad-dashboard tracking fixes" --label "Codex Dev"
 COMMS_ACTOR=claude-dev comms status
 ```
 
-Mention the chosen actor in your reply so the user can see it.
+Use `session start "<name>"` when the user asks you to create a named
+communication session. Use `session join "<name>"` when the user says another
+agent already created one. After joining, claims, notes, findings, and releases
+are automatically tagged with that named session so the UI can show separate
+logs for simultaneous project windows.
+
+Mention the chosen actor and joined session name in your reply so the user can
+see both.
 
 ## Operator UI
 
-The user may run `COMMS_ACTOR=human-eli comms ui` to watch the whole project
-coordination window. The UI has **Start Comms Session** and **End Comms
-Session** controls and a **Session Event Log** selector for current vs archived
-session logs.
+The user may run `COMMS_ACTOR=human-eli comms ui` to watch the repo. The UI has
+**Start Comms Session** and **End Comms Session** controls for named sessions,
+active named-session cards, and a **Session Event Log** selector for active vs
+archived session logs.
 
 Agents still use the CLI for coordination. Do not click UI controls or call the
 UI mutation endpoints unless the user explicitly asks. If asked to inspect the
@@ -50,10 +58,17 @@ UI backend, use:
 curl -fsS http://127.0.0.1:7878/api/status
 ```
 
-The backend advertises `actions`, including `release_claim`,
-`retire_session_actor`, and `transfer_leader`. It also returns
-`current_session.events` and `comms_sessions[].events`; those are filtered
+The backend advertises `actions`, including `start_comms_session`,
+`end_comms_session`, `release_claim`, `retire_session_actor`, and
+`transfer_leader`. It also returns `active_comms_sessions[].events`,
+`current_session.events`, and `comms_sessions[].events`; those are filtered
 views over the append-only JSONL log.
+
+To end one named session from the CLI:
+
+```bash
+COMMS_ACTOR=claude-dev comms session end "ad-dashboard tracking fixes" --reason "project window done"
+```
 
 ## Session Roster Admin
 

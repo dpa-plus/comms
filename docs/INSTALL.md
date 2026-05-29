@@ -85,26 +85,38 @@ comms ui --stale-after 45m
 ```
 
 The UI is intentionally not a replacement for the CLI. Agents still use
-`comms hello`, `claim`, `release`, `note`, `find`, and `doc` themselves. The
-UI is for watching the repo, starting a clean project-level communication
-window, and ending that whole window when you are done with it.
+`comms session start`, `comms session join`, `claim`, `release`, `note`,
+`find`, and `doc` themselves. The UI is for watching the repo, starting named
+communication windows, switching between their logs, and ending the selected
+named session when you are done with it.
 
 If you start the UI with `COMMS_ACTOR` set, the header includes **Start Comms
-Session** and **End Comms Session** buttons. **Start Comms Session** appends a
-normal `hello` event with `comms_session_start=true`; this is useful when you
-want a clean archive boundary before asking Claude/Codex to join. You can also
-skip the button and let the first agent's `comms hello` implicitly start a
-session.
+Session** and **End Comms Session** buttons. **Start Comms Session** asks for a
+name and appends a normal `hello` event with `comms_session_start=true`,
+`comms_session_id`, and `comms_session_name`. Agents can join the same named
+session with:
 
-Use **End Comms Session** when the project work window is over. It appends one
-normal `release` event with `comms_session_end=true`, releases every active
-claim, clears all active sessions, and adds a **Comms Session Archive** summary
-for later analysis. It does not delete old JSONL rows.
+```bash
+COMMS_ACTOR=claude-dev comms session join "dashboard fixes" --label "Claude Dev"
+COMMS_ACTOR=codex-dev comms session join "dashboard fixes" --label "Codex Dev"
+```
 
-The archive boundary means everything from the previous
-`comms_session_end=true` event up to the new one belongs to one completed
-communication session. Later analysis can read the JSONL log directly and
-reconstruct the full history, while the UI shows the compact counts: actors,
+An agent can also create the named session directly:
+
+```bash
+COMMS_ACTOR=claude-dev comms session start "dashboard fixes" --label "Claude Dev"
+```
+
+Use **End Comms Session** when the selected named work window is over. It
+appends one normal `release` event with `comms_session_end=true`, releases
+claims tagged to that named session, clears actors joined to that named session,
+and adds a **Comms Session Archive** summary for later analysis. It does not
+delete old JSONL rows.
+
+Every named session keeps its own `comms_session_id` in the events it owns, so
+multiple sessions can be active in the same repo without their claims, notes,
+findings, or event logs mixing. Later analysis can read the JSONL log directly
+and reconstruct the full history, while the UI shows compact counts: actors,
 events, claims, findings, notes, released refs, end time, and reason.
 
 The **Session Event Log** selector shows logs per communication session. It is

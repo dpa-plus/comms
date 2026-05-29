@@ -95,6 +95,7 @@ func runClaim(scopeRaw, intent, stealID, stealReason string) error {
 	// Build the claim event.
 	now := time.Now().UTC()
 	data := map[string]interface{}{"intent": intent}
+	stampActiveCommsSession(rt, data)
 	if displaceID != "" {
 		data["steals"] = displaceID
 		data["steal_reason"] = stealReason
