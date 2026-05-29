@@ -52,6 +52,56 @@ func TestRunSessionRetireRemovesActorAndReleasesClaims(t *testing.T) {
 	}
 }
 
+func TestRunSessionRetireStampsTargetCommsSession(t *testing.T) {
+	repo := setupUITestRepo(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("COMMS_ACTOR", "human-eli")
+	t.Setenv("USER", "eli")
+	t.Chdir(repo)
+
+	rt, err := Open(OpenOpts{Mutating: true})
+	if err != nil {
+		t.Fatalf("open runtime: %v", err)
+	}
+	claimID := "01JX2Q3Y7W5B6N9P0R1S2T3R3A"
+	setup := []event.Event{
+		{TS: time.Now().Add(-10 * time.Minute).UTC(), ID: "01JX2Q3Y7W5B6N9P0R1S2T3R4A", Actor: "claude-old", Type: event.TypeHello, Data: map[string]interface{}{
+			"base_name":          "claude",
+			"comms_session_id":   "sess-retire",
+			"comms_session_name": "tracking cleanup",
+		}},
+		{TS: time.Now().Add(-9 * time.Minute).UTC(), ID: claimID, Actor: "claude-old", Type: event.TypeClaim, Scope: []string{"src/tracking.ts"}, Data: map[string]interface{}{
+			"intent":             "stale work",
+			"comms_session_id":   "sess-retire",
+			"comms_session_name": "tracking cleanup",
+		}},
+	}
+	for _, ev := range setup {
+		if err := rt.Append(ev); err != nil {
+			t.Fatalf("append setup: %v", err)
+		}
+	}
+	if err := rt.Close(); err != nil {
+		t.Fatalf("close runtime: %v", err)
+	}
+
+	if err := runSessionRetire("claude-old", "renamed to claude-dev"); err != nil {
+		t.Fatalf("retire: %v", err)
+	}
+	rt, err = Open(OpenOpts{Mutating: false})
+	if err != nil {
+		t.Fatalf("reopen runtime: %v", err)
+	}
+	defer rt.Close()
+	last := rt.Events[len(rt.Events)-1]
+	if got := last.Data["comms_session_id"]; got != "sess-retire" {
+		t.Fatalf("retire session id = %v, want sess-retire; event=%+v", got, last)
+	}
+	if got := last.Data["comms_session_name"]; got != "tracking cleanup" {
+		t.Fatalf("retire session name = %v, want tracking cleanup; event=%+v", got, last)
+	}
+}
+
 func TestRunSessionRetireReleasesClaimsWithoutActiveSession(t *testing.T) {
 	repo := setupUITestRepo(t)
 	t.Setenv("HOME", t.TempDir())
