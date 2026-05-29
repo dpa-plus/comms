@@ -68,6 +68,7 @@ func runHello(args []string, label string) error {
 	if label != "" {
 		ev.Data["label"] = label
 	}
+	stampActiveCommsSession(rt, ev.Data)
 	if err := rt.Append(ev); err != nil {
 		return err
 	}

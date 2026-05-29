@@ -241,8 +241,8 @@ func TestUIServeStartCommsSessionCreatesCurrentSession(t *testing.T) {
 	if len(snap.Events) != 1 || snap.Events[0].Summary != "started comms session: new project window" {
 		t.Fatalf("bad current event log: %+v", snap.Events)
 	}
-	if got := actionByIDForTest(snap.Actions, "start_comms_session"); got.Enabled {
-		t.Fatalf("start should be disabled while session active: %+v", got)
+	if got := actionByIDForTest(snap.Actions, "start_comms_session"); !got.Enabled {
+		t.Fatalf("start should stay enabled so another named session can be created: %+v", got)
 	}
 	if got := actionByIDForTest(snap.Actions, "end_comms_session"); !got.Enabled {
 		t.Fatalf("end should be enabled while session active: %+v", got)
@@ -420,7 +420,7 @@ func TestUIServeTransferLeader(t *testing.T) {
 	}
 }
 
-func TestUIStartCommsSessionRejectsWhenActive(t *testing.T) {
+func TestUIStartCommsSessionAllowsAnotherNamedSessionWhenLegacyEventsExist(t *testing.T) {
 	repo := setupUITestRepo(t)
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("COMMS_ACTOR", "human-eli")
@@ -449,8 +449,8 @@ func TestUIStartCommsSessionRejectsWhenActive(t *testing.T) {
 	rec := httptest.NewRecorder()
 	uiServer{staleAfter: 90 * time.Minute}.serveStartCommsSession(rec, req)
 
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want 409, body = %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body = %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -488,16 +488,43 @@ func TestBuildCommsSessionViewsSplitsLogsPerSession(t *testing.T) {
 	firstEnd := event.Event{TS: now.Add(time.Second), ID: "01JX2Q3Y7W5B6N9P0R1S2T3U1B", Actor: "human-eli", Type: event.TypeRelease, Data: map[string]interface{}{"comms_session_end": true, "reason": "done"}}
 	secondHello := event.Event{TS: now.Add(2 * time.Second), ID: "01JX2Q3Y7W5B6N9P0R1S2T3U1C", Actor: "codex-1", Type: event.TypeHello, Data: map[string]interface{}{"comms_session_start": true, "reason": "next"}}
 
-	current, archived := buildCommsSessionViews([]event.Event{secondHello, firstEnd, firstHello})
+	active, archived := buildCommsSessionViews([]event.Event{secondHello, firstEnd, firstHello})
 
-	if current == nil || current.EventCount != 1 || current.Events[0].Actor != "codex-1" {
-		t.Fatalf("bad current session: %+v", current)
+	if len(active) != 1 || active[0].EventCount != 1 || active[0].Events[0].Actor != "codex-1" {
+		t.Fatalf("bad current session: %+v", active)
 	}
 	if len(archived) != 1 || archived[0].EventCount != 2 {
 		t.Fatalf("bad archived sessions: %+v", archived)
 	}
 	if archived[0].Events[0].Type != event.TypeRelease || archived[0].Events[1].Type != event.TypeHello {
 		t.Fatalf("archive events should be newest first and scoped to first session: %+v", archived[0].Events)
+	}
+}
+
+func TestBuildCommsSessionViewsGroupsNamedSessionsIndependently(t *testing.T) {
+	now := time.Now().UTC()
+	aStart := event.Event{TS: now, ID: "01JX2Q3Y7W5B6N9P0R1S2T3V1A", Actor: "claude-dev", Type: event.TypeHello, Data: map[string]interface{}{
+		"comms_session_start": true, "comms_session_id": "sess-a", "comms_session_name": "dashboard fixes",
+	}}
+	bStart := event.Event{TS: now.Add(time.Second), ID: "01JX2Q3Y7W5B6N9P0R1S2T3V1B", Actor: "codex-dev", Type: event.TypeHello, Data: map[string]interface{}{
+		"comms_session_start": true, "comms_session_id": "sess-b", "comms_session_name": "billing fixes",
+	}}
+	aClaim := event.Event{TS: now.Add(2 * time.Second), ID: "01JX2Q3Y7W5B6N9P0R1S2T3V1C", Actor: "claude-dev", Type: event.TypeClaim, Scope: []string{"src/a.ts"}, Data: map[string]interface{}{
+		"intent": "work a", "comms_session_id": "sess-a", "comms_session_name": "dashboard fixes",
+	}}
+	bClaim := event.Event{TS: now.Add(3 * time.Second), ID: "01JX2Q3Y7W5B6N9P0R1S2T3V1D", Actor: "codex-dev", Type: event.TypeClaim, Scope: []string{"src/b.ts"}, Data: map[string]interface{}{
+		"intent": "work b", "comms_session_id": "sess-b", "comms_session_name": "billing fixes",
+	}}
+	aEnd := event.Event{TS: now.Add(4 * time.Second), ID: "01JX2Q3Y7W5B6N9P0R1S2T3V1E", Actor: "human-eli", Type: event.TypeRelease, Data: map[string]interface{}{
+		"comms_session_end": true, "comms_session_id": "sess-a", "comms_session_name": "dashboard fixes", "refs": []interface{}{aClaim.ID}, "reason": "done",
+	}}
+
+	active, archived := buildCommsSessionViews([]event.Event{aStart, bStart, aClaim, bClaim, aEnd})
+	if len(active) != 1 || active[0].ID != "sess-b" || active[0].Name != "billing fixes" || active[0].ClaimCount != 1 {
+		t.Fatalf("bad active named session: %+v", active)
+	}
+	if len(archived) != 1 || archived[0].ID != "sess-a" || archived[0].Name != "dashboard fixes" || archived[0].ReleasedRefs != 1 {
+		t.Fatalf("bad archived named session: %+v", archived)
 	}
 }
 

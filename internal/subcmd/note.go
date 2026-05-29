@@ -51,6 +51,7 @@ func runNote(body string, priority bool) error {
 	if priority {
 		data["priority"] = true
 	}
+	stampActiveCommsSession(rt, data)
 	ev := event.Event{
 		TS:    now,
 		ID:    event.NewID(now),

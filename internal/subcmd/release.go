@@ -111,6 +111,12 @@ func appendReleaseEvent(rt *Runtime, targets []*state.Claim, reason, result stri
 		} else if reason != "" {
 			data["reason"] = reason
 		}
+		if c.SessionID != "" {
+			data["comms_session_id"] = c.SessionID
+			data["comms_session_name"] = c.SessionName
+		} else {
+			stampActiveCommsSession(rt, data)
+		}
 
 		ev := event.Event{
 			TS:    now,

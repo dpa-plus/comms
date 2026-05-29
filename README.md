@@ -6,7 +6,7 @@ Lightweight multi-agent coordination CLI: per-session claims, JSONL event log, `
 - **`mcp-agent-mail`** (heavy MCP server, severity ladders, 7 identities) — too much ceremony; agents kept forgetting protocol steps.
 - **A 1632-line `COMMS.md` append-only markdown** — worked OK but grew unbounded, no targeted reads, agents had to remember to update it, iCloud sync forked the file.
 
-`comms` is the small version. 12 commands, 5 event types, JSONL log + `flock`, a 80-line Claude Code skill, a 3-line `AGENTS.md` block for Codex.
+`comms` is the small version. A compact CLI, 5 event types, JSONL log + `flock`, and opt-in Claude/Codex skills.
 
 The first active session is shown as the repo's lightweight **leader**. The
 leader has one extra privilege: posting `--priority` notes/findings that pin
@@ -20,6 +20,7 @@ go install github.com/dpa-plus/comms/cmd/comms@latest
 
 # Manual / desktop-app use: prefix commands with a concrete actor.
 COMMS_ACTOR=codex-dev comms hello --label "Codex Dev"
+COMMS_ACTOR=codex-dev comms session start "dashboard fixes" --label "Codex Dev"
 COMMS_ACTOR=codex-dev comms status
 COMMS_ACTOR=codex-dev comms claim "src/foo.ts" --intent "fix bug"
 COMMS_ACTOR=codex-dev comms note --priority "Everyone should know: stop editing aggregation until the current claim clears."
@@ -32,6 +33,9 @@ See `docs/INSTALL.md` for manual and optional automated setup,
 
 ```
 comms hello [<name>] [--label "Claude Dev"]   # session entry + friendly UI label
+comms session start "<name>" [--label "..."]  # create + join a named comms session
+comms session join "<name>" [--label "..."]   # join an existing named comms session
+comms session end "<name>" [--reason "..."]   # archive one named session + release its claims
 comms claim "<scope>" --intent "<text>" [--steal <id> --reason "<text>"]
 comms release [<id>|--latest|--all-mine] [--result "<text>"]
 comms session retire <actor> [--reason "..."] # remove actor from active roster; releases its claims
@@ -51,12 +55,12 @@ comms ui [--demo] [--stale-after 90m] [--addr 127.0.0.1:7878] # local dashboard
 ```
 
 The dashboard is for watching repo state. Agents still perform normal work via
-the CLI/skill. When started with `COMMS_ACTOR`, the UI can start and end the
-whole comms session for the project. Starting appends a `hello` boundary event;
-ending releases every active claim, clears active sessions, and appends one
-archive-boundary event to the JSONL log. The UI shows per-session logs by
-slicing the append-only JSONL into current and archived comms sessions. Demo
-mode remains read-only.
+the CLI/skill. When started with `COMMS_ACTOR`, the UI can start multiple named
+sessions, show each session's actors/claims/events separately, and end one
+selected named session when that project window is done. Events stay in the
+same append-only per-repo JSONL file, but every joined actor's claims, notes,
+findings, and releases carry `comms_session_id`/`comms_session_name` metadata so
+session data does not mix in the UI or API. Demo mode remains read-only.
 
 Use stable, readable actors for desktop app work, for example `claude-dev` and
 `codex-dev`, plus `--label "Claude Dev"` / `--label "Codex Dev"` for UI display.

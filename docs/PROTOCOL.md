@@ -31,16 +31,21 @@ Common fields:
 Best-effort metadata; all fields may be empty. `label` is a friendly display
 name for status/UI only. The stable identity remains `actor`.
 
-The UI's **Start Comms Session** button appends a normal `hello` event with
-extra boundary metadata:
+Named comms sessions are created/joined by appending normal `hello` events with
+extra metadata:
 
 ```json
-{"data": {"base_name": "human", "hostname": "MacBook-Pro.local", "comms_session_start": true, "reason": "project work session started"}}
+{"data": {"base_name": "claude", "label": "Claude Dev", "hostname": "MacBook-Pro.local", "comms_session_start": true, "comms_session_id": "01HZ...", "comms_session_name": "dashboard fixes"}}
 ```
 
-Agents can also implicitly start a comms session by running `comms hello`; the
-UI treats all events after the previous `comms_session_end=true` release as the
-current session.
+```json
+{"data": {"base_name": "codex", "label": "Codex Dev", "hostname": "MacBook-Pro.local", "comms_session_join": true, "comms_session_id": "01HZ...", "comms_session_name": "dashboard fixes"}}
+```
+
+After an actor joins a named session, that actor's `claim`, `release`, `note`,
+and `finding` events are stamped with the same `comms_session_id` and
+`comms_session_name`. Untagged legacy events are still supported and are shown
+as a legacy/current window by the UI.
 
 ### `claim`
 ```json
@@ -81,23 +86,26 @@ Arbitrated release (a different actor closing someone else's claim) MUST include
 ```
 
 The UI's **End Comms Session** button appends a normal `release` event with
-session-boundary metadata:
+session-boundary metadata. For a named session it releases only claims tagged
+with that `comms_session_id` and removes only actors currently joined to it:
 
 ```json
 {
   "data": {
-    "refs": ["<all-active-claim-ids>"],
+    "refs": ["<claim-id-in-that-session>"],
     "comms_session_end": true,
+    "comms_session_id": "01HZ...",
+    "comms_session_name": "dashboard fixes",
     "ended_actors": ["claude-3a1f", "codex-9b2c"],
     "reason": "project work session done"
   }
 }
 ```
 
-The reducer treats this as a project-level communication-session boundary:
-all active claims are released, active sessions are cleared, and the UI archives
-the log window from the previous `comms_session_end=true` event through this
-event. The physical `log.jsonl` remains one append-only file.
+For old untagged sessions, `comms_session_end=true` without a
+`comms_session_id` keeps the legacy behavior: all active claims are released and
+all active sessions are cleared. The physical `log.jsonl` remains one
+append-only file either way.
 
 Session roster admin is also encoded as normal `release` events. Retiring an
 actor removes it from active sessions and releases any claim refs listed, but
@@ -205,8 +213,8 @@ Every mutating command acquires an exclusive `flock(2)` on `<logdir>/.lock` befo
 | Endpoint                   | Method | Purpose                                                           |
 | -------------------------- | ------ | ----------------------------------------------------------------- |
 | `/api/status`              | GET    | Current project snapshot, active state, archives, per-session logs, and action metadata. |
-| `/api/comms-session/start` | POST   | Append a `hello` event with `comms_session_start=true`. Requires `COMMS_ACTOR`. |
-| `/api/comms-session/end`   | POST   | Append a `release` event with `comms_session_end=true` and all active claim refs. Requires `COMMS_ACTOR`. |
+| `/api/comms-session/start` | POST   | Body `name`; append a `hello` event with `comms_session_start=true` and a new named session ID. Requires `COMMS_ACTOR`. |
+| `/api/comms-session/end`   | POST   | Body `session_id` or `name`; append a `release` event with `comms_session_end=true` for that named session. Requires `COMMS_ACTOR`. |
 | `/api/claim/release`       | POST   | Append a normal `release` event for one active claim. Body: `claim_id`, optional `result`/`reason`. Requires `COMMS_ACTOR`. |
 | `/api/session/retire`      | POST   | Append a `release` event with `session_retire=true`; releases that actor's claims. Requires `COMMS_ACTOR`. |
 | `/api/session/lead`        | POST   | Append a `release` event with `leader_transfer=true`. Requires `COMMS_ACTOR`. |
@@ -228,8 +236,9 @@ what the backend currently allows:
 ```
 
 Per-session logs are returned as `current_session.events` and
-`comms_sessions[].events`; they are filtered views over the same append-only
-JSONL log, not separate log files.
+`active_comms_sessions[].events` for open named sessions, plus
+`comms_sessions[].events` for archived named or legacy sessions. They are
+filtered views over the same append-only JSONL log, not separate log files.
 
 `/api/status` also includes `lessons`, the list of global lesson slugs loaded
 from the user's comms data directory.

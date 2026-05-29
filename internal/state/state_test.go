@@ -178,6 +178,52 @@ func TestFoldCommsSessionEndArchivesWindowAndReleasesAllClaims(t *testing.T) {
 	}
 }
 
+func TestFoldNamedCommsSessionEndOnlyClearsMatchingSession(t *testing.T) {
+	now := time.Now().UTC()
+	aHello := mkEvent(t, now, "claude-dev", event.TypeHello, nil, map[string]interface{}{
+		"comms_session_id":   "sess-a",
+		"comms_session_name": "dashboard fixes",
+	})
+	aClaim := mkEvent(t, now.Add(time.Second), "claude-dev", event.TypeClaim, []string{"src/a.ts"}, map[string]interface{}{
+		"intent":             "work a",
+		"comms_session_id":   "sess-a",
+		"comms_session_name": "dashboard fixes",
+	})
+	bHello := mkEvent(t, now.Add(2*time.Second), "codex-dev", event.TypeHello, nil, map[string]interface{}{
+		"comms_session_id":   "sess-b",
+		"comms_session_name": "billing fixes",
+	})
+	bClaim := mkEvent(t, now.Add(3*time.Second), "codex-dev", event.TypeClaim, []string{"src/b.ts"}, map[string]interface{}{
+		"intent":             "work b",
+		"comms_session_id":   "sess-b",
+		"comms_session_name": "billing fixes",
+	})
+	endA := mkEvent(t, now.Add(4*time.Second), "human-eli", event.TypeRelease, nil, map[string]interface{}{
+		"refs":               []interface{}{aClaim.ID},
+		"comms_session_end":  true,
+		"comms_session_id":   "sess-a",
+		"comms_session_name": "dashboard fixes",
+		"reason":             "done",
+	})
+
+	s := Fold([]event.Event{aHello, aClaim, bHello, bClaim, endA})
+	if s.Claims[aClaim.ID] != nil {
+		t.Fatalf("ended named session claim should be released")
+	}
+	if s.Claims[bClaim.ID] == nil {
+		t.Fatalf("other named session claim should remain active")
+	}
+	if s.Sessions["claude-dev"] != nil {
+		t.Fatalf("ended named session actor should be removed")
+	}
+	if s.Sessions["codex-dev"] == nil {
+		t.Fatalf("other named session actor should remain active")
+	}
+	if len(s.EndedCommsSessions) != 1 || s.EndedCommsSessions[0].SessionID != "sess-a" || s.EndedCommsSessions[0].Name != "dashboard fixes" {
+		t.Fatalf("bad named archive marker: %+v", s.EndedCommsSessions)
+	}
+}
+
 func TestFoldHelloStartsNewWindowAfterCommsSessionEnd(t *testing.T) {
 	now := time.Now().UTC()
 	end := mkEvent(t, now, "human-eli", event.TypeRelease, nil, map[string]interface{}{

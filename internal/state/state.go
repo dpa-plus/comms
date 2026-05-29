@@ -35,11 +35,13 @@ type State struct {
 
 // Claim is an active exclusive claim on a scope.
 type Claim struct {
-	ID     string
-	TS     time.Time
-	Actor  string
-	Scope  overlap.Scope
-	Intent string
+	ID          string
+	TS          time.Time
+	Actor       string
+	Scope       overlap.Scope
+	Intent      string
+	SessionID   string
+	SessionName string
 
 	// If non-empty, this claim displaced ForcedBy (an arbitrated steal).
 	StolenFromID string
@@ -49,18 +51,22 @@ type Claim struct {
 
 // Session is the most-recent hello per actor.
 type Session struct {
-	Actor    string
-	Label    string
-	TS       time.Time
-	BaseName string
-	Hostname string
-	TTY      string
-	Leader   bool
+	Actor       string
+	Label       string
+	TS          time.Time
+	BaseName    string
+	Hostname    string
+	TTY         string
+	Leader      bool
+	SessionID   string
+	SessionName string
 }
 
 // EndedCommsSession is an archived project-level coordination window.
 type EndedCommsSession struct {
 	ID           string
+	SessionID    string
+	Name         string
 	StartedAt    time.Time
 	EndedAt      time.Time
 	EndedBy      string
@@ -75,13 +81,15 @@ type EndedCommsSession struct {
 
 // Finding is a `comms find` event.
 type Finding struct {
-	ID       string
-	TS       time.Time
-	Actor    string
-	Category string
-	Summary  string
-	Priority bool
-	Refs     []Ref
+	ID          string
+	TS          time.Time
+	Actor       string
+	Category    string
+	Summary     string
+	Priority    bool
+	Refs        []Ref
+	SessionID   string
+	SessionName string
 }
 
 // Ref is a `--ref kind:value` pair attached to a finding.
@@ -92,11 +100,13 @@ type Ref struct {
 
 // Note is a short FYI.
 type Note struct {
-	ID       string
-	TS       time.Time
-	Actor    string
-	Body     string
-	Priority bool
+	ID          string
+	TS          time.Time
+	Actor       string
+	Body        string
+	Priority    bool
+	SessionID   string
+	SessionName string
 }
 
 // Fold replays events in chronological order to produce the current state.
@@ -136,13 +146,15 @@ func Fold(events []event.Event) *State {
 		switch ev.Type {
 		case event.TypeHello:
 			s.Sessions[ev.Actor] = &Session{
-				Actor:    ev.Actor,
-				Label:    stringOf(ev.Data, "label"),
-				TS:       ev.TS,
-				BaseName: stringOf(ev.Data, "base_name"),
-				Hostname: stringOf(ev.Data, "hostname"),
-				TTY:      stringOf(ev.Data, "tty"),
-				Leader:   boolOf(ev.Data, "leader"),
+				Actor:       ev.Actor,
+				Label:       stringOf(ev.Data, "label"),
+				TS:          ev.TS,
+				BaseName:    stringOf(ev.Data, "base_name"),
+				Hostname:    stringOf(ev.Data, "hostname"),
+				TTY:         stringOf(ev.Data, "tty"),
+				Leader:      boolOf(ev.Data, "leader"),
+				SessionID:   stringOf(ev.Data, "comms_session_id"),
+				SessionName: stringOf(ev.Data, "comms_session_name"),
 			}
 		case event.TypeClaim:
 			c, err := claimFromEvent(ev)
@@ -179,8 +191,11 @@ func Fold(events []event.Event) *State {
 				if reason == "" {
 					reason = stringOf(ev.Data, "result")
 				}
+				sessionID := stringOf(ev.Data, "comms_session_id")
 				s.EndedCommsSessions = append(s.EndedCommsSessions, &EndedCommsSession{
 					ID:           ev.ID,
+					SessionID:    sessionID,
+					Name:         stringOf(ev.Data, "comms_session_name"),
 					StartedAt:    windowStart,
 					EndedAt:      ev.TS,
 					EndedBy:      ev.Actor,
@@ -192,29 +207,46 @@ func Fold(events []event.Event) *State {
 					FindingCount: windowFindings,
 					NoteCount:    windowNotes,
 				})
-				s.Claims = make(map[string]*Claim)
-				s.Sessions = make(map[string]*Session)
+				if sessionID == "" {
+					s.Claims = make(map[string]*Claim)
+					s.Sessions = make(map[string]*Session)
+				} else {
+					for id, claim := range s.Claims {
+						if claim.SessionID == sessionID {
+							delete(s.Claims, id)
+						}
+					}
+					for actor, sess := range s.Sessions {
+						if sess.SessionID == sessionID {
+							delete(s.Sessions, actor)
+						}
+					}
+				}
 				windowStart = time.Time{}
 				windowActors = map[string]bool{}
 				windowEvents, windowClaims, windowFindings, windowNotes = 0, 0, 0, 0
 			}
 		case event.TypeFinding:
 			s.Findings = append(s.Findings, &Finding{
-				ID:       ev.ID,
-				TS:       ev.TS,
-				Actor:    ev.Actor,
-				Category: stringOf(ev.Data, "category"),
-				Summary:  stringOf(ev.Data, "summary"),
-				Priority: boolOf(ev.Data, "priority"),
-				Refs:     parseRefs(ev.Data),
+				ID:          ev.ID,
+				TS:          ev.TS,
+				Actor:       ev.Actor,
+				Category:    stringOf(ev.Data, "category"),
+				Summary:     stringOf(ev.Data, "summary"),
+				Priority:    boolOf(ev.Data, "priority"),
+				Refs:        parseRefs(ev.Data),
+				SessionID:   stringOf(ev.Data, "comms_session_id"),
+				SessionName: stringOf(ev.Data, "comms_session_name"),
 			})
 		case event.TypeNote:
 			s.Notes = append(s.Notes, &Note{
-				ID:       ev.ID,
-				TS:       ev.TS,
-				Actor:    ev.Actor,
-				Body:     stringOf(ev.Data, "body"),
-				Priority: boolOf(ev.Data, "priority"),
+				ID:          ev.ID,
+				TS:          ev.TS,
+				Actor:       ev.Actor,
+				Body:        stringOf(ev.Data, "body"),
+				Priority:    boolOf(ev.Data, "priority"),
+				SessionID:   stringOf(ev.Data, "comms_session_id"),
+				SessionName: stringOf(ev.Data, "comms_session_name"),
 			})
 		}
 	}
@@ -246,6 +278,8 @@ func claimFromEvent(ev event.Event) (*Claim, error) {
 		Actor:        ev.Actor,
 		Scope:        sc,
 		Intent:       stringOf(ev.Data, "intent"),
+		SessionID:    stringOf(ev.Data, "comms_session_id"),
+		SessionName:  stringOf(ev.Data, "comms_session_name"),
 		StolenFromID: stringOf(ev.Data, "steals"),
 		StealReason:  stringOf(ev.Data, "steal_reason"),
 		Arbitrator:   stringOf(ev.Data, "arbitrator"),

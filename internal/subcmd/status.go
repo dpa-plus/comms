@@ -80,8 +80,12 @@ func emitStatusHuman(rt *Runtime, cutoff time.Time, since string) {
 			if s.Label != "" {
 				label = fmt.Sprintf(" (%s)", s.Label)
 			}
-			fmt.Printf("  @%-14s%s hello'd %s   %d claim%s  %d finding%s%s\n",
-				s.Actor, label, s.TS.Local().Format("15:04"), cClaims, pluralS(cClaims), cFindings, pluralS(cFindings), role)
+			sessionLabel := ""
+			if s.SessionName != "" {
+				sessionLabel = fmt.Sprintf("  session=%q", s.SessionName)
+			}
+			fmt.Printf("  @%-14s%s hello'd %s   %d claim%s  %d finding%s%s%s\n",
+				s.Actor, label, s.TS.Local().Format("15:04"), cClaims, pluralS(cClaims), cFindings, pluralS(cFindings), role, sessionLabel)
 		}
 	}
 
@@ -91,8 +95,12 @@ func emitStatusHuman(rt *Runtime, cutoff time.Time, since string) {
 		fmt.Println("  (none)")
 	} else {
 		for _, c := range claims {
-			fmt.Printf("  @%-14s %s   %q   (since %s)\n",
-				c.Actor, c.Scope.String(), c.Intent, c.TS.Local().Format("15:04"))
+			sessionLabel := ""
+			if c.SessionName != "" {
+				sessionLabel = fmt.Sprintf("   session=%q", c.SessionName)
+			}
+			fmt.Printf("  @%-14s %s   %q   (since %s)%s\n",
+				c.Actor, c.Scope.String(), c.Intent, c.TS.Local().Format("15:04"), sessionLabel)
 		}
 	}
 
@@ -148,36 +156,44 @@ type statusJSONShape struct {
 }
 
 type statusSession struct {
-	Actor  string    `json:"actor"`
-	Label  string    `json:"label,omitempty"`
-	TS     time.Time `json:"ts"`
-	Leader bool      `json:"leader"`
+	Actor       string    `json:"actor"`
+	Label       string    `json:"label,omitempty"`
+	TS          time.Time `json:"ts"`
+	Leader      bool      `json:"leader"`
+	SessionID   string    `json:"session_id,omitempty"`
+	SessionName string    `json:"session_name,omitempty"`
 }
 
 type statusClaim struct {
-	ID      string    `json:"id"`
-	Actor   string    `json:"actor"`
-	Scope   string    `json:"scope"`
-	Intent  string    `json:"intent"`
-	TS      time.Time `json:"ts"`
-	StoleID string    `json:"stole_id,omitempty"`
+	ID          string    `json:"id"`
+	Actor       string    `json:"actor"`
+	Scope       string    `json:"scope"`
+	Intent      string    `json:"intent"`
+	TS          time.Time `json:"ts"`
+	StoleID     string    `json:"stole_id,omitempty"`
+	SessionID   string    `json:"session_id,omitempty"`
+	SessionName string    `json:"session_name,omitempty"`
 }
 
 type statusFinding struct {
-	ID       string    `json:"id"`
-	Actor    string    `json:"actor"`
-	Category string    `json:"category"`
-	Summary  string    `json:"summary"`
-	Priority bool      `json:"priority"`
-	TS       time.Time `json:"ts"`
+	ID          string    `json:"id"`
+	Actor       string    `json:"actor"`
+	Category    string    `json:"category"`
+	Summary     string    `json:"summary"`
+	Priority    bool      `json:"priority"`
+	TS          time.Time `json:"ts"`
+	SessionID   string    `json:"session_id,omitempty"`
+	SessionName string    `json:"session_name,omitempty"`
 }
 
 type statusNote struct {
-	ID       string    `json:"id"`
-	Actor    string    `json:"actor"`
-	Body     string    `json:"body"`
-	Priority bool      `json:"priority"`
-	TS       time.Time `json:"ts"`
+	ID          string    `json:"id"`
+	Actor       string    `json:"actor"`
+	Body        string    `json:"body"`
+	Priority    bool      `json:"priority"`
+	TS          time.Time `json:"ts"`
+	SessionID   string    `json:"session_id,omitempty"`
+	SessionName string    `json:"session_name,omitempty"`
 }
 
 func emitStatusJSON(rt *Runtime, cutoff time.Time) error {
@@ -185,23 +201,23 @@ func emitStatusJSON(rt *Runtime, cutoff time.Time) error {
 	sessions := collectActiveSessions(rt.State, time.Now().Add(-4*time.Hour))
 	markLeaderSessions(sessions)
 	for _, s := range sessions {
-		out.Sessions = append(out.Sessions, statusSession{Actor: s.Actor, Label: s.Label, TS: s.TS, Leader: s.Leader})
+		out.Sessions = append(out.Sessions, statusSession{Actor: s.Actor, Label: s.Label, TS: s.TS, Leader: s.Leader, SessionID: s.SessionID, SessionName: s.SessionName})
 	}
 	for _, c := range sortedClaims(rt.State) {
 		out.Claims = append(out.Claims, statusClaim{
 			ID: c.ID, Actor: c.Actor, Scope: c.Scope.String(),
-			Intent: c.Intent, TS: c.TS, StoleID: c.StolenFromID,
+			Intent: c.Intent, TS: c.TS, StoleID: c.StolenFromID, SessionID: c.SessionID, SessionName: c.SessionName,
 		})
 	}
 	for _, f := range recentFindings(rt.State, cutoff, 50) {
 		out.Findings = append(out.Findings, statusFinding{
 			ID: f.ID, Actor: f.Actor, Category: f.Category,
-			Summary: f.Summary, Priority: f.Priority, TS: f.TS,
+			Summary: f.Summary, Priority: f.Priority, TS: f.TS, SessionID: f.SessionID, SessionName: f.SessionName,
 		})
 	}
 	for _, n := range recentNotes(rt.State, cutoff, 50) {
 		out.Notes = append(out.Notes, statusNote{
-			ID: n.ID, Actor: n.Actor, Body: n.Body, Priority: n.Priority, TS: n.TS,
+			ID: n.ID, Actor: n.Actor, Body: n.Body, Priority: n.Priority, TS: n.TS, SessionID: n.SessionID, SessionName: n.SessionName,
 		})
 	}
 	out.Docs = listDocs(rt.Paths.Docs)

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -231,6 +230,8 @@ func (s uiServer) serveStartCommsSession(w http.ResponseWriter, r *http.Request)
 	}
 	var req struct {
 		Reason string `json:"reason"`
+		Name   string `json:"name"`
+		Label  string `json:"label"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
@@ -242,30 +243,20 @@ func (s uiServer) serveStartCommsSession(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	defer rt.Close()
-	current, _ := buildCommsSessionViews(rt.Events)
-	if current != nil || len(rt.State.Sessions) > 0 || len(rt.State.Claims) > 0 {
-		http.Error(w, "a comms session is already active; end it before starting a new one", http.StatusConflict)
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		name = strings.TrimSpace(req.Reason)
+	}
+	if name == "" {
+		http.Error(w, "comms session name is required", http.StatusBadRequest)
 		return
 	}
-	reason := strings.TrimSpace(req.Reason)
-	if reason == "" {
-		reason = "comms session started from ui"
+	if id, _ := activeCommsSessionByName(rt.State, name); id != "" {
+		http.Error(w, "a comms session named "+name+" is already active", http.StatusConflict)
+		return
 	}
 	now := time.Now().UTC()
-	hostname, _ := os.Hostname()
-	ev := event.Event{
-		TS:    now,
-		ID:    event.NewID(now),
-		Actor: rt.Actor,
-		Type:  event.TypeHello,
-		Data: map[string]interface{}{
-			"base_name":           baseNameOfActor(rt.Actor),
-			"hostname":            hostname,
-			"comms_session_start": true,
-			"reason":              reason,
-		},
-	}
-	if err := rt.Append(ev); err != nil {
+	if err := appendSessionHello(rt, now, event.NewID(now), name, req.Label, true); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -282,7 +273,9 @@ func (s uiServer) serveEndCommsSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Reason string `json:"reason"`
+		Reason    string `json:"reason"`
+		Name      string `json:"name"`
+		SessionID string `json:"session_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
@@ -294,22 +287,72 @@ func (s uiServer) serveEndCommsSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer rt.Close()
-	current, _ := buildCommsSessionViews(rt.Events)
-	if current == nil {
-		http.Error(w, "no active comms session to end", http.StatusConflict)
-		return
-	}
-	refs := make([]interface{}, 0, len(rt.State.Claims))
-	for _, claim := range sortedClaims(rt.State) {
-		refs = append(refs, claim.ID)
-	}
-	endedActors := make([]interface{}, 0, len(rt.State.Sessions))
-	for _, session := range collectActiveSessions(rt.State, time.Time{}) {
-		endedActors = append(endedActors, session.Actor)
-	}
 	reason := strings.TrimSpace(req.Reason)
 	if reason == "" {
 		reason = "comms session ended from ui"
+	}
+	sessionID := strings.TrimSpace(req.SessionID)
+	sessionName := strings.TrimSpace(req.Name)
+	if sessionID == "" && sessionName != "" {
+		sessionID, sessionName = activeCommsSessionByName(rt.State, sessionName)
+		if sessionID == "" {
+			http.Error(w, "no active comms session named "+strings.TrimSpace(req.Name), http.StatusConflict)
+			return
+		}
+	}
+	if sessionID == "" {
+		if sess := rt.State.Sessions[rt.Actor]; sess != nil {
+			sessionID = sess.SessionID
+			sessionName = sess.SessionName
+		}
+	}
+	var refs []interface{}
+	var endedActors []interface{}
+	if sessionID == "" {
+		if len(rt.State.Sessions) == 0 && len(rt.State.Claims) == 0 {
+			http.Error(w, "no active comms session to end", http.StatusConflict)
+			return
+		}
+		refs = make([]interface{}, 0, len(rt.State.Claims))
+		for _, claim := range sortedClaims(rt.State) {
+			refs = append(refs, claim.ID)
+		}
+		endedActors = make([]interface{}, 0, len(rt.State.Sessions))
+		for _, session := range collectActiveSessions(rt.State, time.Time{}) {
+			endedActors = append(endedActors, session.Actor)
+		}
+	} else {
+		if sessionName == "" {
+			for _, sess := range rt.State.Sessions {
+				if sess.SessionID == sessionID {
+					sessionName = sess.SessionName
+					break
+				}
+			}
+		}
+		claims := activeClaimsByCommsSession(rt.State, sessionID)
+		if sessionName == "" {
+			for _, claim := range claims {
+				if claim.SessionName != "" {
+					sessionName = claim.SessionName
+					break
+				}
+			}
+		}
+		if sessionName == "" && len(claims) == 0 {
+			http.Error(w, "no active comms session matches "+sessionID, http.StatusConflict)
+			return
+		}
+		refs = make([]interface{}, 0, len(claims))
+		for _, claim := range claims {
+			refs = append(refs, claim.ID)
+		}
+		endedActors = make([]interface{}, 0, len(rt.State.Sessions))
+		for _, session := range collectActiveSessions(rt.State, time.Time{}) {
+			if session.SessionID == sessionID {
+				endedActors = append(endedActors, session.Actor)
+			}
+		}
 	}
 	now := time.Now().UTC()
 	ev := event.Event{
@@ -318,10 +361,12 @@ func (s uiServer) serveEndCommsSession(w http.ResponseWriter, r *http.Request) {
 		Actor: rt.Actor,
 		Type:  event.TypeRelease,
 		Data: map[string]interface{}{
-			"refs":              refs,
-			"comms_session_end": true,
-			"ended_actors":      endedActors,
-			"reason":            reason,
+			"refs":               refs,
+			"comms_session_end":  true,
+			"comms_session_id":   sessionID,
+			"comms_session_name": sessionName,
+			"ended_actors":       endedActors,
+			"reason":             reason,
 		},
 	}
 	if err := rt.Append(ev); err != nil {
@@ -334,6 +379,7 @@ func (s uiServer) serveEndCommsSession(w http.ResponseWriter, r *http.Request) {
 type uiSnapshot struct {
 	Project       uiProject        `json:"project"`
 	Current       *uiCommsSession  `json:"current_session,omitempty"`
+	Active        []uiCommsSession `json:"active_comms_sessions"`
 	Actions       []uiAction       `json:"actions"`
 	Sessions      []uiSession      `json:"sessions"`
 	CommsSessions []uiCommsSession `json:"comms_sessions"`
@@ -368,16 +414,19 @@ type uiAction struct {
 }
 
 type uiSession struct {
-	Actor    string    `json:"actor"`
-	Label    string    `json:"label,omitempty"`
-	BaseName string    `json:"base_name"`
-	Hostname string    `json:"hostname"`
-	TS       time.Time `json:"ts"`
-	Leader   bool      `json:"leader"`
+	Actor       string    `json:"actor"`
+	Label       string    `json:"label,omitempty"`
+	BaseName    string    `json:"base_name"`
+	Hostname    string    `json:"hostname"`
+	TS          time.Time `json:"ts"`
+	Leader      bool      `json:"leader"`
+	SessionID   string    `json:"session_id,omitempty"`
+	SessionName string    `json:"session_name,omitempty"`
 }
 
 type uiCommsSession struct {
 	ID           string    `json:"id"`
+	Name         string    `json:"name,omitempty"`
 	StartedAt    time.Time `json:"started_at"`
 	EndedAt      time.Time `json:"ended_at"`
 	EndedBy      string    `json:"ended_by"`
@@ -392,31 +441,37 @@ type uiCommsSession struct {
 }
 
 type uiClaim struct {
-	ID      string    `json:"id"`
-	Actor   string    `json:"actor"`
-	Scope   string    `json:"scope"`
-	Intent  string    `json:"intent"`
-	TS      time.Time `json:"ts"`
-	Age     string    `json:"age"`
-	Stale   bool      `json:"stale"`
-	StoleID string    `json:"stole_id,omitempty"`
+	ID          string    `json:"id"`
+	Actor       string    `json:"actor"`
+	Scope       string    `json:"scope"`
+	Intent      string    `json:"intent"`
+	TS          time.Time `json:"ts"`
+	Age         string    `json:"age"`
+	Stale       bool      `json:"stale"`
+	StoleID     string    `json:"stole_id,omitempty"`
+	SessionID   string    `json:"session_id,omitempty"`
+	SessionName string    `json:"session_name,omitempty"`
 }
 
 type uiFinding struct {
-	ID       string    `json:"id"`
-	Actor    string    `json:"actor"`
-	Category string    `json:"category"`
-	Summary  string    `json:"summary"`
-	Priority bool      `json:"priority"`
-	TS       time.Time `json:"ts"`
+	ID          string    `json:"id"`
+	Actor       string    `json:"actor"`
+	Category    string    `json:"category"`
+	Summary     string    `json:"summary"`
+	Priority    bool      `json:"priority"`
+	TS          time.Time `json:"ts"`
+	SessionID   string    `json:"session_id,omitempty"`
+	SessionName string    `json:"session_name,omitempty"`
 }
 
 type uiNote struct {
-	ID       string    `json:"id"`
-	Actor    string    `json:"actor"`
-	Body     string    `json:"body"`
-	Priority bool      `json:"priority"`
-	TS       time.Time `json:"ts"`
+	ID          string    `json:"id"`
+	Actor       string    `json:"actor"`
+	Body        string    `json:"body"`
+	Priority    bool      `json:"priority"`
+	TS          time.Time `json:"ts"`
+	SessionID   string    `json:"session_id,omitempty"`
+	SessionName string    `json:"session_name,omitempty"`
 }
 
 type uiEvent struct {
@@ -441,6 +496,7 @@ func buildUISnapshot(rt *Runtime, staleAfter time.Duration) uiSnapshot {
 		},
 		Actions:       []uiAction{},
 		Sessions:      []uiSession{},
+		Active:        []uiCommsSession{},
 		CommsSessions: []uiCommsSession{},
 		Claims:        []uiClaim{},
 		Findings:      []uiFinding{},
@@ -467,9 +523,16 @@ func buildUISnapshot(rt *Runtime, staleAfter time.Duration) uiSnapshot {
 	for _, s := range sessions {
 		out.Sessions = append(out.Sessions, uiSession{
 			Actor: s.Actor, Label: s.Label, BaseName: s.BaseName, Hostname: s.Hostname, TS: s.TS, Leader: s.Leader,
+			SessionID: s.SessionID, SessionName: s.SessionName,
 		})
 	}
-	out.Current, out.CommsSessions = buildCommsSessionViews(rt.Events)
+	out.Active, out.CommsSessions = buildCommsSessionViews(rt.Events)
+	if len(out.Active) > 0 {
+		out.Current = &out.Active[0]
+	}
+	if out.Active == nil {
+		out.Active = []uiCommsSession{}
+	}
 	if out.CommsSessions == nil {
 		out.CommsSessions = []uiCommsSession{}
 	}
@@ -477,15 +540,17 @@ func buildUISnapshot(rt *Runtime, staleAfter time.Duration) uiSnapshot {
 		out.Claims = append(out.Claims, uiClaim{
 			ID: c.ID, Actor: c.Actor, Scope: c.Scope.String(), Intent: c.Intent,
 			TS: c.TS, Age: shortAge(now.Sub(c.TS)), Stale: now.Sub(c.TS) >= staleAfter, StoleID: c.StolenFromID,
+			SessionID: c.SessionID, SessionName: c.SessionName,
 		})
 	}
 	for _, f := range recentFindings(rt.State, now.Add(-24*time.Hour), 12) {
 		out.Findings = append(out.Findings, uiFinding{
 			ID: f.ID, Actor: f.Actor, Category: f.Category, Summary: f.Summary, Priority: f.Priority, TS: f.TS,
+			SessionID: f.SessionID, SessionName: f.SessionName,
 		})
 	}
 	for _, n := range recentNotes(rt.State, now.Add(-24*time.Hour), 8) {
-		out.Notes = append(out.Notes, uiNote{ID: n.ID, Actor: n.Actor, Body: n.Body, Priority: n.Priority, TS: n.TS})
+		out.Notes = append(out.Notes, uiNote{ID: n.ID, Actor: n.Actor, Body: n.Body, Priority: n.Priority, TS: n.TS, SessionID: n.SessionID, SessionName: n.SessionName})
 	}
 	if out.Current != nil {
 		out.Events = out.Current.Events
@@ -521,6 +586,10 @@ func buildDemoUISnapshot(staleAfter time.Duration) uiSnapshot {
 	for i := range claims {
 		claims[i].Stale = base.Sub(claims[i].TS) >= staleAfter
 	}
+	current := uiCommsSession{
+		ID: "01JX2Q3Z5V6B6N9P0R1S2T3U4V", Name: "demo preview", StartedAt: base.Add(-13 * time.Minute), Actors: []string{"claude-dev", "codex-dev", "human-eli"},
+		Reason: "demo preview", EventCount: len(currentEvents), ClaimCount: 3, FindingCount: 3, NoteCount: 2, Events: currentEvents,
+	}
 	return uiSnapshot{
 		Project: uiProject{
 			Name:            "demo-project",
@@ -539,10 +608,8 @@ func buildDemoUISnapshot(staleAfter time.Duration) uiSnapshot {
 			{ID: "transfer_leader", Label: "Transfer Leader", Method: http.MethodPost, Path: "/api/session/lead", Enabled: false, Reason: "demo mode is read-only"},
 			{ID: "select_session_log", Label: "Select Session Event Log", Enabled: true, Reason: "client-side filtered view over current_session/events and comms_sessions/events"},
 		},
-		Current: &uiCommsSession{
-			ID: "current", StartedAt: base.Add(-13 * time.Minute), Actors: []string{"claude-dev", "codex-dev", "human-eli"},
-			Reason: "demo preview", EventCount: len(currentEvents), ClaimCount: 3, FindingCount: 3, NoteCount: 2, Events: currentEvents,
-		},
+		Current: &current,
+		Active:  []uiCommsSession{current},
 		Sessions: []uiSession{
 			{Actor: "codex-dev", Label: "Codex Dev", BaseName: "codex", Hostname: "MacBook-Pro.local", TS: base.Add(-13 * time.Minute), Leader: true},
 			{Actor: "claude-dev", Label: "Claude Dev", BaseName: "claude", Hostname: "MacBook-Pro.local", TS: base.Add(-12 * time.Minute)},
@@ -603,12 +670,8 @@ func buildUIActions(snap uiSnapshot) []uiAction {
 		lead.Reason = reason
 		return []uiAction{start, end, releaseClaim, retire, lead, logs}
 	}
-	if snap.Current == nil && len(snap.Sessions) == 0 && len(snap.Claims) == 0 {
-		start.Enabled = true
-	} else {
-		start.Reason = "a comms session is already active"
-	}
-	if snap.Current != nil {
+	start.Enabled = true
+	if len(snap.Active) > 0 {
 		end.Enabled = true
 	} else {
 		end.Reason = "no active comms session to end"
@@ -631,36 +694,89 @@ func buildUIActions(snap uiSnapshot) []uiAction {
 	return []uiAction{start, end, releaseClaim, retire, lead, logs}
 }
 
-func buildCommsSessionViews(events []event.Event) (*uiCommsSession, []uiCommsSession) {
+func buildCommsSessionViews(events []event.Event) ([]uiCommsSession, []uiCommsSession) {
 	if len(events) == 0 {
 		return nil, nil
 	}
 	sorted := append([]event.Event(nil), events...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].ID < sorted[j].ID })
 
-	start := 0
+	type namedWindow struct {
+		id      string
+		name    string
+		events  []event.Event
+		ended   bool
+		endedBy string
+		reason  string
+		refs    []string
+	}
+	named := map[string]*namedWindow{}
+	var order []string
+	var legacy []event.Event
+	for _, ev := range sorted {
+		sessionID := dataString(ev.Data, "comms_session_id")
+		if sessionID == "" {
+			legacy = append(legacy, ev)
+			continue
+		}
+		win := named[sessionID]
+		if win == nil {
+			win = &namedWindow{id: sessionID}
+			named[sessionID] = win
+			order = append(order, sessionID)
+		}
+		if name := dataString(ev.Data, "comms_session_name"); name != "" {
+			win.name = name
+		}
+		win.events = append(win.events, ev)
+		if ev.Type == event.TypeRelease && dataBool(ev.Data, "comms_session_end") {
+			win.ended = true
+			win.endedBy = ev.Actor
+			win.reason = reasonOf(ev)
+			win.refs = dataStringList(ev.Data, "refs")
+		}
+	}
+
+	var active []uiCommsSession
 	var archived []uiCommsSession
-	for i, ev := range sorted {
+	for _, id := range order {
+		win := named[id]
+		if win == nil || len(win.events) == 0 {
+			continue
+		}
+		if win.ended {
+			view := summarizeCommsWindow(win.id, win.name, win.events, false, win.endedBy, win.reason, win.refs)
+			archived = append(archived, view)
+		} else {
+			view := summarizeCommsWindow(win.id, win.name, win.events, true, "", "", nil)
+			active = append(active, view)
+		}
+	}
+
+	start := 0
+	for i, ev := range legacy {
 		if ev.Type != event.TypeRelease || !dataBool(ev.Data, "comms_session_end") {
 			continue
 		}
-		window := sorted[start : i+1]
+		window := legacy[start : i+1]
 		refs := dataStringList(ev.Data, "refs")
-		archived = append(archived, summarizeCommsWindow(ev.ID, window, false, ev.Actor, reasonOf(ev), refs))
+		archived = append(archived, summarizeCommsWindow(ev.ID, "", window, false, ev.Actor, reasonOf(ev), refs))
 		start = i + 1
 	}
 
 	sort.Slice(archived, func(i, j int) bool { return archived[i].EndedAt.After(archived[j].EndedAt) })
-	if start >= len(sorted) {
-		return nil, archived
+	if start < len(legacy) {
+		current := summarizeCommsWindow("current", "Current session", legacy[start:], true, "", "", nil)
+		active = append(active, current)
 	}
-	current := summarizeCommsWindow("current", sorted[start:], true, "", "", nil)
-	return &current, archived
+	sort.Slice(active, func(i, j int) bool { return active[i].StartedAt.After(active[j].StartedAt) })
+	return active, archived
 }
 
-func summarizeCommsWindow(id string, events []event.Event, current bool, endedBy string, reason string, refs []string) uiCommsSession {
+func summarizeCommsWindow(id, name string, events []event.Event, current bool, endedBy string, reason string, refs []string) uiCommsSession {
 	view := uiCommsSession{
 		ID:           id,
+		Name:         name,
 		EndedBy:      endedBy,
 		Reason:       reason,
 		ReleasedRefs: len(refs),
@@ -727,10 +843,19 @@ func eventSummary(ev event.Event) string {
 	switch ev.Type {
 	case event.TypeHello:
 		if dataBool(ev.Data, "comms_session_start") {
+			if s := dataString(ev.Data, "comms_session_name"); s != "" {
+				return "started comms session: " + s
+			}
 			if s := reasonOf(ev); s != "" {
 				return "started comms session: " + s
 			}
 			return "started comms session"
+		}
+		if dataBool(ev.Data, "comms_session_join") {
+			if s := dataString(ev.Data, "comms_session_name"); s != "" {
+				return "joined comms session: " + s
+			}
+			return "joined comms session"
 		}
 	case event.TypeClaim:
 		if s, _ := ev.Data["intent"].(string); s != "" {
@@ -784,6 +909,15 @@ func dataBool(m map[string]interface{}, key string) bool {
 		}
 	}
 	return false
+}
+
+func dataString(m map[string]interface{}, key string) string {
+	if v, ok := m[key]; ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
 }
 
 func dataStringList(m map[string]interface{}, key string) []string {
@@ -1169,10 +1303,11 @@ th {
   color: var(--muted);
   font-weight: 650;
 }
-.claims th:nth-child(1), .claims td:nth-child(1) { width: 120px; }
-.claims th:nth-child(2), .claims td:nth-child(2) { width: 32%; }
-.claims th:nth-child(4), .claims td:nth-child(4) { width: 78px; }
-.claims th:nth-child(5), .claims td:nth-child(5) { width: 112px; }
+.claims th:nth-child(1), .claims td:nth-child(1) { width: 116px; }
+.claims th:nth-child(2), .claims td:nth-child(2) { width: 132px; }
+.claims th:nth-child(3), .claims td:nth-child(3) { width: 30%; }
+.claims th:nth-child(5), .claims td:nth-child(5) { width: 78px; }
+.claims th:nth-child(6), .claims td:nth-child(6) { width: 112px; }
 .events th:nth-child(1), .events td:nth-child(1) { width: 120px; }
 .events th:nth-child(2), .events td:nth-child(2) { width: 86px; }
 .events th:nth-child(3), .events td:nth-child(3) { width: 128px; }
@@ -1413,7 +1548,7 @@ function renderTable(items, headers, fn, label) {
 }
 function mutationHelp(data) {
   if (data.project.demo) return 'Demo mode is read-only.';
-  if (data.project.mutations_enabled) return 'Agents create/release claims; Start and End control the whole coordination window.';
+  if (data.project.mutations_enabled) return 'Agents create/release claims; Start creates a named session, End archives the selected named session.';
   return data.project.mutation_message || 'Set COMMS_ACTOR before starting comms ui to start or end the comms session here.';
 }
 function actionByID(data, id) {
@@ -1433,9 +1568,11 @@ function renderStats(data) {
   const findings = data.findings || [];
   const notes = data.notes || [];
   const archive = data.comms_sessions || [];
+  const activeSessions = data.active_comms_sessions || [];
   const stat = (label, value, warn) => '<div class="stat ' + (warn ? 'warn' : '') + '"><span class="stat-label">' + label + '</span><span class="stat-value">' + esc(value) + '</span></div>';
   el('stats').innerHTML = [
-    stat('sessions', (data.sessions || []).length, false),
+    stat('named sessions', activeSessions.length, false),
+    stat('actors', (data.sessions || []).length, false),
     stat('claims', claims.length, false),
     stat('stale', claims.filter(c => c.stale).length, claims.some(c => c.stale)),
     stat('findings', findings.length, false),
@@ -1464,14 +1601,14 @@ async function load() {
   el('endComms').title = endAction.reason || mutationHelp(data);
   el('sessions').innerHTML = renderRows(data.sessions, s => {
     const title = s.label ? esc(s.label) + ' <span class="meta-inline">@' + esc(s.actor) + '</span>' : '@' + esc(s.actor);
-    return '<div class="row session-row"><div><div class="actor">' + title + (s.leader ? ' <span class="pill leader">leader</span>' : '') + '</div><div class="meta">' + esc(s.base_name || 'session') + ' · ' + esc(s.hostname || 'unknown host') + ' · hello ' + fmtTime(s.ts) + '</div></div></div>';
+    return '<div class="row session-row"><div><div class="actor">' + title + (s.leader ? ' <span class="pill leader">leader</span>' : '') + '</div><div class="meta">' + esc(s.base_name || 'session') + ' · ' + esc(s.hostname || 'unknown host') + ' · hello ' + fmtTime(s.ts) + '</div>' + (s.session_name ? '<div class="meta">in session: ' + esc(s.session_name) + '</div>' : '') + '</div></div>';
   },
     'No active sessions in the last 4h.');
-  el('currentSession').innerHTML = data.current_session
-    ? '<div class="row"><div class="actor">Started ' + fmtTime(data.current_session.started_at) + '</div><div class="meta">' + esc(data.current_session.event_count) + ' event(s) · ' + esc(data.current_session.claim_count) + ' claim(s) · ' + esc(data.current_session.finding_count) + ' finding(s) · ' + esc(data.current_session.note_count) + ' note(s)</div><div class="meta">' + esc((data.current_session.actors || []).map(a => '@' + a).join(', ')) + '</div></div>'
-    : empty('No comms session is open. Use Start Comms Session, or let the first agent run comms hello.');
+  el('currentSession').innerHTML = renderRows(data.active_comms_sessions, s =>
+    '<div class="row"><div class="actor">' + esc(s.name || 'Unnamed session') + '</div><div class="meta">Started ' + fmtTime(s.started_at) + ' · ' + esc(s.event_count) + ' event(s) · ' + esc(s.claim_count) + ' claim(s) · ' + esc(s.finding_count) + ' finding(s) · ' + esc(s.note_count) + ' note(s)</div><div class="meta">' + esc((s.actors || []).map(a => '@' + a).join(', ')) + '</div></div>',
+    'No named comms session is open. Use Start Comms Session, or ask an agent to run comms session start "<name>".');
   el('commsSessions').innerHTML = renderRows(data.comms_sessions, s =>
-    '<div class="row"><div class="actor">' + fmtTime(s.started_at) + ' → ' + fmtTime(s.ended_at) + '</div><div class="meta">ended by @' + esc(s.ended_by) + ' · ' + esc(s.reason || 'comms session ended') + '</div><div class="meta">' + esc(s.event_count) + ' event(s) · ' + esc(s.claim_count) + ' claim(s) · ' + esc(s.finding_count) + ' finding(s) · ' + esc(s.note_count) + ' note(s)</div><div class="meta">' + esc((s.actors || []).map(a => '@' + a).join(', ')) + '</div></div>',
+    '<div class="row"><div class="actor">' + esc(s.name || 'Archived session') + '</div><div class="meta">' + fmtTime(s.started_at) + ' → ' + fmtTime(s.ended_at) + '</div><div class="meta">ended by @' + esc(s.ended_by) + ' · ' + esc(s.reason || 'comms session ended') + '</div><div class="meta">' + esc(s.event_count) + ' event(s) · ' + esc(s.claim_count) + ' claim(s) · ' + esc(s.finding_count) + ' finding(s) · ' + esc(s.note_count) + ' note(s)</div><div class="meta">' + esc((s.actors || []).map(a => '@' + a).join(', ')) + '</div></div>',
     'No archived comms sessions yet. Use End Comms Session when the project work window is done.');
   renderClaims(data);
   el('findings').innerHTML = renderRows(data.findings, f =>
@@ -1494,7 +1631,7 @@ function renderClaims(data) {
   const claimFilter = filterText('claimFilter');
   const claims = (data.claims || []).filter(c => includesFilter([c.actor, c.scope, c.intent, c.age, c.id], claimFilter));
   el('claims').innerHTML = '<div class="hint">Claims older than ' + esc(data.project.stale_after) + ' are marked stale. ' + esc(mutationHelp(data)) + '</div>' +
-    renderTable(claims, ['Actor', 'Scope', 'Intent', 'Age', 'Action'], c => {
+    renderTable(claims, ['Actor', 'Session', 'Scope', 'Intent', 'Age', 'Action'], c => {
       const actions = [];
       if (releaseAction.enabled) {
         actions.push('<button class="small primary" type="button" data-release-claim="' + esc(c.id) + '" data-release-actor="' + esc(c.actor) + '" data-release-scope="' + esc(c.scope) + '">Release</button>');
@@ -1503,7 +1640,7 @@ function renderClaims(data) {
         actions.push('<button class="small danger" type="button" data-retire-actor="' + esc(c.actor) + '">Retire</button>');
       }
       const action = actions.length ? actions.join(' ') : (c.stale ? '<span class="pill stale">stale</span>' : '<span class="meta">active</span>');
-      return '<tr class="' + (c.stale ? 'claim-stale' : '') + '"><td><span class="actor">@' + esc(c.actor) + '</span></td><td><div class="scope">' + esc(c.scope) + '</div><div class="copy">' + esc(c.id.slice(0, 10)) + '</div></td><td>' + esc(c.intent) + '</td><td>' + esc(c.age) + (c.stale ? '<div><span class="pill stale">stale</span></div>' : '') + '</td><td>' + action + '</td></tr>';
+      return '<tr class="' + (c.stale ? 'claim-stale' : '') + '"><td><span class="actor">@' + esc(c.actor) + '</span></td><td>' + esc(c.session_name || 'legacy') + '</td><td><div class="scope">' + esc(c.scope) + '</div><div class="copy">' + esc(c.id.slice(0, 10)) + '</div></td><td>' + esc(c.intent) + '</td><td>' + esc(c.age) + (c.stale ? '<div><span class="pill stale">stale</span></div>' : '') + '</td><td>' + action + '</td></tr>';
     },
     claimFilter ? 'No claims match this filter.' : 'No active claims.');
   document.querySelectorAll('[data-release-claim]').forEach(button => {
@@ -1515,9 +1652,12 @@ function renderClaims(data) {
 }
 function allSessionChoices(data) {
   const out = [];
-  if (data.current_session) out.push({ id: 'current', label: 'Current session', session: data.current_session });
+  for (const s of data.active_comms_sessions || []) {
+    out.push({ id: s.id, label: 'Active: ' + (s.name || s.id.slice(0, 10)), session: s, active: true });
+  }
+  if (!out.length && data.current_session) out.push({ id: 'current', label: 'Current session', session: data.current_session, active: true });
   for (const s of data.comms_sessions || []) {
-    out.push({ id: s.id, label: 'Archive: ' + fmtTime(s.started_at) + ' → ' + fmtTime(s.ended_at), session: s });
+    out.push({ id: s.id, label: 'Archive: ' + (s.name || fmtTime(s.started_at) + ' → ' + fmtTime(s.ended_at)), session: s, active: false });
   }
   return out;
 }
@@ -1542,7 +1682,7 @@ function renderSelectedSessionLog(data) {
     return;
   }
   const s = chosen.session;
-  const range = chosen.id === 'current' ? 'Current session started ' + fmtTime(s.started_at) : 'Archived session ' + fmtTime(s.started_at) + ' → ' + fmtTime(s.ended_at);
+  const range = chosen.active ? 'Active session "' + (s.name || s.id) + '" started ' + fmtTime(s.started_at) : 'Archived session "' + (s.name || s.id) + '" ' + fmtTime(s.started_at) + ' → ' + fmtTime(s.ended_at);
   el('eventHint').textContent = range + ' · ' + s.event_count + ' event(s). The physical JSONL remains append-only; this table is filtered to the selected session.';
   const eventFilter = filterText('eventFilter');
   const events = (s.events || []).filter(ev => includesFilter([fmtTime(ev.ts), ev.type, ev.actor, (ev.scope || []).join(', '), ev.summary], eventFilter));
@@ -1551,26 +1691,26 @@ function renderSelectedSessionLog(data) {
     eventFilter ? 'No events match this filter.' : 'No log events in this session.');
 }
 async function startCommsSession() {
-  const reason = window.prompt('Start a new comms session? This creates the first log row for a new coordination window.', 'project work session started');
-  if (reason === null) return;
+  const name = window.prompt('Name for the new comms session? Agents can join it with: comms session join "<name>"', 'dashboard fixes');
+  if (name === null) return;
   const res = await fetch('/api/comms-session/start', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ reason })
+    body: JSON.stringify({ name })
   });
   if (!res.ok) throw new Error(await res.text());
-  selectedSessionID = 'current';
-  localStorage.setItem('selectedSessionID', selectedSessionID);
   hideError();
   await load();
 }
 async function endCommsSession() {
-  const reason = window.prompt('End the whole comms session? This releases all active claims, clears active sessions, and archives this communication window for later analysis.', 'project work session done');
+  const chosen = latestData ? allSessionChoices(latestData).find(c => c.id === selectedSessionID && c.active) : null;
+  if (!chosen) throw new Error('Select an active named session in the Session Event Log dropdown first.');
+  const reason = window.prompt('End "' + (chosen.session.name || chosen.session.id) + '"? This releases claims in that named session and archives its log for later analysis.', 'project work session done');
   if (reason === null) return;
   const res = await fetch('/api/comms-session/end', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ reason })
+    body: JSON.stringify({ reason, session_id: chosen.session.id, name: chosen.session.name })
   });
   if (!res.ok) throw new Error(await res.text());
   selectedSessionID = '';
