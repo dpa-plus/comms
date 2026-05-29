@@ -51,7 +51,13 @@ func runLog(actor, since, scope, types, category string, asJSON bool) error {
 	}
 	cutoff := time.Now().Add(-dur)
 
-	typeSet := parseTypeSet(types)
+	typeSet, err := parseTypeSet(types)
+	if err != nil {
+		Fatalf(2, "log: %v", err)
+	}
+	if err := validateLogCategory(category); err != nil {
+		Fatalf(2, "log: %v", err)
+	}
 	var scopeFilter *overlap.Scope
 	if scope != "" {
 		s, err := overlap.Parse(scope)
@@ -97,15 +103,31 @@ func runLog(actor, since, scope, types, category string, asJSON bool) error {
 	return nil
 }
 
-func parseTypeSet(s string) map[string]struct{} {
+func parseTypeSet(s string) (map[string]struct{}, error) {
 	if s == "" {
-		return nil
+		return nil, nil
 	}
 	out := make(map[string]struct{})
 	for _, p := range strings.Split(s, ",") {
-		out[strings.TrimSpace(p)] = struct{}{}
+		t := strings.TrimSpace(p)
+		switch event.Type(t) {
+		case event.TypeHello, event.TypeClaim, event.TypeRelease, event.TypeNote, event.TypeFinding:
+			out[t] = struct{}{}
+		default:
+			return nil, fmt.Errorf("unknown event type %q; choose hello, claim, release, note, or finding", t)
+		}
 	}
-	return out
+	return out, nil
+}
+
+func validateLogCategory(category string) error {
+	if category == "" {
+		return nil
+	}
+	if _, ok := findCategories[category]; !ok {
+		return fmt.Errorf("unknown category %q; choose bug, fix, ship, decision, or gotcha", category)
+	}
+	return nil
 }
 
 func eventScopeOverlaps(ev event.Event, want overlap.Scope) bool {

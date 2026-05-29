@@ -73,6 +73,18 @@ func TestRunReleaseRejectsPositionalIDWithAllMine(t *testing.T) {
 	}
 }
 
+func TestParseTypeSetRejectsUnknownEventType(t *testing.T) {
+	if _, err := parseTypeSet("hello,typo"); err == nil || !strings.Contains(err.Error(), "unknown event type") {
+		t.Fatalf("unknown event type should be rejected, got %v", err)
+	}
+}
+
+func TestValidateLogCategoryRejectsUnknownCategory(t *testing.T) {
+	if err := validateLogCategory("typo"); err == nil || !strings.Contains(err.Error(), "unknown category") {
+		t.Fatalf("unknown category should be rejected, got %v", err)
+	}
+}
+
 func captureLogStdout(t *testing.T, fn func()) string {
 	t.Helper()
 	old := os.Stdout
