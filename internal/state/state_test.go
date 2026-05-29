@@ -224,6 +224,53 @@ func TestFoldNamedCommsSessionEndOnlyClearsMatchingSession(t *testing.T) {
 	}
 }
 
+func TestFoldNamedCommsSessionArchiveCountsOnlyThatSession(t *testing.T) {
+	now := time.Now().UTC()
+	aHello := mkEvent(t, now, "claude-dev", event.TypeHello, nil, map[string]interface{}{
+		"comms_session_id":   "sess-a",
+		"comms_session_name": "dashboard fixes",
+	})
+	aClaim := mkEvent(t, now.Add(time.Second), "claude-dev", event.TypeClaim, []string{"src/a.ts"}, map[string]interface{}{
+		"intent":             "work a",
+		"comms_session_id":   "sess-a",
+		"comms_session_name": "dashboard fixes",
+	})
+	bHello := mkEvent(t, now.Add(2*time.Second), "codex-dev", event.TypeHello, nil, map[string]interface{}{
+		"comms_session_id":   "sess-b",
+		"comms_session_name": "billing fixes",
+	})
+	bClaim := mkEvent(t, now.Add(3*time.Second), "codex-dev", event.TypeClaim, []string{"src/b.ts"}, map[string]interface{}{
+		"intent":             "work b",
+		"comms_session_id":   "sess-b",
+		"comms_session_name": "billing fixes",
+	})
+	endA := mkEvent(t, now.Add(4*time.Second), "human-eli", event.TypeRelease, nil, map[string]interface{}{
+		"refs":               []interface{}{aClaim.ID},
+		"comms_session_end":  true,
+		"comms_session_id":   "sess-a",
+		"comms_session_name": "dashboard fixes",
+		"reason":             "done",
+	})
+
+	s := Fold([]event.Event{aHello, aClaim, bHello, bClaim, endA})
+	if len(s.EndedCommsSessions) != 1 {
+		t.Fatalf("ended comms sessions = %d, want 1", len(s.EndedCommsSessions))
+	}
+	ended := s.EndedCommsSessions[0]
+	if ended.EventCount != 3 || ended.ClaimCount != 1 || ended.StartedAt != aHello.TS {
+		t.Fatalf("named archive should count only sess-a events plus end marker: %+v", ended)
+	}
+	wantActors := []string{"claude-dev", "human-eli"}
+	if len(ended.Actors) != len(wantActors) {
+		t.Fatalf("actors = %+v, want %+v", ended.Actors, wantActors)
+	}
+	for i, want := range wantActors {
+		if ended.Actors[i] != want {
+			t.Fatalf("actors = %+v, want %+v", ended.Actors, wantActors)
+		}
+	}
+}
+
 func TestFoldHelloStartsNewWindowAfterCommsSessionEnd(t *testing.T) {
 	now := time.Now().UTC()
 	end := mkEvent(t, now, "human-eli", event.TypeRelease, nil, map[string]interface{}{

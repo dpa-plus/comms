@@ -24,8 +24,9 @@ type State struct {
 	// Sessions keyed by actor name. Only the most recent hello per actor is kept.
 	Sessions map[string]*Session
 
-	// EndedCommsSessions are project-level archive boundaries. Each entry
-	// represents all events since the previous comms-session end marker.
+	// EndedCommsSessions are archive boundaries. Legacy entries represent all
+	// events since the previous global comms-session end marker. Named session
+	// entries represent only events stamped with that named session ID.
 	EndedCommsSessions []*EndedCommsSession
 
 	// Findings and Notes in chronological order. Caller filters by `since`.
@@ -127,6 +128,15 @@ func Fold(events []event.Event) *State {
 	var windowStart time.Time
 	windowActors := map[string]bool{}
 	windowEvents, windowClaims, windowFindings, windowNotes := 0, 0, 0, 0
+	type sessionWindow struct {
+		start    time.Time
+		actors   map[string]bool
+		events   int
+		claims   int
+		findings int
+		notes    int
+	}
+	namedWindows := map[string]*sessionWindow{}
 
 	for _, ev := range sorted {
 		if windowStart.IsZero() {
@@ -141,6 +151,25 @@ func Fold(events []event.Event) *State {
 			windowFindings++
 		case event.TypeNote:
 			windowNotes++
+		}
+		sessionID := stringOf(ev.Data, "comms_session_id")
+		var named *sessionWindow
+		if sessionID != "" {
+			named = namedWindows[sessionID]
+			if named == nil {
+				named = &sessionWindow{start: ev.TS, actors: map[string]bool{}}
+				namedWindows[sessionID] = named
+			}
+			named.events++
+			named.actors[ev.Actor] = true
+			switch ev.Type {
+			case event.TypeClaim:
+				named.claims++
+			case event.TypeFinding:
+				named.findings++
+			case event.TypeNote:
+				named.notes++
+			}
 		}
 
 		switch ev.Type {
@@ -191,25 +220,36 @@ func Fold(events []event.Event) *State {
 				if reason == "" {
 					reason = stringOf(ev.Data, "result")
 				}
-				sessionID := stringOf(ev.Data, "comms_session_id")
+				startedAt := windowStart
+				actors := sortedActorSet(windowActors)
+				eventCount, claimCount, findingCount, noteCount := windowEvents, windowClaims, windowFindings, windowNotes
+				if sessionID != "" && named != nil {
+					startedAt = named.start
+					actors = sortedActorSet(named.actors)
+					eventCount, claimCount, findingCount, noteCount = named.events, named.claims, named.findings, named.notes
+				}
 				s.EndedCommsSessions = append(s.EndedCommsSessions, &EndedCommsSession{
 					ID:           ev.ID,
 					SessionID:    sessionID,
 					Name:         stringOf(ev.Data, "comms_session_name"),
-					StartedAt:    windowStart,
+					StartedAt:    startedAt,
 					EndedAt:      ev.TS,
 					EndedBy:      ev.Actor,
 					Reason:       reason,
-					Actors:       sortedActorSet(windowActors),
+					Actors:       actors,
 					ReleasedRefs: refs,
-					EventCount:   windowEvents,
-					ClaimCount:   windowClaims,
-					FindingCount: windowFindings,
-					NoteCount:    windowNotes,
+					EventCount:   eventCount,
+					ClaimCount:   claimCount,
+					FindingCount: findingCount,
+					NoteCount:    noteCount,
 				})
 				if sessionID == "" {
 					s.Claims = make(map[string]*Claim)
 					s.Sessions = make(map[string]*Session)
+					namedWindows = map[string]*sessionWindow{}
+					windowStart = time.Time{}
+					windowActors = map[string]bool{}
+					windowEvents, windowClaims, windowFindings, windowNotes = 0, 0, 0, 0
 				} else {
 					for id, claim := range s.Claims {
 						if claim.SessionID == sessionID {
@@ -221,10 +261,8 @@ func Fold(events []event.Event) *State {
 							delete(s.Sessions, actor)
 						}
 					}
+					delete(namedWindows, sessionID)
 				}
-				windowStart = time.Time{}
-				windowActors = map[string]bool{}
-				windowEvents, windowClaims, windowFindings, windowNotes = 0, 0, 0, 0
 			}
 		case event.TypeFinding:
 			s.Findings = append(s.Findings, &Finding{
