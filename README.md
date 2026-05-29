@@ -51,7 +51,7 @@ comms doc <slug> --edit                       # wiki: open $EDITOR under sidecar
 comms lesson --list                           # global lessons: list slugs
 comms lesson <slug>                           # global lessons: print
 comms lesson <slug> --edit                    # global lessons: edit under sidecar flock
-comms ui [--demo] [--stale-after 90m] [--addr 127.0.0.1:7878] # local dashboard
+comms ui [--demo] [--all] [--stale-after 90m] [--addr 127.0.0.1:7878] # local dashboard
 ```
 
 The dashboard is for watching repo state. Agents still perform normal work via
@@ -61,6 +61,10 @@ selected named session when that project window is done. Events stay in the
 same append-only per-repo JSONL file, but every joined actor's claims, notes,
 findings, and releases carry `comms_session_id`/`comms_session_name` metadata so
 session data does not mix in the UI or API. Demo mode remains read-only.
+
+Use `comms ui --all` for a read-only portfolio dashboard across every repo log
+under the comms data directory. Per-repo logs stay separate on disk; the global
+view prefixes session names with the project.
 
 Use stable, readable actors for desktop app work, for example `claude-dev` and
 `codex-dev`, plus `--label "Claude Dev"` / `--label "Codex Dev"` for UI display.

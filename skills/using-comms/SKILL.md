@@ -50,6 +50,10 @@ The user may run `COMMS_ACTOR=human-eli comms ui` to watch the repo. The UI has
 active named-session cards, and a **Session Event Log** selector for active vs
 archived session logs.
 
+The user may run `comms ui --all` for a read-only dashboard across every repo
+that has a comms log. Do not use `--all` for mutations; start/join/end named
+sessions from the repo-specific CLI/UI so events land in the correct repo log.
+
 Agents still use the CLI for coordination. Do not click UI controls or call the
 UI mutation endpoints unless the user explicitly asks. If asked to inspect the
 UI backend, use:
