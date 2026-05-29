@@ -232,6 +232,60 @@ func TestBuildGlobalUISnapshotSkipsOrphanedRepoPath(t *testing.T) {
 	}
 }
 
+func TestBuildGlobalUISnapshotSkipsScratchTempRepoRoots(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	repoRoot := filepath.Join(t.TempDir(), "comms-uitest")
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatalf("mkdir scratch repo root: %v", err)
+	}
+	hash := "abc123scratch"
+	dataHome, err := paths.UserDataHome()
+	if err != nil {
+		t.Fatalf("user data home: %v", err)
+	}
+	logDir := filepath.Join(dataHome, "comms", hash)
+	if err := os.MkdirAll(logDir, 0o700); err != nil {
+		t.Fatalf("mkdir log dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(logDir, "repo-path.txt"), []byte(repoRoot+"\n"), 0o600); err != nil {
+		t.Fatalf("write repo path: %v", err)
+	}
+	now := time.Now().UTC()
+	for _, ev := range []event.Event{
+		{TS: now.Add(-10 * time.Minute), ID: event.NewID(now.Add(-10 * time.Minute)), Actor: "agent-a", Type: event.TypeHello, Data: map[string]interface{}{"base_name": "codex"}},
+		{TS: now.Add(-9 * time.Minute), ID: event.NewID(now.Add(-9 * time.Minute)), Actor: "agent-a", Type: event.TypeClaim, Scope: []string{"src/current.ts"}, Data: map[string]interface{}{"intent": "generated UI smoke work"}},
+	} {
+		if err := event.Append(filepath.Join(logDir, "log.jsonl"), ev); err != nil {
+			t.Fatalf("append event: %v", err)
+		}
+	}
+
+	snap, err := buildGlobalUISnapshot(90 * time.Minute)
+	if err != nil {
+		t.Fatalf("build global snapshot: %v", err)
+	}
+	if len(snap.Active) != 0 || len(snap.Claims) != 0 || len(snap.Sessions) != 0 {
+		t.Fatalf("scratch temp repo log should be hidden: active=%+v claims=%+v sessions=%+v", snap.Active, snap.Claims, snap.Sessions)
+	}
+}
+
+func TestIsScratchRepoRootRecognizesPrivateTmpRepos(t *testing.T) {
+	if _, err := os.Stat("/private/tmp"); err != nil {
+		t.Skip("/private/tmp is not available on this platform")
+	}
+	if !isScratchRepoRoot("/private/tmp/comms-uitest") {
+		t.Fatalf("expected /private/tmp generated comms repo to be scratch")
+	}
+	if !isScratchRepoRoot("/private/tmp/test-comms-repo") {
+		t.Fatalf("expected /private/tmp generated test comms repo to be scratch")
+	}
+	if isScratchRepoRoot("/private/tmp/freelancing-scraper") {
+		t.Fatalf("non-generated repo names under /private/tmp should remain visible")
+	}
+}
+
 func TestBuildGlobalUISnapshotKeepsTemporarilyUnreadableRepoPath(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
