@@ -141,11 +141,6 @@ func runDocEdit(slug string) error {
 	// the sidecar so other comms commands can proceed while the editor is open.
 	defer rt.Close()
 
-	editor, err := resolveEditor()
-	if err != nil {
-		Fatalf(2, "doc: %v", err)
-	}
-
 	docPath := rt.Paths.DocFilePath(slug)
 	if err := ensureDocStub(docPath, slug); err != nil {
 		Fatalf(2, "doc: %v", err)
@@ -172,7 +167,10 @@ func runDocEdit(slug string) error {
 	_ = rt.Close()
 
 	// Run the editor.
-	cmd := exec.Command(editor, docPath)
+	cmd, err := newEditorCommand(docPath)
+	if err != nil {
+		Fatalf(2, "doc: %v", err)
+	}
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -234,13 +232,29 @@ func readSidecarHolder(path string) string {
 	return "another editor"
 }
 
-// resolveEditor picks an editor from $VISUAL, $EDITOR, then `vi` fallback.
-func resolveEditor() (string, error) {
+// newEditorCommand builds an editor command from $VISUAL, $EDITOR, then `vi`.
+// EDITOR values commonly include arguments, for example "code --wait".
+func newEditorCommand(path string) (*exec.Cmd, error) {
+	spec, err := resolveEditorSpec()
+	if err != nil {
+		return nil, err
+	}
+	parts := strings.Fields(spec)
+	if len(parts) == 0 {
+		return nil, fmt.Errorf("empty editor command")
+	}
+	exe, err := exec.LookPath(parts[0])
+	if err != nil {
+		return nil, fmt.Errorf("editor %q not found", parts[0])
+	}
+	args := append(append([]string{}, parts[1:]...), path)
+	return exec.Command(exe, args...), nil
+}
+
+func resolveEditorSpec() (string, error) {
 	for _, env := range []string{"VISUAL", "EDITOR"} {
-		if v := os.Getenv(env); v != "" {
-			if _, err := exec.LookPath(v); err == nil {
-				return v, nil
-			}
+		if v := strings.TrimSpace(os.Getenv(env)); v != "" {
+			return v, nil
 		}
 	}
 	if _, err := exec.LookPath("vi"); err == nil {

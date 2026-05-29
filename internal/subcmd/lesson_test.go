@@ -66,6 +66,64 @@ func TestLessonEditCreatesGlobalStub(t *testing.T) {
 	}
 }
 
+func TestEditorCommandSupportsArguments(t *testing.T) {
+	dir := t.TempDir()
+	editor := filepath.Join(dir, "editor-with-args")
+	if err := os.WriteFile(editor, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write editor: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("EDITOR", "editor-with-args --wait --reuse-window")
+
+	cmd, err := newEditorCommand("/tmp/example.md")
+	if err != nil {
+		t.Fatalf("newEditorCommand: %v", err)
+	}
+	if filepath.Base(cmd.Path) != "editor-with-args" {
+		t.Fatalf("editor executable = %q", cmd.Path)
+	}
+	want := []string{"--wait", "--reuse-window", "/tmp/example.md"}
+	if strings.Join(cmd.Args[1:], "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("editor args = %#v, want %#v", cmd.Args[1:], want)
+	}
+}
+
+func TestLessonEditRunsEditorWithArguments(t *testing.T) {
+	home := t.TempDir()
+	dir := t.TempDir()
+	editor := filepath.Join(dir, "editor-with-args")
+	script := `#!/bin/sh
+if [ "$1" != "--append" ]; then
+  echo "missing --append" >&2
+  exit 7
+fi
+printf '\nEdited through argument-aware editor.\n' >> "$2"
+`
+	if err := os.WriteFile(editor, []byte(script), 0o755); err != nil {
+		t.Fatalf("write editor: %v", err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("COMMS_ACTOR", "human-eli")
+	t.Setenv("USER", "eli")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("EDITOR", "editor-with-args --append")
+
+	if err := runLessonEdit("argument-editor"); err != nil {
+		t.Fatalf("runLessonEdit: %v", err)
+	}
+	lessonsDir, err := paths.GlobalLessonsDir()
+	if err != nil {
+		t.Fatalf("global lessons dir: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(lessonsDir, "argument-editor.md"))
+	if err != nil {
+		t.Fatalf("read lesson: %v", err)
+	}
+	if !strings.Contains(string(raw), "Edited through argument-aware editor.") {
+		t.Fatalf("editor did not receive/run with args, lesson=%q", raw)
+	}
+}
+
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
 	old := os.Stdout

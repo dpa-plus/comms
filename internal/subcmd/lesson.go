@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -119,10 +118,6 @@ func runLessonEdit(slug string) error {
 	if err != nil {
 		return err
 	}
-	editor, err := resolveEditor()
-	if err != nil {
-		Fatalf(2, "lesson: %v", err)
-	}
 	dir, err := paths.GlobalLessonsDir()
 	if err != nil {
 		return err
@@ -144,7 +139,10 @@ func runLessonEdit(slug string) error {
 	stampSidecar(sidecarPath, a)
 	defer sidecar.Close()
 
-	cmd := exec.Command(editor, lessonPath)
+	cmd, err := newEditorCommand(lessonPath)
+	if err != nil {
+		Fatalf(2, "lesson: %v", err)
+	}
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
