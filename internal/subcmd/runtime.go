@@ -36,6 +36,11 @@ type OpenOpts struct {
 	// `--repo-id` flag.
 	RepoIDOverride string
 
+	// RepoRootOverride is an explicit repo path. It bypasses cwd discovery and
+	// does not spawn git, which keeps comms usable from a safe directory when a
+	// desktop app process has lost macOS TCC access to its cwd.
+	RepoRootOverride string
+
 	// SkipLock disables flock acquisition even when Mutating==true. Used
 	// only by `comms check` to avoid blocking on a long-running command;
 	// since check is read-only on the log it's safe.
@@ -65,7 +70,7 @@ func Open(opts OpenOpts) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	id, err := repo.DiscoverFromCWD(opts.RepoIDOverride)
+	id, err := discoverRuntimeRepo(opts)
 	if err != nil {
 		return nil, err
 	}
@@ -103,6 +108,22 @@ func Open(opts OpenOpts) (*Runtime, error) {
 	rt.Events = events
 	rt.State = state.Fold(events)
 	return rt, nil
+}
+
+func discoverRuntimeRepo(opts OpenOpts) (repo.Identity, error) {
+	if opts.RepoRootOverride != "" {
+		return repo.DiscoverExplicit(opts.RepoRootOverride)
+	}
+	if globalRepoRoot != "" {
+		return repo.DiscoverExplicit(globalRepoRoot)
+	}
+	if envRepo := os.Getenv("COMMS_REPO"); envRepo != "" {
+		return repo.DiscoverExplicit(envRepo)
+	}
+	if globalRepoID != "" {
+		return repo.Identity{}, fmt.Errorf("--repo-id is no longer used for repo selection; use --repo /absolute/repo/path instead")
+	}
+	return repo.DiscoverFromCWD(opts.RepoIDOverride)
 }
 
 // Append writes an event to the log, then re-folds the state so the caller

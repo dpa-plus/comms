@@ -23,6 +23,7 @@ func main() {
 		SilenceErrors: true,
 		Version:       Version,
 	}
+	subcmd.AddGlobalFlags(root)
 	root.AddCommand(
 		subcmd.NewHelloCmd(),
 		subcmd.NewClaimCmd(),

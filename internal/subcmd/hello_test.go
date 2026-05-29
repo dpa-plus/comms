@@ -1,6 +1,9 @@
 package subcmd
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 func TestRunHelloKeepsLeaderOnReentry(t *testing.T) {
 	repo := setupUITestRepo(t)
@@ -28,5 +31,27 @@ func TestRunHelloKeepsLeaderOnReentry(t *testing.T) {
 	}
 	if got := rt.State.Sessions["codex-1"].Label; got != "Codex Dev" {
 		t.Fatalf("label = %q, want Codex Dev", got)
+	}
+}
+
+func TestOpenWithExplicitRepoRootWorksOutsideRepo(t *testing.T) {
+	repo := setupUITestRepo(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("COMMS_ACTOR", "codex-1")
+	t.Setenv("USER", "eli")
+	t.Chdir(t.TempDir())
+
+	rt, err := Open(OpenOpts{Mutating: true, RepoRootOverride: repo})
+	if err != nil {
+		t.Fatalf("open runtime with repo root override: %v", err)
+	}
+	defer rt.Close()
+
+	want, err := filepath.EvalSymlinks(repo)
+	if err != nil {
+		t.Fatalf("eval want root: %v", err)
+	}
+	if rt.Repo.Root != want {
+		t.Fatalf("repo root = %q, want %q", rt.Repo.Root, want)
 	}
 }

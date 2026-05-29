@@ -26,6 +26,16 @@ COMMS_ACTOR=codex-dev comms claim "src/foo.ts" --intent "fix bug"
 COMMS_ACTOR=codex-dev comms note --priority "Everyone should know: stop editing aggregation until the current claim clears."
 ```
 
+If a desktop app loses macOS access to its current directory, run `comms` from a
+safe directory and point it at the repo explicitly:
+
+```bash
+COMMS_ACTOR=claude-dev comms --repo /Users/Eli/code/freelancing-scraper status
+# or persist for one shell:
+export COMMS_REPO=/Users/Eli/code/freelancing-scraper
+COMMS_ACTOR=claude-dev comms status
+```
+
 See `docs/INSTALL.md` for manual and optional automated setup,
 `docs/PROTOCOL.md` for the event schema, `docs/DESIGN.md` for the why.
 
@@ -52,6 +62,9 @@ comms lesson --list                           # global lessons: list slugs
 comms lesson <slug>                           # global lessons: print
 comms lesson <slug> --edit                    # global lessons: edit under sidecar flock
 comms ui [--demo] [--all] [--stale-after 90m] [--addr 127.0.0.1:7878] # local dashboard
+
+Global flags:
+  --repo /absolute/repo/path                  # bypass cwd/git discovery
 ```
 
 The dashboard is for watching repo state. Agents still perform normal work via

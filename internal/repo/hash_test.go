@@ -1,7 +1,9 @@
 package repo
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -64,6 +66,36 @@ func TestDiscoverWithOverride(t *testing.T) {
 	}
 	if id.Root == "" || id.Hash == "" {
 		t.Errorf("expected populated identity, got %+v", id)
+	}
+}
+
+func TestDiscoverExplicitRepoRootFromSubdir(t *testing.T) {
+	dir := initTestGitRepo(t)
+	subdir := dir + "/nested/path"
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatalf("mkdir subdir: %v", err)
+	}
+
+	id, err := DiscoverExplicit(subdir)
+	if err != nil {
+		t.Fatalf("DiscoverExplicit: %v", err)
+	}
+	want, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("eval want root: %v", err)
+	}
+	if id.Root != want {
+		t.Fatalf("root = %q, want %q", id.Root, want)
+	}
+	if id.Hash == "" || len(id.Hash) != 12 {
+		t.Fatalf("hash = %q, want 12 chars", id.Hash)
+	}
+}
+
+func TestDiscoverExplicitFailsOutsideGit(t *testing.T) {
+	_, err := DiscoverExplicit(t.TempDir())
+	if err == nil {
+		t.Fatal("expected error outside git repo")
 	}
 }
 

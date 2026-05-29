@@ -206,7 +206,13 @@ The path overlap is computed purely as a string operation — `comms` never glob
 
 `<repo-hash>` = first 12 hex chars of `sha256(filepath.EvalSymlinks(git rev-parse --show-toplevel))`.
 
-If `git rev-parse` fails (not a git repo, no git installed), pass `--repo-id <hash>` explicitly to override. Two repos that resolve to the same path get the same hash; renaming or moving a repo creates a new hash and orphans the old log.
+If cwd discovery fails, pass `--repo /absolute/repo/path` or set
+`COMMS_REPO=/absolute/repo/path`. Explicit repo paths are resolved by walking up
+to `.git` without calling `os.Getwd()` or spawning `git`, so they keep working
+when a desktop app process hits a macOS TCC/getcwd failure on a protected
+Desktop/Documents/Downloads path. Two repos that resolve to the same path get
+the same hash; renaming or moving a repo creates a new hash and orphans the old
+log.
 
 ## Concurrency
 
