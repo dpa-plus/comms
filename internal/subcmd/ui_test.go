@@ -145,6 +145,57 @@ func TestBuildGlobalUISnapshotAttachesLegacyClaimsToProjectCurrentSession(t *tes
 	}
 }
 
+func TestBuildGlobalUISnapshotDedupesDuplicateRepoRoots(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	repoRoot := filepath.Join(home, "002")
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatalf("mkdir repo root: %v", err)
+	}
+	dataHome, err := paths.UserDataHome()
+	if err != nil {
+		t.Fatalf("user data home: %v", err)
+	}
+	now := time.Now().UTC()
+	for _, tc := range []struct {
+		hash   string
+		actor  string
+		scope  string
+		offset time.Duration
+	}{
+		{hash: "oldhash00001", actor: "old-agent", scope: "src/old.ts", offset: -30 * time.Minute},
+		{hash: "newhash00002", actor: "new-agent", scope: "src/new.ts", offset: -5 * time.Minute},
+	} {
+		logDir := filepath.Join(dataHome, "comms", tc.hash)
+		if err := os.MkdirAll(logDir, 0o700); err != nil {
+			t.Fatalf("mkdir log dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(logDir, "repo-path.txt"), []byte(repoRoot+"\n"), 0o600); err != nil {
+			t.Fatalf("write repo path: %v", err)
+		}
+		for _, ev := range []event.Event{
+			{TS: now.Add(tc.offset), ID: event.NewID(now.Add(tc.offset)), Actor: tc.actor, Type: event.TypeHello, Data: map[string]interface{}{"base_name": "codex"}},
+			{TS: now.Add(tc.offset + time.Minute), ID: event.NewID(now.Add(tc.offset + time.Minute)), Actor: tc.actor, Type: event.TypeClaim, Scope: []string{tc.scope}, Data: map[string]interface{}{"intent": "current work"}},
+		} {
+			if err := event.Append(filepath.Join(logDir, "log.jsonl"), ev); err != nil {
+				t.Fatalf("append event: %v", err)
+			}
+		}
+	}
+
+	snap, err := buildGlobalUISnapshot(90 * time.Minute)
+	if err != nil {
+		t.Fatalf("build global snapshot: %v", err)
+	}
+	if len(snap.Active) != 1 || snap.Active[0].ID != "newhash00002:current" {
+		t.Fatalf("duplicate repo roots should keep only newest active session: %+v", snap.Active)
+	}
+	if len(snap.Claims) != 1 || snap.Claims[0].Actor != "new-agent" || snap.Claims[0].Scope != "src/new.ts" {
+		t.Fatalf("duplicate repo roots should keep newest log claims: %+v", snap.Claims)
+	}
+}
+
 func TestBuildGlobalUISnapshotSkipsOrphanedRepoPath(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

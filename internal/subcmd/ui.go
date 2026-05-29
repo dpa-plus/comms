@@ -532,6 +532,14 @@ type uiEvent struct {
 	TS      time.Time  `json:"ts"`
 }
 
+type globalLogCandidate struct {
+	hash     string
+	repoRoot string
+	repoName string
+	events   []event.Event
+	lastTS   time.Time
+}
+
 func buildUISnapshot(rt *Runtime, staleAfter time.Duration) uiSnapshot {
 	now := time.Now()
 	out := uiSnapshot{
@@ -730,6 +738,8 @@ func buildGlobalUISnapshot(staleAfter time.Duration) (uiSnapshot, error) {
 		}
 		return uiSnapshot{}, err
 	}
+	candidates := map[string]globalLogCandidate{}
+	var candidateKeys []string
 	for _, entry := range entries {
 		if !entry.IsDir() || entry.Name() == "global" {
 			continue
@@ -752,6 +762,27 @@ func buildGlobalUISnapshot(staleAfter time.Duration) (uiSnapshot, error) {
 		if err != nil {
 			continue
 		}
+		key := globalProjectKey(repoRoot, hash)
+		candidate := globalLogCandidate{
+			hash:     hash,
+			repoRoot: repoRoot,
+			repoName: repoName,
+			events:   events,
+			lastTS:   latestEventTS(events),
+		}
+		if existing, ok := candidates[key]; !ok {
+			candidates[key] = candidate
+			candidateKeys = append(candidateKeys, key)
+		} else if globalLogCandidateNewer(candidate, existing) {
+			candidates[key] = candidate
+		}
+	}
+	for _, key := range candidateKeys {
+		candidate := candidates[key]
+		hash := candidate.hash
+		repoRoot := candidate.repoRoot
+		repoName := candidate.repoName
+		events := candidate.events
 		st := state.Fold(events)
 		active, archived := buildCommsSessionViews(events)
 		active = filterActiveCommsSessionViews(active, st, now.Add(-4*time.Hour))
@@ -823,6 +854,34 @@ func buildGlobalUISnapshot(staleAfter time.Duration) (uiSnapshot, error) {
 	attachClaimsToActiveSessions(&out)
 	out.Actions = buildUIActions(out)
 	return out, nil
+}
+
+func globalProjectKey(repoRoot, hash string) string {
+	repoRoot = strings.TrimSpace(repoRoot)
+	if repoRoot == "" {
+		return "hash:" + hash
+	}
+	if resolved, err := filepath.EvalSymlinks(repoRoot); err == nil {
+		return "repo:" + resolved
+	}
+	return "repo:" + filepath.Clean(repoRoot)
+}
+
+func latestEventTS(events []event.Event) time.Time {
+	var latest time.Time
+	for _, ev := range events {
+		if ev.TS.After(latest) {
+			latest = ev.TS
+		}
+	}
+	return latest
+}
+
+func globalLogCandidateNewer(candidate, existing globalLogCandidate) bool {
+	if !candidate.lastTS.Equal(existing.lastTS) {
+		return candidate.lastTS.After(existing.lastTS)
+	}
+	return candidate.hash > existing.hash
 }
 
 func readSmallFile(path string) string {
