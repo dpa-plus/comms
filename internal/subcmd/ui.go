@@ -765,7 +765,7 @@ func buildGlobalUISnapshot(staleAfter time.Duration) (uiSnapshot, error) {
 				Hostname:    s.Hostname,
 				TS:          s.TS,
 				Leader:      s.Leader,
-				SessionID:   hash + ":" + s.SessionID,
+				SessionID:   projectSessionID(hash, s.SessionID),
 				SessionName: projectSessionName(repoName, s.SessionName),
 			})
 		}
@@ -779,20 +779,20 @@ func buildGlobalUISnapshot(staleAfter time.Duration) (uiSnapshot, error) {
 				Age:         shortAge(now.Sub(c.TS)),
 				Stale:       now.Sub(c.TS) >= staleAfter,
 				StoleID:     c.StolenFromID,
-				SessionID:   hash + ":" + c.SessionID,
+				SessionID:   projectSessionID(hash, c.SessionID),
 				SessionName: projectSessionName(repoName, c.SessionName),
 			})
 		}
 		for _, f := range recentFindings(st, now.Add(-24*time.Hour), 12) {
 			out.Findings = append(out.Findings, uiFinding{
 				ID: f.ID, Actor: f.Actor, Category: f.Category, Summary: repoName + ": " + f.Summary,
-				Priority: f.Priority, TS: f.TS, SessionID: hash + ":" + f.SessionID, SessionName: projectSessionName(repoName, f.SessionName),
+				Priority: f.Priority, TS: f.TS, SessionID: projectSessionID(hash, f.SessionID), SessionName: projectSessionName(repoName, f.SessionName),
 			})
 		}
 		for _, n := range recentNotes(st, now.Add(-24*time.Hour), 8) {
 			out.Notes = append(out.Notes, uiNote{
 				ID: n.ID, Actor: n.Actor, Body: repoName + ": " + n.Body,
-				Priority: n.Priority, TS: n.TS, SessionID: hash + ":" + n.SessionID, SessionName: projectSessionName(repoName, n.SessionName),
+				Priority: n.Priority, TS: n.TS, SessionID: projectSessionID(hash, n.SessionID), SessionName: projectSessionName(repoName, n.SessionName),
 			})
 		}
 		if repoRoot != "" {
@@ -842,6 +842,13 @@ func projectSessionName(repoName, sessionName string) string {
 		return repoName + " / legacy"
 	}
 	return repoName + " / " + sessionName
+}
+
+func projectSessionID(hash, sessionID string) string {
+	if strings.TrimSpace(sessionID) == "" {
+		return hash + ":current"
+	}
+	return hash + ":" + sessionID
 }
 
 func attachClaimsToActiveSessions(snap *uiSnapshot) {

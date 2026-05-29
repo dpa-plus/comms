@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -97,6 +99,40 @@ func TestBuildUISnapshotUsesEmptySlicesForMissingArchiveAndLessons(t *testing.T)
 	}
 	if strings.Contains(string(body), `"lessons":null`) {
 		t.Fatalf("lessons should encode as [], got %s", body)
+	}
+}
+
+func TestBuildGlobalUISnapshotAttachesLegacyClaimsToProjectCurrentSession(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	hash := "abc123legacy"
+	logDir := filepath.Join(home, "Library", "Application Support", "comms", hash)
+	if err := os.MkdirAll(logDir, 0o700); err != nil {
+		t.Fatalf("mkdir log dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(logDir, "repo-path.txt"), []byte("/tmp/example-project\n"), 0o600); err != nil {
+		t.Fatalf("write repo path: %v", err)
+	}
+	now := time.Now().UTC()
+	for _, ev := range []event.Event{
+		{TS: now.Add(-10 * time.Minute), ID: event.NewID(now.Add(-10 * time.Minute)), Actor: "claude-dev", Type: event.TypeHello, Data: map[string]interface{}{"base_name": "claude"}},
+		{TS: now.Add(-9 * time.Minute), ID: event.NewID(now.Add(-9 * time.Minute)), Actor: "claude-dev", Type: event.TypeClaim, Scope: []string{"src/current.ts"}, Data: map[string]interface{}{"intent": "legacy current work"}},
+	} {
+		if err := event.Append(filepath.Join(logDir, "log.jsonl"), ev); err != nil {
+			t.Fatalf("append event: %v", err)
+		}
+	}
+
+	snap, err := buildGlobalUISnapshot(90 * time.Minute)
+	if err != nil {
+		t.Fatalf("build global snapshot: %v", err)
+	}
+	if len(snap.Active) != 1 || snap.Active[0].ID != hash+":current" {
+		t.Fatalf("expected one prefixed legacy current session: %+v", snap.Active)
+	}
+	if len(snap.Active[0].Claims) != 1 || snap.Active[0].Claims[0].Scope != "src/current.ts" {
+		t.Fatalf("legacy claim should attach to prefixed current session: active=%+v claims=%+v", snap.Active, snap.Claims)
 	}
 }
 
