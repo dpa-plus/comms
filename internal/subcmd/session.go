@@ -148,7 +148,7 @@ func runSessionStart(name, label string) error {
 		return err
 	}
 	defer rt.Close()
-	if id, _ := activeCommsSessionByName(rt.State, name); id != "" {
+	if id, _ := activeCommsSessionByName(rt.State, name, time.Now().Add(-4*time.Hour)); id != "" {
 		return fmt.Errorf("session start: %q is already active; use `comms session join %q`", name, name)
 	}
 	helloAt := time.Now().UTC().Add(time.Millisecond)
@@ -173,7 +173,7 @@ func runSessionJoin(name, label string) error {
 		return err
 	}
 	defer rt.Close()
-	id, canonicalName := activeCommsSessionByName(rt.State, name)
+	id, canonicalName := activeCommsSessionByName(rt.State, name, time.Now().Add(-4*time.Hour))
 	if id == "" {
 		return fmt.Errorf("session join: no active comms session named %q; create it with `comms session start %q`", name, name)
 	}
@@ -198,7 +198,7 @@ func runSessionEnd(name, reason string) error {
 		return err
 	}
 	defer rt.Close()
-	id, canonicalName := activeCommsSessionByName(rt.State, name)
+	id, canonicalName := activeCommsSessionByName(rt.State, name, time.Now().Add(-4*time.Hour))
 	if id == "" {
 		return fmt.Errorf("session end: no active comms session named %q", name)
 	}
@@ -293,12 +293,12 @@ func appendLeaderTransfer(rt *Runtime, target, reason string) error {
 	})
 }
 
-func activeCommsSessionByName(s *state.State, name string) (string, string) {
+func activeCommsSessionByName(s *state.State, name string, sessionCutoff time.Time) (string, string) {
 	name = strings.TrimSpace(name)
 	if s == nil || name == "" {
 		return "", ""
 	}
-	for _, sess := range s.Sessions {
+	for _, sess := range collectActiveSessions(s, sessionCutoff) {
 		if sess.SessionID == "" {
 			continue
 		}
