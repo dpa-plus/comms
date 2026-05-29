@@ -143,6 +143,9 @@ func TestBuildGlobalUISnapshotAttachesLegacyClaimsToProjectCurrentSession(t *tes
 	if len(snap.Active[0].Claims) != 1 || snap.Active[0].Claims[0].Scope != "src/current.ts" {
 		t.Fatalf("legacy claim should attach to prefixed current session: active=%+v claims=%+v", snap.Active, snap.Claims)
 	}
+	if snap.Claims[0].RepoHash != hash {
+		t.Fatalf("global claim should expose owning repo hash, got %+v", snap.Claims[0])
+	}
 }
 
 func TestBuildGlobalUISnapshotDedupesDuplicateRepoRoots(t *testing.T) {
@@ -193,6 +196,59 @@ func TestBuildGlobalUISnapshotDedupesDuplicateRepoRoots(t *testing.T) {
 	}
 	if len(snap.Claims) != 1 || snap.Claims[0].Actor != "new-agent" || snap.Claims[0].Scope != "src/new.ts" {
 		t.Fatalf("duplicate repo roots should keep newest log claims: %+v", snap.Claims)
+	}
+}
+
+func TestUIAllModeCanReleaseClaimByRepoHash(t *testing.T) {
+	repo := setupUITestRepo(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("COMMS_ACTOR", "human-eli")
+	t.Setenv("USER", "eli")
+
+	rt, err := Open(OpenOpts{Mutating: true, RepoRootOverride: repo})
+	if err != nil {
+		t.Fatalf("open runtime: %v", err)
+	}
+	hash := rt.Repo.Hash
+	claimID := "01JX2Q3Y7W5B6N9P0R1S2T4G0"
+	if err := rt.Append(event.Event{
+		TS:    time.Now().Add(-9 * time.Minute).UTC(),
+		ID:    claimID,
+		Actor: "claude-dev",
+		Type:  event.TypeClaim,
+		Scope: []string{"src/config.ts"},
+		Data:  map[string]interface{}{"intent": "global release smoke"},
+	}); err != nil {
+		t.Fatalf("append claim: %v", err)
+	}
+	if err := rt.Close(); err != nil {
+		t.Fatalf("close runtime: %v", err)
+	}
+
+	body := `{"claim_id":"` + claimID + `","repo_hash":"` + hash + `","reason":"cleared from global UI"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/claim/release", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	uiServer{all: true, staleAfter: 90 * time.Minute}.serveReleaseClaim(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var snap uiSnapshot
+	if err := json.Unmarshal(rec.Body.Bytes(), &snap); err != nil {
+		t.Fatalf("decode snapshot: %v", err)
+	}
+	if len(snap.Claims) != 0 {
+		t.Fatalf("released claim should be gone from global snapshot: %+v", snap.Claims)
+	}
+
+	rt, err = Open(OpenOpts{Mutating: false, RepoRootOverride: repo})
+	if err != nil {
+		t.Fatalf("reopen runtime: %v", err)
+	}
+	defer rt.Close()
+	if got := rt.State.ClaimByID(claimID); got != nil {
+		t.Fatalf("claim still active after global UI release: %+v", got)
 	}
 }
 
