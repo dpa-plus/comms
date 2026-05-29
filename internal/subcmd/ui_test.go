@@ -579,6 +579,38 @@ func TestUIServeTransferLeader(t *testing.T) {
 	}
 }
 
+func TestUIServeTransferLeaderRejectsStaleActor(t *testing.T) {
+	repo := setupUITestRepo(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("COMMS_ACTOR", "human-eli")
+	t.Setenv("USER", "eli")
+	t.Chdir(repo)
+
+	rt, err := Open(OpenOpts{Mutating: true})
+	if err != nil {
+		t.Fatalf("open runtime: %v", err)
+	}
+	for _, ev := range []event.Event{
+		{TS: time.Now().Add(-5 * time.Hour).UTC(), ID: "01JX2Q3Y7W5B6N9P0R1S2T3U6C", Actor: "claude-stale", Type: event.TypeHello, Data: map[string]interface{}{"base_name": "claude"}},
+		{TS: time.Now().Add(-9 * time.Minute).UTC(), ID: "01JX2Q3Y7W5B6N9P0R1S2T3U6D", Actor: "codex-fresh", Type: event.TypeHello, Data: map[string]interface{}{"base_name": "codex", "leader": true}},
+	} {
+		if err := rt.Append(ev); err != nil {
+			t.Fatalf("append setup event: %v", err)
+		}
+	}
+	if err := rt.Close(); err != nil {
+		t.Fatalf("close runtime: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/session/lead", strings.NewReader(`{"actor":"claude-stale","reason":"lead now"}`))
+	rec := httptest.NewRecorder()
+	uiServer{staleAfter: 90 * time.Minute}.serveTransferLeader(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestUIStartCommsSessionAllowsAnotherNamedSessionWhenLegacyEventsExist(t *testing.T) {
 	repo := setupUITestRepo(t)
 	t.Setenv("HOME", t.TempDir())
