@@ -181,6 +181,56 @@ func TestBuildGlobalUISnapshotSkipsOrphanedRepoPath(t *testing.T) {
 	}
 }
 
+func TestBuildGlobalUISnapshotKeepsTemporarilyUnreadableRepoPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	lockedParent := filepath.Join(home, "locked")
+	repoRoot := filepath.Join(lockedParent, "real-project")
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatalf("mkdir repo root: %v", err)
+	}
+	if err := os.Chmod(lockedParent, 0); err != nil {
+		t.Fatalf("chmod locked parent: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(lockedParent, 0o755)
+	})
+
+	hash := "abc123locked"
+	dataHome, err := paths.UserDataHome()
+	if err != nil {
+		t.Fatalf("user data home: %v", err)
+	}
+	logDir := filepath.Join(dataHome, "comms", hash)
+	if err := os.MkdirAll(logDir, 0o700); err != nil {
+		t.Fatalf("mkdir log dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(logDir, "repo-path.txt"), []byte(repoRoot+"\n"), 0o600); err != nil {
+		t.Fatalf("write repo path: %v", err)
+	}
+	now := time.Now().UTC()
+	for _, ev := range []event.Event{
+		{TS: now.Add(-10 * time.Minute), ID: event.NewID(now.Add(-10 * time.Minute)), Actor: "agent-a", Type: event.TypeHello, Data: map[string]interface{}{"base_name": "codex"}},
+		{TS: now.Add(-9 * time.Minute), ID: event.NewID(now.Add(-9 * time.Minute)), Actor: "agent-a", Type: event.TypeClaim, Scope: []string{"src/current.ts"}, Data: map[string]interface{}{"intent": "work in protected repo"}},
+	} {
+		if err := event.Append(filepath.Join(logDir, "log.jsonl"), ev); err != nil {
+			t.Fatalf("append event: %v", err)
+		}
+	}
+
+	snap, err := buildGlobalUISnapshot(90 * time.Minute)
+	if err != nil {
+		t.Fatalf("build global snapshot: %v", err)
+	}
+	if len(snap.Active) != 1 || snap.Active[0].ID != hash+":current" {
+		t.Fatalf("temporarily unreadable repo path should remain visible: active=%+v", snap.Active)
+	}
+	if len(snap.Claims) != 1 || snap.Claims[0].Scope != "src/current.ts" {
+		t.Fatalf("claim from temporarily unreadable repo should remain visible: %+v", snap.Claims)
+	}
+}
+
 func TestUIServeEndCommsSessionArchivesAndReleasesAllClaims(t *testing.T) {
 	repo := setupUITestRepo(t)
 	t.Setenv("HOME", t.TempDir())
