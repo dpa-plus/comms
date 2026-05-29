@@ -135,7 +135,7 @@ func printEventHuman(ev event.Event) {
 			fmt.Printf("%s  claim    @%s  %s  %q\n", ts, ev.Actor, joinScope(ev.Scope), intent)
 		}
 	case event.TypeRelease:
-		result, _ := ev.Data["result"].(string)
+		result := eventSummary(ev)
 		orig, _ := ev.Data["original_actor"].(string)
 		if orig != "" && orig != ev.Actor {
 			fmt.Printf("%s  release  @%s arbitrated @%s's claim  %q\n", ts, ev.Actor, orig, result)
