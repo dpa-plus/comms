@@ -89,7 +89,9 @@ func UserDataHome() (string, error) {
 		}
 		return filepath.Join(home, "Library", "Application Support"), nil
 	case "linux", "freebsd", "netbsd", "openbsd":
-		if xdg := os.Getenv("XDG_DATA_HOME"); xdg != "" {
+		// Per the XDG Base Directory spec, a relative XDG_DATA_HOME is invalid
+		// and MUST be ignored; fall through to the ~/.local/share default.
+		if xdg := os.Getenv("XDG_DATA_HOME"); xdg != "" && filepath.IsAbs(xdg) {
 			return xdg, nil
 		}
 		home, err := os.UserHomeDir()

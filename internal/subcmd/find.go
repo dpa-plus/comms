@@ -45,7 +45,7 @@ numbers, issue links. Example:
 			return runFind(args[0], args[1], refs, priority)
 		},
 	}
-	cmd.Flags().StringSliceVar(&refs, "ref", nil, "kind:value reference (repeatable)")
+	cmd.Flags().StringArrayVar(&refs, "ref", nil, "kind:value reference (repeatable)")
 	cmd.Flags().BoolVar(&priority, "priority", false, "leader-only: pin this finding as high priority in status/UI")
 	return cmd
 }
@@ -56,6 +56,11 @@ func runFind(category, summary string, refs []string, priority bool) error {
 	}
 	if summary == "" {
 		Fatalf(2, "find: summary is empty")
+	}
+	// The summary is rendered raw via %s in status/log output, so reject any
+	// control character (terminal-injection vector) and cap the length.
+	if err := rejectControlText("finding summary", summary, 280); err != nil {
+		Fatalf(2, "find: %v", err)
 	}
 	parsedRefs, err := parseRefs(refs)
 	if err != nil {

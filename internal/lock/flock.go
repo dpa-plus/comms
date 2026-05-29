@@ -56,6 +56,32 @@ func TryAcquire(path string) (*Handle, error) {
 	return &Handle{f: f}, nil
 }
 
+// TryAcquireOK is the non-blocking acquire used to build a *bounded* (looping,
+// deadline-capped) acquire on top of a single non-blocking attempt. It returns:
+//
+//	(handle, true, nil)  — lock obtained; caller owns the FD and must Close it.
+//	(nil, false, nil)    — lock is currently held by another process (EWOULDBLOCK).
+//	(nil, false, err)    — a real error (e.g. open failure).
+//
+// Unlike TryAcquire, the "already held" case is NOT an error, which lets a
+// caller poll without allocating/inspecting a sentinel each iteration. The FD
+// is always CLOSED when the lock is not obtained, so nothing leaks across a
+// busy-wait loop.
+func TryAcquireOK(path string) (*Handle, bool, error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, false, fmt.Errorf("lock: open %s: %w", path, err)
+	}
+	if err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
+		_ = f.Close()
+		if err == unix.EWOULDBLOCK {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("lock: flock %s: %w", path, err)
+	}
+	return &Handle{f: f}, true, nil
+}
+
 // Close releases the flock by closing the underlying FD. Safe to call
 // multiple times.
 func (h *Handle) Close() error {

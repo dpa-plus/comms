@@ -101,11 +101,29 @@ func Decode(line []byte) (Event, error) {
 	return e, nil
 }
 
-// NewID returns a fresh ULID (monotonic, time-prefixed, 26 chars).
+// entropy is a process-wide, mutex-guarded monotonic ULID entropy source.
 //
-// We use a fresh entropy source per call. This is fine for human-scale
-// concurrency (a few processes per second); for higher rates we would
-// switch to ulid.MonotonicEntropy with a shared mutex.
+// A MonotonicReader guarantees that two ULIDs minted in the SAME millisecond
+// are strictly increasing. The state reducer (internal/state) orders events to
+// reconstruct claims/sessions, and the documented invariant is that IDs are
+// time-ordered AND monotonic. crypto/rand.Reader alone is NOT monotonic: two
+// same-millisecond IDs share the 48-bit timestamp prefix but get independent
+// random suffixes, so they sort in random order — which previously let
+// same-millisecond events (e.g. a claim and its steal/release) replay out of
+// causal order. LockedMonotonicReader is safe for concurrent use.
+var entropy = &ulid.LockedMonotonicReader{MonotonicReader: ulid.Monotonic(rand.Reader, 0)}
+
+// NewID returns a fresh, monotonic, time-prefixed ULID (26 chars).
+//
+// IDs minted within the same process in the same millisecond are guaranteed
+// strictly increasing via the shared monotonic entropy source above. On the
+// (astronomically unlikely) monotonic-overflow error — generating ~2^80 IDs in
+// one millisecond — we fall back to a fresh non-monotonic suffix rather than
+// panic. Correctness does not depend on the fallback being monotonic: the state
+// reducer orders events by timestamp (see internal/state.Fold), not by ULID.
 func NewID(now time.Time) string {
+	if id, err := ulid.New(ulid.Timestamp(now), entropy); err == nil {
+		return id.String()
+	}
 	return ulid.MustNew(ulid.Timestamp(now), rand.Reader).String()
 }

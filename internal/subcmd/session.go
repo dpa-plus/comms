@@ -338,7 +338,7 @@ func activeCommsSessionByName(s *state.State, name string, sessionCutoff time.Ti
 			return sess.SessionID, sess.SessionName
 		}
 	}
-	for _, claim := range s.Claims {
+	for _, claim := range sortedClaims(s) {
 		if claim.SessionID == "" {
 			continue
 		}

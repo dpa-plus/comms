@@ -233,13 +233,17 @@ func readSidecarHolder(path string) string {
 }
 
 // newEditorCommand builds an editor command from $VISUAL, $EDITOR, then `vi`.
-// EDITOR values commonly include arguments, for example "code --wait".
+// EDITOR values commonly include arguments, for example "code --wait", and may
+// quote a binary path that contains spaces.
 func newEditorCommand(path string) (*exec.Cmd, error) {
 	spec, err := resolveEditorSpec()
 	if err != nil {
 		return nil, err
 	}
-	parts := strings.Fields(spec)
+	parts, err := splitEditorSpec(spec)
+	if err != nil {
+		return nil, err
+	}
 	if len(parts) == 0 {
 		return nil, fmt.Errorf("empty editor command")
 	}
@@ -249,6 +253,50 @@ func newEditorCommand(path string) (*exec.Cmd, error) {
 	}
 	args := append(append([]string{}, parts[1:]...), path)
 	return exec.Command(exe, args...), nil
+}
+
+// splitEditorSpec tokenizes an $EDITOR/$VISUAL spec into words, honoring single
+// and double quotes so a binary path with spaces survives intact, for example
+// `"/Applications/Visual Studio Code.app/.../code" --wait`. Whitespace outside
+// quotes separates tokens; quotes are removed from the resulting words. It is a
+// small hand-rolled state machine — no shell is invoked.
+func splitEditorSpec(spec string) ([]string, error) {
+	var (
+		tokens []string
+		cur    strings.Builder
+		quote  rune // 0, '\'' or '"'
+		inWord bool
+	)
+	flush := func() {
+		if inWord {
+			tokens = append(tokens, cur.String())
+			cur.Reset()
+			inWord = false
+		}
+	}
+	for _, r := range spec {
+		switch {
+		case quote != 0:
+			if r == quote {
+				quote = 0
+			} else {
+				cur.WriteRune(r)
+			}
+		case r == '\'' || r == '"':
+			quote = r
+			inWord = true
+		case r == ' ' || r == '\t' || r == '\n' || r == '\r':
+			flush()
+		default:
+			cur.WriteRune(r)
+			inWord = true
+		}
+	}
+	if quote != 0 {
+		return nil, fmt.Errorf("editor command has an unterminated %c quote", quote)
+	}
+	flush()
+	return tokens, nil
 }
 
 func resolveEditorSpec() (string, error) {
@@ -273,8 +321,8 @@ func firstSummaryLine(path string) string {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		if len(line) > 70 {
-			return line[:67] + "..."
+		if r := []rune(line); len(r) > 70 {
+			return string(r[:67]) + "..."
 		}
 		return line
 	}

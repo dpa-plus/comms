@@ -102,6 +102,23 @@ func TestNewIDMonotonic(t *testing.T) {
 	}
 }
 
+// TestNewIDSameMillisecondMonotonic is the case the reducer actually depends
+// on: many IDs minted in the SAME millisecond must be strictly increasing so
+// that sorting reconstructs causal order. crypto/rand alone fails this ~50% of
+// the time; the shared monotonic entropy source must not.
+func TestNewIDSameMillisecondMonotonic(t *testing.T) {
+	now := time.Now()
+	const n = 5000
+	prev := NewID(now)
+	for i := 1; i < n; i++ {
+		cur := NewID(now) // identical timestamp on purpose
+		if cur <= prev {
+			t.Fatalf("same-millisecond ID %d not strictly increasing: %q !> %q", i, cur, prev)
+		}
+		prev = cur
+	}
+}
+
 func TestTSForcedUTC(t *testing.T) {
 	loc, _ := time.LoadLocation("America/New_York")
 	e := Event{TS: time.Date(2026, 5, 22, 10, 0, 0, 0, loc), ID: "x", Actor: "a", Type: TypeHello}

@@ -36,6 +36,12 @@ func runNote(body string, priority bool) error {
 	if utf8.RuneCountInString(body) > maxNoteRunes {
 		Fatalf(2, "note: body exceeds %d runes (got %d)", maxNoteRunes, utf8.RuneCountInString(body))
 	}
+	// The body is rendered raw via %s in status/log output, so reject any
+	// control character (terminal-injection vector). The rune cap here is a
+	// backstop; maxNoteRunes above is the stricter user-facing limit.
+	if err := rejectControlText("note body", body, 280); err != nil {
+		Fatalf(2, "note: %v", err)
+	}
 
 	rt, err := Open(OpenOpts{Mutating: true})
 	if err != nil {

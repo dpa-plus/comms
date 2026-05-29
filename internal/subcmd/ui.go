@@ -2,8 +2,11 @@ package subcmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -72,13 +75,104 @@ func runUI(addr string, demo, all bool, staleAfter time.Duration) error {
 	if all {
 		fmt.Println("All-project mode: view across all comms repo logs; claim release is enabled when COMMS_ACTOR is set.")
 	}
-	return http.ListenAndServe(addr, mux)
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+	return srv.ListenAndServe()
 }
 
 type uiServer struct {
 	demo       bool
 	all        bool
 	staleAfter time.Duration
+}
+
+// guardMutation enforces the security preconditions shared by every
+// state-changing endpoint and caps the request body. It returns true when the
+// request was rejected (and a response was already written), so callers do:
+//
+//	if guardMutation(w, r) { return }
+//
+// Protections:
+//   - POST only (CSRF can't be a top-level navigation/GET).
+//   - Same-origin — if the browser sends an Origin, it must match the Host AND
+//     that host must be loopback. This blocks both classic cross-origin CSRF
+//     (Origin != Host) and DNS-rebinding (Origin == Host but resolves to a
+//     non-loopback attacker domain). Non-browser clients (no Origin header,
+//     e.g. curl or the hook) are allowed; they are not a CSRF vector.
+//   - Request body capped at 64 KiB.
+func guardMutation(w http.ResponseWriter, r *http.Request) bool {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return true
+	}
+	if !sameOriginRequest(r) {
+		http.Error(w, "forbidden: cross-origin request rejected", http.StatusForbidden)
+		return true
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	return false
+}
+
+func hostIsLoopback(host string) bool {
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	if host == "" || strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func sameOriginRequest(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true // non-browser client (curl/hook) or same-origin nav without Origin
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	// Origin must match the Host we were reached on, and that host must be
+	// loopback — otherwise a DNS-rebinding page (Origin == Host == attacker
+	// domain pointed at 127.0.0.1) would slip through.
+	return strings.EqualFold(u.Host, r.Host) && hostIsLoopback(u.Host)
+}
+
+// uiLockTimeout bounds how long a UI mutating handler waits for the per-repo
+// flock. The CLI may legitimately hold it for a moment; if a process holds it
+// longer than this, the handler fails fast with 503 rather than parking the
+// request goroutine (and its .lock FD) indefinitely.
+const uiLockTimeout = 5 * time.Second
+
+// openMutatingUI opens a mutating runtime with a bounded lock timeout. On
+// failure it writes the HTTP response (503 when another process holds the lock
+// past the timeout, 400 otherwise) and returns ok=false, so handlers do:
+//
+//	rt, ok := s.openMutatingUI(w, OpenOpts{Mutating: true})
+//	if !ok { return }
+//	defer rt.Close()
+func (s uiServer) openMutatingUI(w http.ResponseWriter, opts OpenOpts) (*Runtime, bool) {
+	opts.Mutating = true
+	if opts.LockTimeout == 0 {
+		opts.LockTimeout = uiLockTimeout
+	}
+	rt, err := Open(opts)
+	if err != nil {
+		if errors.Is(err, ErrLockTimeout) {
+			http.Error(w, "busy: another comms process holds the lock, try again", http.StatusServiceUnavailable)
+			return nil, false
+		}
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return nil, false
+	}
+	return rt, true
 }
 
 func (s uiServer) servePage(w http.ResponseWriter, r *http.Request) {
@@ -93,6 +187,13 @@ func (s uiServer) servePage(w http.ResponseWriter, r *http.Request) {
 func (s uiServer) serveStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	// Apply the same same-origin / DNS-rebinding guard the mutations use so a
+	// cross-origin page cannot read the repo's coordination state. Non-browser
+	// clients send no Origin and stay allowed.
+	if r.Header.Get("Origin") != "" && !sameOriginRequest(r) {
+		http.Error(w, "forbidden: cross-origin request rejected", http.StatusForbidden)
 		return
 	}
 	if s.demo {
@@ -126,8 +227,7 @@ func (s uiServer) serveStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s uiServer) serveRetireSessionActor(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if guardMutation(w, r) {
 		return
 	}
 	if s.demo {
@@ -146,9 +246,8 @@ func (s uiServer) serveRetireSessionActor(w http.ResponseWriter, r *http.Request
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}
-	rt, err := Open(OpenOpts{Mutating: true})
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	rt, ok := s.openMutatingUI(w, OpenOpts{})
+	if !ok {
 		return
 	}
 	defer rt.Close()
@@ -160,8 +259,7 @@ func (s uiServer) serveRetireSessionActor(w http.ResponseWriter, r *http.Request
 }
 
 func (s uiServer) serveReleaseClaim(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if guardMutation(w, r) {
 		return
 	}
 	if s.demo {
@@ -192,9 +290,8 @@ func (s uiServer) serveReleaseClaim(w http.ResponseWriter, r *http.Request) {
 		s.serveGlobalReleaseClaim(w, id, strings.TrimSpace(req.RepoHash), strings.TrimSpace(req.SessionID), req.Reason, req.Result)
 		return
 	}
-	rt, err := Open(OpenOpts{Mutating: true})
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	rt, ok := s.openMutatingUI(w, OpenOpts{})
+	if !ok {
 		return
 	}
 	defer rt.Close()
@@ -227,9 +324,8 @@ func (s uiServer) serveGlobalReleaseClaim(w http.ResponseWriter, claimID, repoHa
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	rt, err := Open(OpenOpts{Mutating: true, RepoRootOverride: repoRoot})
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	rt, ok := s.openMutatingUI(w, OpenOpts{RepoRootOverride: repoRoot})
+	if !ok {
 		return
 	}
 	defer rt.Close()
@@ -263,8 +359,7 @@ func (s uiServer) serveGlobalReleaseClaim(w http.ResponseWriter, claimID, repoHa
 }
 
 func (s uiServer) serveTransferLeader(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if guardMutation(w, r) {
 		return
 	}
 	if s.demo {
@@ -283,9 +378,8 @@ func (s uiServer) serveTransferLeader(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}
-	rt, err := Open(OpenOpts{Mutating: true})
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	rt, ok := s.openMutatingUI(w, OpenOpts{})
+	if !ok {
 		return
 	}
 	defer rt.Close()
@@ -297,8 +391,7 @@ func (s uiServer) serveTransferLeader(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s uiServer) serveStartCommsSession(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if guardMutation(w, r) {
 		return
 	}
 	if s.demo {
@@ -318,9 +411,8 @@ func (s uiServer) serveStartCommsSession(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}
-	rt, err := Open(OpenOpts{Mutating: true})
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	rt, ok := s.openMutatingUI(w, OpenOpts{})
+	if !ok {
 		return
 	}
 	defer rt.Close()
@@ -350,8 +442,7 @@ func (s uiServer) serveStartCommsSession(w http.ResponseWriter, r *http.Request)
 }
 
 func (s uiServer) serveEndCommsSession(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if guardMutation(w, r) {
 		return
 	}
 	if s.demo {
@@ -371,9 +462,8 @@ func (s uiServer) serveEndCommsSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}
-	rt, err := Open(OpenOpts{Mutating: true})
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	rt, ok := s.openMutatingUI(w, OpenOpts{})
+	if !ok {
 		return
 	}
 	defer rt.Close()
@@ -383,7 +473,13 @@ func (s uiServer) serveEndCommsSession(w http.ResponseWriter, r *http.Request) {
 	}
 	sessionID := strings.TrimSpace(req.SessionID)
 	sessionName := strings.TrimSpace(req.Name)
-	if sessionID == "current" {
+	// "current" is the sentinel for the legacy/global window (claims and
+	// sessions with no comms_session_id). Blanking it must drive the no-session
+	// sweep below, NOT the operator fallback — otherwise ending the legacy
+	// current window would wrongly end this operator's own NAMED session and
+	// release that session's claims.
+	explicitCurrent := sessionID == "current"
+	if explicitCurrent {
 		sessionID = ""
 		sessionName = ""
 	}
@@ -394,7 +490,7 @@ func (s uiServer) serveEndCommsSession(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if sessionID == "" {
+	if sessionID == "" && !explicitCurrent {
 		if sess := rt.State.Sessions[rt.Actor]; sess != nil {
 			sessionID = sess.SessionID
 			sessionName = sess.SessionName
@@ -1196,7 +1292,11 @@ func buildCommsSessionViews(events []event.Event) ([]uiCommsSession, []uiCommsSe
 		return nil, nil
 	}
 	sorted := append([]event.Event(nil), events...)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].ID < sorted[j].ID })
+	// Match the authoritative reducer (internal/state.Fold), which orders events
+	// by timestamp with a STABLE sort. events arrives in append order, so a
+	// stable TS sort preserves causal order for same-millisecond events instead
+	// of reordering by ULID ID, which would diverge from the reduced state.
+	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].TS.Before(sorted[j].TS) })
 
 	type namedWindow struct {
 		id      string
@@ -2147,10 +2247,10 @@ function renderClaims(data) {
     },
     claimFilter ? 'No claims match this filter.' : (chosen && !chosen.active ? 'No active claims in archived sessions.' : 'No active claims in this session.'));
   document.querySelectorAll('[data-release-claim]').forEach(button => {
-    button.addEventListener('click', () => releaseClaim(button.getAttribute('data-release-claim'), button.getAttribute('data-release-actor'), button.getAttribute('data-release-scope'), button.getAttribute('data-release-repo'), button.getAttribute('data-release-session')));
+    button.addEventListener('click', () => releaseClaim(button.getAttribute('data-release-claim'), button.getAttribute('data-release-actor'), button.getAttribute('data-release-scope'), button.getAttribute('data-release-repo'), button.getAttribute('data-release-session')).catch(showError));
   });
   document.querySelectorAll('[data-retire-actor]').forEach(button => {
-    button.addEventListener('click', () => retireActor(button.getAttribute('data-retire-actor')));
+    button.addEventListener('click', () => retireActor(button.getAttribute('data-retire-actor')).catch(showError));
   });
 }
 function allSessionChoices(data) {
@@ -2165,17 +2265,27 @@ function allSessionChoices(data) {
   return out;
 }
 function renderSessionChoices(data) {
+  const sel = el('sessionSelect');
   const choices = allSessionChoices(data);
   if (!choices.length) {
-    el('sessionSelect').innerHTML = '<option value="">No sessions yet</option>';
-    el('sessionSelect').disabled = true;
+    sel.innerHTML = '<option value="">No sessions yet</option>';
+    sel.disabled = true;
+    sel.dataset.sig = '';
     el('events').innerHTML = empty('No session logs yet. Start a comms session or run comms ui --demo.');
     return;
   }
   if (!choices.some(c => c.id === selectedSessionID)) selectedSessionID = choices[0].id;
-  el('sessionSelect').disabled = false;
-  el('sessionSelect').innerHTML = choices.map(c => '<option value="' + esc(c.id) + '">' + esc(c.label) + '</option>').join('');
-  el('sessionSelect').value = selectedSessionID;
+  sel.disabled = false;
+  // Only rebuild the <option> set when it actually changed, and never while the
+  // user has the dropdown open (focused). The 2s auto-refresh would otherwise
+  // collapse an open menu and reset the selection every cycle. We still keep the
+  // selected log in sync below.
+  const sig = JSON.stringify(choices.map(c => [c.id, c.label]));
+  if (sel.dataset.sig !== sig && document.activeElement !== sel) {
+    sel.innerHTML = choices.map(c => '<option value="' + esc(c.id) + '">' + esc(c.label) + '</option>').join('');
+    sel.dataset.sig = sig;
+  }
+  if (document.activeElement !== sel && sel.value !== selectedSessionID) sel.value = selectedSessionID;
   renderSelectedSessionLog(data);
 }
 function renderSelectedSessionLog(data) {

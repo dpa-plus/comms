@@ -99,6 +99,64 @@ func TestDiscoverExplicitFailsOutsideGit(t *testing.T) {
 	}
 }
 
+// DiscoverExplicit is the macOS-TCC escape hatch and must not depend on the
+// process cwd. A relative --repo/COMMS_REPO would force filepath.Abs ->
+// os.Getwd, defeating the hatch, so it's rejected up front with a recovery hint.
+func TestDiscoverExplicitRejectsRelativePath(t *testing.T) {
+	_, err := DiscoverExplicit("relative/repo/path")
+	if err == nil {
+		t.Fatal("expected error for relative --repo path")
+	}
+	if !strings.Contains(err.Error(), "absolute path") {
+		t.Fatalf("error should explain the path must be absolute, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "--repo") {
+		t.Fatalf("error should mention --repo/COMMS_REPO, got: %v", err)
+	}
+}
+
+// The repo hash must be identical whether or not the leaf component of the
+// repo path is reachable via EvalSymlinks. resolveDeepestAncestor backs that
+// guarantee: resolving the deepest reachable ancestor and re-appending the
+// unresolved tail yields the same canonical path a full EvalSymlinks would,
+// so a permission-class (EPERM/EACCES) failure on the leaf can't fork the log.
+func TestResolveDeepestAncestorMatchesFullResolve(t *testing.T) {
+	// real/ is the canonical dir; link/ is a symlink to it. A path through the
+	// symlink must canonicalize to the same place regardless of which ancestor
+	// we manage to resolve.
+	base := t.TempDir()
+	real := filepath.Join(base, "real")
+	if err := os.MkdirAll(filepath.Join(real, "sub"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	link := filepath.Join(base, "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	viaLink := filepath.Join(link, "sub")
+
+	// Sanity: a successful full resolve dereferences the symlink.
+	full, err := filepath.EvalSymlinks(viaLink)
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+
+	// Leaf reachable: resolveDeepestAncestor must equal the full resolve.
+	if got := resolveDeepestAncestor(viaLink); got != full {
+		t.Fatalf("reachable leaf: resolveDeepestAncestor = %q, want %q", got, full)
+	}
+
+	// Leaf NOT present (simulates an unresolvable/permission-blocked tail): the
+	// deepest resolvable ancestor (link -> real) plus the re-appended tail must
+	// still match the canonicalized path, i.e. the hash stays stable.
+	missingLeaf := filepath.Join(viaLink, "does-not-exist-yet")
+	wantMissing := filepath.Join(full, "does-not-exist-yet")
+	if got := resolveDeepestAncestor(missingLeaf); got != wantMissing {
+		t.Fatalf("unreachable leaf: resolveDeepestAncestor = %q, want %q", got, wantMissing)
+	}
+}
+
 func TestDiscoverFailsOutsideGit(t *testing.T) {
 	dir := t.TempDir()
 	_, err := Discover(dir, "")

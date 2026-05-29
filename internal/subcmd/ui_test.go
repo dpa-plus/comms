@@ -2,6 +2,7 @@ package subcmd
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/dpa-plus/comms/internal/event"
+	"github.com/dpa-plus/comms/internal/lock"
 	"github.com/dpa-plus/comms/internal/paths"
 	"github.com/dpa-plus/comms/internal/state"
 )
@@ -564,6 +566,134 @@ func TestUIServeEndCurrentSessionIDArchivesLegacyCurrentSession(t *testing.T) {
 	}
 }
 
+// TestUIServeEndCurrentSessionIDDoesNotEndOperatorNamedSession locks in
+// round-2 finding #R2-06: ending the legacy/global "current" window
+// (session_id=="current") must drive the no-session global sweep, NOT the
+// operator fallback. Previously, when the operator (rt.Actor) also held its own
+// NAMED comms session, "end current" wrongly resolved to that named session and
+// released only its claims — leaving a different actor's legacy claim active and
+// tagging the archive with the operator's named session id.
+func TestUIServeEndCurrentSessionIDDoesNotEndOperatorNamedSession(t *testing.T) {
+	repo := setupUITestRepo(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("COMMS_ACTOR", "human-eli")
+	t.Setenv("USER", "eli")
+	t.Chdir(repo)
+
+	const namedSessionID = "01JX2Q3Y7W5B6N9P0R1S2T3W0S"
+	operatorNamedClaim := "01JX2Q3Y7W5B6N9P0R1S2T3W0A"
+	legacyClaim := "01JX2Q3Y7W5B6N9P0R1S2T3W0B"
+
+	rt, err := Open(OpenOpts{Mutating: true})
+	if err != nil {
+		t.Fatalf("open runtime: %v", err)
+	}
+	// Operator opens its OWN named comms session...
+	err = rt.Append(event.Event{
+		TS:    time.Now().Add(-9 * time.Minute).UTC(),
+		ID:    "01JX2Q3Y7W5B6N9P0R1S2T3W0H",
+		Actor: "human-eli",
+		Type:  event.TypeHello,
+		Data: map[string]interface{}{
+			"base_name":           "human",
+			"hostname":            "host",
+			"comms_session_start": true,
+			"comms_session_id":    namedSessionID,
+			"comms_session_name":  "feature-x",
+		},
+	})
+	// ...with a claim attributed to that named session.
+	if err == nil {
+		err = rt.Append(event.Event{
+			TS:    time.Now().Add(-8 * time.Minute).UTC(),
+			ID:    operatorNamedClaim,
+			Actor: "human-eli",
+			Type:  event.TypeClaim,
+			Scope: []string{"src/feature.ts"},
+			Data: map[string]interface{}{
+				"intent":             "named session work",
+				"comms_session_id":   namedSessionID,
+				"comms_session_name": "feature-x",
+			},
+		})
+	}
+	// A DIFFERENT actor holds a legacy claim with no comms_session_id.
+	if err == nil {
+		err = rt.Append(event.Event{
+			TS:    time.Now().Add(-7 * time.Minute).UTC(),
+			ID:    legacyClaim,
+			Actor: "claude-legacy",
+			Type:  event.TypeClaim,
+			Scope: []string{"src/legacy.ts"},
+			Data:  map[string]interface{}{"intent": "legacy current work"},
+		})
+	}
+	if closeErr := rt.Close(); closeErr != nil {
+		t.Fatalf("close runtime: %v", closeErr)
+	}
+	if err != nil {
+		t.Fatalf("append setup events: %v", err)
+	}
+
+	// Sanity: the operator DOES have a named session that the buggy fallback
+	// would otherwise latch onto.
+	rt, err = Open(OpenOpts{Mutating: false})
+	if err != nil {
+		t.Fatalf("reopen for sanity: %v", err)
+	}
+	if sess := rt.State.Sessions["human-eli"]; sess == nil || sess.SessionID != namedSessionID {
+		_ = rt.Close()
+		t.Fatalf("setup: operator should hold named session %s, got %+v", namedSessionID, sess)
+	}
+	_ = rt.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/comms-session/end", strings.NewReader(`{"reason":"end legacy current","session_id":"current","name":"Current session"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	uiServer{staleAfter: 90 * time.Minute}.serveEndCommsSession(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var snap uiSnapshot
+	if err := json.Unmarshal(rec.Body.Bytes(), &snap); err != nil {
+		t.Fatalf("decode snapshot: %v", err)
+	}
+	// Global sweep: every claim must be released, INCLUDING the other actor's
+	// legacy claim. The buggy operator-fallback would leave it active.
+	if len(snap.Claims) != 0 {
+		t.Fatalf("ending current window must release all claims, still active: %+v", snap.Claims)
+	}
+
+	rt, err = Open(OpenOpts{Mutating: false})
+	if err != nil {
+		t.Fatalf("reopen runtime: %v", err)
+	}
+	defer rt.Close()
+	if got := rt.State.ClaimByID(legacyClaim); got != nil {
+		t.Fatalf("legacy claim of @claude-legacy should be released by the global sweep: %+v", got)
+	}
+	if got := rt.State.ClaimByID(operatorNamedClaim); got != nil {
+		t.Fatalf("operator's named claim should also be released by the global sweep: %+v", got)
+	}
+
+	// The archive's end event must be the GLOBAL one (empty comms_session_id),
+	// not the operator's named session. A non-empty id here is the regression.
+	var endEvent *event.Event
+	for i := range rt.Events {
+		ev := rt.Events[i]
+		if ev.Type == event.TypeRelease && dataBool(ev.Data, "comms_session_end") {
+			endEvent = &rt.Events[i]
+		}
+	}
+	if endEvent == nil {
+		t.Fatalf("no comms_session_end event was appended; events=%+v", rt.Events)
+	}
+	if id := dataString(endEvent.Data, "comms_session_id"); id != "" {
+		t.Fatalf("end event scoped to a named session %q; expected global sweep (empty id)", id)
+	}
+}
+
 func TestUIServeEndCommsSessionRejectsStaleNamedSessionWithoutClaims(t *testing.T) {
 	repo := setupUITestRepo(t)
 	t.Setenv("HOME", t.TempDir())
@@ -600,6 +730,57 @@ func TestUIServeEndCommsSessionRejectsStaleNamedSessionWithoutClaims(t *testing.
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
+}
+
+// TestAcquireLockBounded locks in round-2 finding #R2-05: the UI mutating path
+// uses a BOUNDED lock acquire so a request goroutine never blocks forever behind
+// a process holding the per-repo flock, while the CLI's unbounded acquire is
+// unchanged.
+func TestAcquireLockBounded(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bounded.lock")
+
+	held, err := lock.Acquire(path)
+	if err != nil {
+		t.Fatalf("hold lock: %v", err)
+	}
+
+	// Bounded acquire while held must time out promptly with ErrLockTimeout
+	// rather than blocking forever.
+	start := time.Now()
+	h, err := acquireLock(path, 120*time.Millisecond)
+	elapsed := time.Since(start)
+	if h != nil {
+		_ = h.Close()
+		t.Fatalf("bounded acquire returned a handle while lock was held")
+	}
+	if !errors.Is(err, ErrLockTimeout) {
+		t.Fatalf("expected ErrLockTimeout, got %v", err)
+	}
+	if elapsed < 100*time.Millisecond {
+		t.Fatalf("bounded acquire returned too early (%v); should wait ~the full timeout", elapsed)
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("bounded acquire took too long (%v); should be roughly the timeout", elapsed)
+	}
+
+	// After release, the bounded acquire succeeds.
+	if err := held.Close(); err != nil {
+		t.Fatalf("release held lock: %v", err)
+	}
+	h2, err := acquireLock(path, 1*time.Second)
+	if err != nil || h2 == nil {
+		t.Fatalf("bounded acquire after release: handle=%v err=%v", h2, err)
+	}
+	if err := h2.Close(); err != nil {
+		t.Fatalf("close bounded handle: %v", err)
+	}
+
+	// timeout==0 keeps the original blocking acquire (CLI behavior).
+	h3, err := acquireLock(path, 0)
+	if err != nil || h3 == nil {
+		t.Fatalf("unbounded acquire: handle=%v err=%v", h3, err)
+	}
+	_ = h3.Close()
 }
 
 func TestUIServeStartCommsSessionCreatesCurrentSession(t *testing.T) {
@@ -1136,4 +1317,36 @@ func actionByIDForTest(actions []uiAction, id string) uiAction {
 		}
 	}
 	return uiAction{}
+}
+
+// TestGuardMutationCSRF locks in the cross-origin / DNS-rebinding protection on
+// the dashboard's state-changing endpoints (round-1 finding #04).
+func TestGuardMutationCSRF(t *testing.T) {
+	cases := []struct {
+		name    string
+		method  string
+		origin  string
+		host    string
+		blocked bool
+	}{
+		{"no-origin non-browser client", http.MethodPost, "", "127.0.0.1:7878", false},
+		{"same loopback origin", http.MethodPost, "http://127.0.0.1:7878", "127.0.0.1:7878", false},
+		{"localhost origin", http.MethodPost, "http://localhost:7878", "localhost:7878", false},
+		{"classic cross-origin CSRF", http.MethodPost, "https://evil.example", "127.0.0.1:7878", true},
+		{"dns-rebinding origin==host non-loopback", http.MethodPost, "http://evil.example:7878", "evil.example:7878", true},
+		{"wrong method", http.MethodGet, "", "127.0.0.1:7878", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			req := httptest.NewRequest(c.method, "/api/claim/release", strings.NewReader("{}"))
+			req.Host = c.host
+			if c.origin != "" {
+				req.Header.Set("Origin", c.origin)
+			}
+			rec := httptest.NewRecorder()
+			if got := guardMutation(rec, req); got != c.blocked {
+				t.Fatalf("guardMutation blocked=%v, want %v (status %d)", got, c.blocked, rec.Code)
+			}
+		})
+	}
 }
