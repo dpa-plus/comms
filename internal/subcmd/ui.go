@@ -753,6 +753,9 @@ func buildGlobalUISnapshot(staleAfter time.Duration) (uiSnapshot, error) {
 					continue
 				}
 			}
+			if isScratchRepoRoot(repoRoot) {
+				continue
+			}
 		}
 		repoName := hash
 		if repoRoot != "" {
@@ -882,6 +885,50 @@ func globalLogCandidateNewer(candidate, existing globalLogCandidate) bool {
 		return candidate.lastTS.After(existing.lastTS)
 	}
 	return candidate.hash > existing.hash
+}
+
+func isScratchRepoRoot(repoRoot string) bool {
+	repoRoot = strings.TrimSpace(repoRoot)
+	if repoRoot == "" {
+		return false
+	}
+	root := filepath.Clean(repoRoot)
+	if abs, err := filepath.Abs(root); err == nil {
+		root = abs
+	}
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		root = resolved
+	}
+	base := filepath.Base(root)
+	if !strings.HasPrefix(base, "comms-") && !strings.HasPrefix(base, "test-comms-") {
+		return false
+	}
+	for _, temp := range scratchTempRoots() {
+		rel, err := filepath.Rel(temp, root)
+		if err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel) {
+			return true
+		}
+	}
+	return false
+}
+
+func scratchTempRoots() []string {
+	seen := map[string]bool{}
+	var roots []string
+	for _, root := range []string{os.TempDir(), "/tmp", "/private/tmp"} {
+		root = filepath.Clean(root)
+		if abs, err := filepath.Abs(root); err == nil {
+			root = abs
+		}
+		if resolved, err := filepath.EvalSymlinks(root); err == nil {
+			root = resolved
+		}
+		if !seen[root] {
+			seen[root] = true
+			roots = append(roots, root)
+		}
+	}
+	return roots
 }
 
 func readSmallFile(path string) string {
