@@ -353,6 +353,7 @@ func (s uiServer) serveEndCommsSession(w http.ResponseWriter, r *http.Request) {
 			sessionName = sess.SessionName
 		}
 	}
+	sessionCutoff := time.Now().Add(-4 * time.Hour)
 	var refs []interface{}
 	var endedActors []interface{}
 	if sessionID == "" {
@@ -365,17 +366,22 @@ func (s uiServer) serveEndCommsSession(w http.ResponseWriter, r *http.Request) {
 			refs = append(refs, claim.ID)
 		}
 		endedActors = make([]interface{}, 0, len(rt.State.Sessions))
-		for _, session := range collectActiveSessions(rt.State, time.Time{}) {
+		for _, session := range collectActiveSessions(rt.State, sessionCutoff) {
 			endedActors = append(endedActors, session.Actor)
 		}
 	} else {
-		if sessionName == "" {
-			for _, sess := range rt.State.Sessions {
-				if sess.SessionID == sessionID {
-					sessionName = sess.SessionName
-					break
+		activeSessionName := ""
+		activeActors := make([]interface{}, 0, len(rt.State.Sessions))
+		for _, session := range collectActiveSessions(rt.State, sessionCutoff) {
+			if session.SessionID == sessionID {
+				activeActors = append(activeActors, session.Actor)
+				if activeSessionName == "" {
+					activeSessionName = session.SessionName
 				}
 			}
+		}
+		if sessionName == "" {
+			sessionName = activeSessionName
 		}
 		claims := activeClaimsByCommsSession(rt.State, sessionID)
 		if sessionName == "" {
@@ -386,7 +392,7 @@ func (s uiServer) serveEndCommsSession(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		if sessionName == "" && len(claims) == 0 {
+		if len(activeActors) == 0 && len(claims) == 0 {
 			http.Error(w, "no active comms session matches "+sessionID, http.StatusConflict)
 			return
 		}
@@ -394,12 +400,7 @@ func (s uiServer) serveEndCommsSession(w http.ResponseWriter, r *http.Request) {
 		for _, claim := range claims {
 			refs = append(refs, claim.ID)
 		}
-		endedActors = make([]interface{}, 0, len(rt.State.Sessions))
-		for _, session := range collectActiveSessions(rt.State, time.Time{}) {
-			if session.SessionID == sessionID {
-				endedActors = append(endedActors, session.Actor)
-			}
-		}
+		endedActors = activeActors
 	}
 	now := time.Now().UTC()
 	ev := event.Event{
