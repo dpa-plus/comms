@@ -60,7 +60,10 @@ sessions, show each session's actors/claims/events separately, and end one
 selected named session when that project window is done. Events stay in the
 same append-only per-repo JSONL file, but every joined actor's claims, notes,
 findings, and releases carry `comms_session_id`/`comms_session_name` metadata so
-session data does not mix in the UI or API. Demo mode remains read-only.
+session data does not mix in the UI or API. If an actor starts or joins a
+different named session, comms releases that actor's prior-session claims first;
+claims do not follow the actor into the new session. Demo mode remains
+read-only.
 
 Use `comms ui --all` for a read-only portfolio dashboard across every repo log
 under the comms data directory. Per-repo logs stay separate on disk; the global
