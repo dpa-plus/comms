@@ -32,8 +32,7 @@ type OpenOpts struct {
 	// and resolves actor read-only (empty COMMS_ACTOR is fine).
 	Mutating bool
 
-	// RepoIDOverride bypasses git discovery. Used by tests and the
-	// `--repo-id` flag.
+	// RepoIDOverride bypasses git discovery for tests and legacy callers.
 	RepoIDOverride string
 
 	// RepoRootOverride is an explicit repo path. It bypasses cwd discovery and

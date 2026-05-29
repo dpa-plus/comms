@@ -29,8 +29,7 @@ type Identity struct {
 }
 
 // Discover resolves the current repo by running `git rev-parse --show-toplevel`
-// from `start`. If gitTopLevelOverride is non-empty, it bypasses git entirely
-// (useful for tests / non-git directories — see --repo-id flag).
+// from `start`. If gitTopLevelOverride is non-empty, it bypasses git entirely.
 func Discover(start, gitTopLevelOverride string) (Identity, error) {
 	var root string
 	if gitTopLevelOverride != "" {
@@ -38,7 +37,7 @@ func Discover(start, gitTopLevelOverride string) (Identity, error) {
 	} else {
 		out, err := runGit(start, "rev-parse", "--show-toplevel")
 		if err != nil {
-			return Identity{}, fmt.Errorf("repo: cannot find git root from %q: %w (set --repo-id to override)", start, err)
+			return Identity{}, fmt.Errorf("repo: cannot find git root from %q: %w (use --repo /absolute/repo/path or COMMS_REPO to target a repo explicitly)", start, err)
 		}
 		root = strings.TrimSpace(out)
 	}
