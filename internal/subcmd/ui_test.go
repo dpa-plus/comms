@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/dpa-plus/comms/internal/event"
+	"github.com/dpa-plus/comms/internal/paths"
 	"github.com/dpa-plus/comms/internal/state"
 )
 
@@ -107,7 +108,11 @@ func TestBuildGlobalUISnapshotAttachesLegacyClaimsToProjectCurrentSession(t *tes
 	t.Setenv("HOME", home)
 
 	hash := "abc123legacy"
-	logDir := filepath.Join(home, "Library", "Application Support", "comms", hash)
+	dataHome, err := paths.UserDataHome()
+	if err != nil {
+		t.Fatalf("user data home: %v", err)
+	}
+	logDir := filepath.Join(dataHome, "comms", hash)
 	if err := os.MkdirAll(logDir, 0o700); err != nil {
 		t.Fatalf("mkdir log dir: %v", err)
 	}
