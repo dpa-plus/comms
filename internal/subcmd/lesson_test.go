@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -121,6 +122,69 @@ printf '\nEdited through argument-aware editor.\n' >> "$2"
 	}
 	if !strings.Contains(string(raw), "Edited through argument-aware editor.") {
 		t.Fatalf("editor did not receive/run with args, lesson=%q", raw)
+	}
+}
+
+func TestLessonEditWithMissingEditorDoesNotCreateStub(t *testing.T) {
+	if os.Getenv("COMMS_TEST_LESSON_MISSING_EDITOR_CHILD") == "1" {
+		_ = runLessonEdit("missing-editor")
+		return
+	}
+
+	home := t.TempDir()
+	cmd := exec.Command(os.Args[0], "-test.run=TestLessonEditWithMissingEditorDoesNotCreateStub")
+	cmd.Env = append(os.Environ(),
+		"COMMS_TEST_LESSON_MISSING_EDITOR_CHILD=1",
+		"HOME="+home,
+		"COMMS_ACTOR=human-eli",
+		"USER=eli",
+		"VISUAL=",
+		"EDITOR=comms-missing-editor",
+	)
+	err := cmd.Run()
+	if err == nil {
+		t.Fatalf("runLessonEdit with a missing editor should exit non-zero")
+	}
+	if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 2 {
+		t.Fatalf("exit = %v, want code 2", err)
+	}
+	t.Setenv("HOME", home)
+	dir, err := paths.GlobalLessonsDir()
+	if err != nil {
+		t.Fatalf("global lessons dir: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "missing-editor.md")); !os.IsNotExist(err) {
+		t.Fatalf("missing editor should not create lesson stub, stat err=%v", err)
+	}
+}
+
+func TestDocEditWithMissingEditorDoesNotCreateStub(t *testing.T) {
+	if os.Getenv("COMMS_TEST_DOC_MISSING_EDITOR_CHILD") == "1" {
+		_ = runDocEdit("missing-editor-doc")
+		return
+	}
+
+	home := t.TempDir()
+	repo := setupUITestRepo(t)
+	cmd := exec.Command(os.Args[0], "-test.run=TestDocEditWithMissingEditorDoesNotCreateStub")
+	cmd.Dir = repo
+	cmd.Env = append(os.Environ(),
+		"COMMS_TEST_DOC_MISSING_EDITOR_CHILD=1",
+		"HOME="+home,
+		"COMMS_ACTOR=human-eli",
+		"USER=eli",
+		"VISUAL=",
+		"EDITOR=comms-missing-editor",
+	)
+	err := cmd.Run()
+	if err == nil {
+		t.Fatalf("runDocEdit with a missing editor should exit non-zero")
+	}
+	if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 2 {
+		t.Fatalf("exit = %v, want code 2", err)
+	}
+	if _, err := os.Stat(filepath.Join(repo, ".comms", "docs", "missing-editor-doc.md")); !os.IsNotExist(err) {
+		t.Fatalf("missing editor should not create doc stub, stat err=%v", err)
 	}
 }
 

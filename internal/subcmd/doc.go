@@ -142,6 +142,10 @@ func runDocEdit(slug string) error {
 	defer rt.Close()
 
 	docPath := rt.Paths.DocFilePath(slug)
+	cmd, err := newEditorCommand(docPath)
+	if err != nil {
+		Fatalf(2, "doc: %v", err)
+	}
 	if err := ensureDocStub(docPath, slug); err != nil {
 		Fatalf(2, "doc: %v", err)
 	}
@@ -167,10 +171,6 @@ func runDocEdit(slug string) error {
 	_ = rt.Close()
 
 	// Run the editor.
-	cmd, err := newEditorCommand(docPath)
-	if err != nil {
-		Fatalf(2, "doc: %v", err)
-	}
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

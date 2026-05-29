@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -44,7 +45,7 @@ the real comms log.`,
 	}
 	cmd.Flags().StringVar(&addr, "addr", addr, "listen address")
 	cmd.Flags().BoolVar(&demo, "demo", false, "serve deterministic sample data without touching the real log")
-	cmd.Flags().BoolVar(&all, "all", false, "serve a read-only dashboard across every repo log under the comms data directory")
+	cmd.Flags().BoolVar(&all, "all", false, "serve a dashboard across every repo log under the comms data directory")
 	cmd.Flags().DurationVar(&staleAfter, "stale-after", staleAfter, "highlight claims older than this duration")
 	return cmd
 }
@@ -69,7 +70,7 @@ func runUI(addr string, demo, all bool, staleAfter time.Duration) error {
 		fmt.Println("Demo mode: serving sample data only; no fake events are written.")
 	}
 	if all {
-		fmt.Println("All-project mode: read-only view across all comms repo logs.")
+		fmt.Println("All-project mode: view across all comms repo logs; claim release is enabled when COMMS_ACTOR is set.")
 	}
 	return http.ListenAndServe(addr, mux)
 }
@@ -167,15 +168,13 @@ func (s uiServer) serveReleaseClaim(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "demo mode is read-only; no claim release event is written", http.StatusConflict)
 		return
 	}
-	if s.all {
-		http.Error(w, "all-project mode is read-only; use a repo-specific UI or CLI for mutations", http.StatusConflict)
-		return
-	}
 	var req struct {
-		ID      string `json:"id"`
-		ClaimID string `json:"claim_id"`
-		Reason  string `json:"reason"`
-		Result  string `json:"result"`
+		ID        string `json:"id"`
+		ClaimID   string `json:"claim_id"`
+		RepoHash  string `json:"repo_hash"`
+		SessionID string `json:"session_id"`
+		Reason    string `json:"reason"`
+		Result    string `json:"result"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
@@ -187,6 +186,10 @@ func (s uiServer) serveReleaseClaim(w http.ResponseWriter, r *http.Request) {
 	}
 	if id == "" {
 		http.Error(w, "claim id is required", http.StatusBadRequest)
+		return
+	}
+	if s.all {
+		s.serveGlobalReleaseClaim(w, id, strings.TrimSpace(req.RepoHash), strings.TrimSpace(req.SessionID), req.Reason, req.Result)
 		return
 	}
 	rt, err := Open(OpenOpts{Mutating: true})
@@ -213,6 +216,50 @@ func (s uiServer) serveReleaseClaim(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.writeSnapshot(w, rt)
+}
+
+func (s uiServer) serveGlobalReleaseClaim(w http.ResponseWriter, claimID, repoHash, sessionID, reasonText, resultText string) {
+	if repoHash == "" {
+		repoHash = repoHashFromPrefixedSessionID(sessionID)
+	}
+	repoRoot, err := repoRootForGlobalHash(repoHash)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	rt, err := Open(OpenOpts{Mutating: true, RepoRootOverride: repoRoot})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer rt.Close()
+	if rt.Repo.Hash != repoHash {
+		http.Error(w, "repo hash "+repoHash+" no longer matches "+rt.Repo.Hash+" for "+repoRoot, http.StatusConflict)
+		return
+	}
+	claim := rt.State.ClaimByID(claimID)
+	if claim == nil {
+		http.Error(w, "no active claim matches "+claimID, http.StatusConflict)
+		return
+	}
+	reason := strings.TrimSpace(reasonText)
+	result := strings.TrimSpace(resultText)
+	if claim.Actor != rt.Actor && reason == "" {
+		reason = "released from global UI by @" + rt.Actor
+	}
+	if claim.Actor == rt.Actor && result == "" {
+		result = "released from global UI"
+	}
+	if err := appendReleaseEvent(rt, []*state.Claim{claim}, reason, result); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	snap, err := buildGlobalUISnapshot(s.staleAfter)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, snap)
 }
 
 func (s uiServer) serveTransferLeader(w http.ResponseWriter, r *http.Request) {
@@ -498,6 +545,7 @@ type uiClaim struct {
 	Age         string    `json:"age"`
 	Stale       bool      `json:"stale"`
 	StoleID     string    `json:"stole_id,omitempty"`
+	RepoHash    string    `json:"repo_hash,omitempty"`
 	SessionID   string    `json:"session_id,omitempty"`
 	SessionName string    `json:"session_name,omitempty"`
 }
@@ -598,7 +646,7 @@ func buildUISnapshot(rt *Runtime, staleAfter time.Duration) uiSnapshot {
 		out.Claims = append(out.Claims, uiClaim{
 			ID: c.ID, Actor: c.Actor, Scope: c.Scope.String(), Intent: c.Intent,
 			TS: c.TS, Age: shortAge(now.Sub(c.TS)), Stale: now.Sub(c.TS) >= staleAfter, StoleID: c.StolenFromID,
-			SessionID: c.SessionID, SessionName: c.SessionName,
+			RepoHash: rt.Repo.Hash, SessionID: c.SessionID, SessionName: c.SessionName,
 		})
 	}
 	for _, f := range recentFindings(rt.State, now.Add(-24*time.Hour), 12) {
@@ -714,7 +762,7 @@ func buildGlobalUISnapshot(staleAfter time.Duration) (uiSnapshot, error) {
 			Root:             root,
 			Hash:             "global",
 			LogPath:          root,
-			MutationMessage:  "All-project mode is read-only; use a repo-specific UI or CLI to start/end sessions.",
+			MutationMessage:  "All-project mode can release claims; use a repo-specific UI or CLI to start/end sessions.",
 			StaleAfter:       staleAfter.String(),
 			MutationsEnabled: false,
 		},
@@ -737,6 +785,11 @@ func buildGlobalUISnapshot(staleAfter time.Duration) (uiSnapshot, error) {
 			return out, nil
 		}
 		return uiSnapshot{}, err
+	}
+	if a, err := actor.Resolve(actor.Mutating); err == nil {
+		out.Project.Actor = a
+	} else {
+		out.Project.MutationMessage = err.Error()
 	}
 	candidates := map[string]globalLogCandidate{}
 	var candidateKeys []string
@@ -821,6 +874,7 @@ func buildGlobalUISnapshot(staleAfter time.Duration) (uiSnapshot, error) {
 				Age:         shortAge(now.Sub(c.TS)),
 				Stale:       now.Sub(c.TS) >= staleAfter,
 				StoleID:     c.StolenFromID,
+				RepoHash:    hash,
 				SessionID:   projectSessionID(hash, c.SessionID),
 				SessionName: projectSessionName(repoName, c.SessionName),
 			})
@@ -885,6 +939,41 @@ func globalLogCandidateNewer(candidate, existing globalLogCandidate) bool {
 		return candidate.lastTS.After(existing.lastTS)
 	}
 	return candidate.hash > existing.hash
+}
+
+func repoHashFromPrefixedSessionID(sessionID string) string {
+	left, _, ok := strings.Cut(strings.TrimSpace(sessionID), ":")
+	if !ok {
+		return ""
+	}
+	return left
+}
+
+func repoRootForGlobalHash(hash string) (string, error) {
+	hash = strings.TrimSpace(hash)
+	if !regexp.MustCompile(`^[a-f0-9]{12}$`).MatchString(hash) {
+		return "", fmt.Errorf("valid repo_hash is required")
+	}
+	dataHome, err := paths.UserDataHome()
+	if err != nil {
+		return "", err
+	}
+	logDir := filepath.Join(dataHome, "comms", hash)
+	info, err := os.Stat(logDir)
+	if err != nil {
+		return "", fmt.Errorf("repo log %s: %w", hash, err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("repo log %s is not a directory", hash)
+	}
+	repoRoot := strings.TrimSpace(readSmallFile(filepath.Join(logDir, "repo-path.txt")))
+	if repoRoot == "" {
+		return "", fmt.Errorf("repo log %s has no repo-path.txt", hash)
+	}
+	if isScratchRepoRoot(repoRoot) {
+		return "", fmt.Errorf("repo log %s belongs to a generated scratch repo", hash)
+	}
+	return repoRoot, nil
 }
 
 func isScratchRepoRoot(repoRoot string) bool {
@@ -1046,6 +1135,24 @@ func buildUIActions(snap uiSnapshot) []uiAction {
 		releaseClaim.Reason = "demo mode is read-only"
 		retire.Reason = "demo mode is read-only"
 		lead.Reason = "demo mode is read-only"
+		return []uiAction{start, end, releaseClaim, retire, lead, logs}
+	}
+	if snap.Project.Hash == "global" {
+		reason := "All-project mode only supports releasing claims; use a repo-specific UI or CLI for other mutations."
+		start.Reason = reason
+		end.Reason = reason
+		retire.Reason = reason
+		lead.Reason = reason
+		if snap.Project.Actor == "" {
+			releaseClaim.Reason = snap.Project.MutationMessage
+			if releaseClaim.Reason == "" {
+				releaseClaim.Reason = "mutating UI actions require COMMS_ACTOR"
+			}
+		} else if len(snap.Claims) > 0 {
+			releaseClaim.Enabled = true
+		} else {
+			releaseClaim.Reason = "no active claim to release"
+		}
 		return []uiAction{start, end, releaseClaim, retire, lead, logs}
 	}
 	if !snap.Project.MutationsEnabled {
@@ -1939,6 +2046,7 @@ function renderTable(items, headers, fn, label) {
 }
 function mutationHelp(data) {
   if (data.project.demo) return 'Demo mode is read-only.';
+  if (data.project.hash === 'global') return data.project.mutation_message || 'All-project mode can release claims; use a repo-specific UI or CLI to start/end sessions.';
   if (data.project.mutations_enabled) return 'Agents create/release claims; Start creates a named session, End archives the selected named session.';
   return data.project.mutation_message || 'Set COMMS_ACTOR before starting comms ui to start or end the comms session here.';
 }
@@ -2029,7 +2137,7 @@ function renderClaims(data) {
     renderTable(claims, ['Actor', 'Session', 'Scope', 'Intent', 'Age', 'Action'], c => {
       const actions = [];
       if (releaseAction.enabled) {
-        actions.push('<button class="small primary" type="button" data-release-claim="' + esc(c.id) + '" data-release-actor="' + esc(c.actor) + '" data-release-scope="' + esc(c.scope) + '">Release</button>');
+        actions.push('<button class="small primary" type="button" data-release-claim="' + esc(c.id) + '" data-release-repo="' + esc(c.repo_hash || '') + '" data-release-session="' + esc(c.session_id || '') + '" data-release-actor="' + esc(c.actor) + '" data-release-scope="' + esc(c.scope) + '">Release</button>');
       }
       if (c.stale && retireAction.enabled) {
         actions.push('<button class="small danger" type="button" data-retire-actor="' + esc(c.actor) + '">Retire</button>');
@@ -2039,7 +2147,7 @@ function renderClaims(data) {
     },
     claimFilter ? 'No claims match this filter.' : (chosen && !chosen.active ? 'No active claims in archived sessions.' : 'No active claims in this session.'));
   document.querySelectorAll('[data-release-claim]').forEach(button => {
-    button.addEventListener('click', () => releaseClaim(button.getAttribute('data-release-claim'), button.getAttribute('data-release-actor'), button.getAttribute('data-release-scope')));
+    button.addEventListener('click', () => releaseClaim(button.getAttribute('data-release-claim'), button.getAttribute('data-release-actor'), button.getAttribute('data-release-scope'), button.getAttribute('data-release-repo'), button.getAttribute('data-release-session')));
   });
   document.querySelectorAll('[data-retire-actor]').forEach(button => {
     button.addEventListener('click', () => retireActor(button.getAttribute('data-retire-actor')));
@@ -2125,13 +2233,13 @@ async function retireActor(actor) {
   hideError();
   await load();
 }
-async function releaseClaim(claimID, actor, scope) {
+async function releaseClaim(claimID, actor, scope, repoHash, sessionID) {
   const result = window.prompt('Release claim ' + claimID.slice(0, 10) + ' held by @' + actor + ' on ' + scope + '?', 'done');
   if (result === null) return;
   const res = await fetch('/api/claim/release', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ claim_id: claimID, result, reason: result })
+    body: JSON.stringify({ claim_id: claimID, repo_hash: repoHash || '', session_id: sessionID || '', result, reason: result })
   });
   if (!res.ok) throw new Error(await res.text());
   hideError();
