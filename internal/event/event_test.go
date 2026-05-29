@@ -68,6 +68,28 @@ func TestDecodeRejectsInvalidType(t *testing.T) {
 	}
 }
 
+func TestDecodeRejectsMissingRequiredFields(t *testing.T) {
+	cases := []struct {
+		name string
+		e    Event
+	}{
+		{"missing id", Event{Actor: "a", Type: TypeHello, TS: time.Now()}},
+		{"missing actor", Event{ID: "x", Type: TypeHello, TS: time.Now()}},
+		{"missing ts", Event{ID: "x", Actor: "a", Type: TypeHello}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			bad, err := json.Marshal(c.e)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			if _, err := Decode(bad); err == nil {
+				t.Fatalf("expected decode error for %s", c.name)
+			}
+		})
+	}
+}
+
 func TestNewIDMonotonic(t *testing.T) {
 	now := time.Now()
 	a := NewID(now)
