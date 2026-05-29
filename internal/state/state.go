@@ -451,6 +451,9 @@ func refList(m map[string]interface{}, key string) []string {
 	if s, ok := v.(string); ok {
 		return []string{s}
 	}
+	if arr, ok := v.([]string); ok {
+		return append([]string(nil), arr...)
+	}
 	if arr, ok := v.([]interface{}); ok {
 		out := make([]string, 0, len(arr))
 		for _, x := range arr {

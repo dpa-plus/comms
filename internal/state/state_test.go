@@ -141,6 +141,19 @@ func TestFoldClaimAndRelease(t *testing.T) {
 	}
 }
 
+func TestFoldReleaseAcceptsStringSliceRefs(t *testing.T) {
+	now := time.Now().UTC()
+	claim := mkEvent(t, now, "claude-3a1f", event.TypeClaim, []string{"src/foo.ts"}, map[string]interface{}{"intent": "fix bug"})
+	events := []event.Event{
+		claim,
+		mkEvent(t, now.Add(time.Second), "claude-3a1f", event.TypeRelease, nil, map[string]interface{}{"refs": []string{claim.ID}}),
+	}
+	s := Fold(events)
+	if len(s.Claims) != 0 {
+		t.Fatalf("[]string refs should release claim, got %+v", s.Claims)
+	}
+}
+
 func TestFoldCommsSessionEndArchivesWindowAndReleasesAllClaims(t *testing.T) {
 	now := time.Now().UTC()
 	hello := mkEvent(t, now, "claude-1", event.TypeHello, nil, map[string]interface{}{"leader": true})
