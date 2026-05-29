@@ -373,3 +373,21 @@ func TestPrefixLookup(t *testing.T) {
 		t.Errorf("prefix lookup failed: got %v", found)
 	}
 }
+
+func TestFoldClaimPreservesLiteralHashInPath(t *testing.T) {
+	now := time.Now().UTC()
+	scope, err := overlap.Parse(`weird\#name.ts`)
+	if err != nil {
+		t.Fatalf("parse scope: %v", err)
+	}
+	claim := mkEvent(t, now, "alice", event.TypeClaim, []string{scope.String()}, map[string]interface{}{"intent": "hash path"})
+
+	s := Fold([]event.Event{claim})
+	got := s.Claims[claim.ID]
+	if got == nil {
+		t.Fatalf("claim missing after fold")
+	}
+	if got.Scope.Path != "weird#name.ts" || got.Scope.Anchor.Kind != overlap.AnchorWhole {
+		t.Fatalf("literal hash path should remain whole-file path claim, got %+v", got.Scope)
+	}
+}

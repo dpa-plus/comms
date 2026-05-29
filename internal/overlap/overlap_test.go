@@ -230,6 +230,24 @@ func TestParse_HashEscape(t *testing.T) {
 	}
 }
 
+func TestScopeStringEscapesLiteralHashInPath(t *testing.T) {
+	s, err := Parse(`weird\#name.ts`)
+	if err != nil {
+		t.Fatalf("Parse with escaped hash: %v", err)
+	}
+	rendered := s.String()
+	if rendered != `weird\#name.ts` {
+		t.Fatalf("String() = %q, want escaped literal hash", rendered)
+	}
+	roundTrip, err := Parse(rendered)
+	if err != nil {
+		t.Fatalf("Parse rendered scope: %v", err)
+	}
+	if roundTrip.Path != s.Path || roundTrip.Anchor.Kind != AnchorWhole {
+		t.Fatalf("round-trip changed scope: before=%+v after=%+v", s, roundTrip)
+	}
+}
+
 func TestScope_String(t *testing.T) {
 	parse := func(s string) Scope {
 		x, err := Parse(s)
