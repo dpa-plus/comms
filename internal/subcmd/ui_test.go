@@ -313,6 +313,44 @@ func TestUIServeEndCurrentSessionIDArchivesLegacyCurrentSession(t *testing.T) {
 	}
 }
 
+func TestUIServeEndCommsSessionRejectsStaleNamedSessionWithoutClaims(t *testing.T) {
+	repo := setupUITestRepo(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("COMMS_ACTOR", "human-eli")
+	t.Setenv("USER", "eli")
+	t.Chdir(repo)
+
+	rt, err := Open(OpenOpts{Mutating: true})
+	if err != nil {
+		t.Fatalf("open runtime: %v", err)
+	}
+	if err := rt.Append(event.Event{
+		TS:    time.Now().Add(-5 * time.Hour).UTC(),
+		ID:    "01JX2Q3Y7W5B6N9P0R1S2T3U9C",
+		Actor: "claude-stale",
+		Type:  event.TypeHello,
+		Data: map[string]interface{}{
+			"comms_session_start": true,
+			"comms_session_id":    "sess-stale",
+			"comms_session_name":  "stale session",
+		},
+	}); err != nil {
+		t.Fatalf("append setup event: %v", err)
+	}
+	if err := rt.Close(); err != nil {
+		t.Fatalf("close runtime: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/comms-session/end", strings.NewReader(`{"reason":"done","session_id":"sess-stale","name":"stale session"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	uiServer{staleAfter: 90 * time.Minute}.serveEndCommsSession(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestUIServeStartCommsSessionCreatesCurrentSession(t *testing.T) {
 	repo := setupUITestRepo(t)
 	t.Setenv("HOME", t.TempDir())
