@@ -4,12 +4,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/dpa-plus/comms/internal/actor"
 	"github.com/dpa-plus/comms/internal/event"
+	"github.com/dpa-plus/comms/internal/paths"
 	"github.com/dpa-plus/comms/internal/state"
 	"github.com/spf13/cobra"
 )
@@ -18,6 +21,7 @@ import (
 func NewUICmd() *cobra.Command {
 	addr := "127.0.0.1:7878"
 	demo := false
+	all := false
 	staleAfter := 90 * time.Minute
 	cmd := &cobra.Command{
 		Use:   "ui",
@@ -35,20 +39,21 @@ per-session logs for the current comms session and archived comms sessions.
 Use --demo to show deterministic sample data without writing fake events to
 the real comms log.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runUI(addr, demo, staleAfter)
+			return runUI(addr, demo, all, staleAfter)
 		},
 	}
 	cmd.Flags().StringVar(&addr, "addr", addr, "listen address")
 	cmd.Flags().BoolVar(&demo, "demo", false, "serve deterministic sample data without touching the real log")
+	cmd.Flags().BoolVar(&all, "all", false, "serve a read-only dashboard across every repo log under the comms data directory")
 	cmd.Flags().DurationVar(&staleAfter, "stale-after", staleAfter, "highlight claims older than this duration")
 	return cmd
 }
 
-func runUI(addr string, demo bool, staleAfter time.Duration) error {
+func runUI(addr string, demo, all bool, staleAfter time.Duration) error {
 	if staleAfter < time.Minute {
 		return fmt.Errorf("ui: --stale-after must be at least 1m")
 	}
-	server := uiServer{demo: demo, staleAfter: staleAfter}
+	server := uiServer{demo: demo, all: all, staleAfter: staleAfter}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", server.servePage)
 	mux.HandleFunc("/api/status", server.serveStatus)
@@ -63,11 +68,15 @@ func runUI(addr string, demo bool, staleAfter time.Duration) error {
 	if demo {
 		fmt.Println("Demo mode: serving sample data only; no fake events are written.")
 	}
+	if all {
+		fmt.Println("All-project mode: read-only view across all comms repo logs.")
+	}
 	return http.ListenAndServe(addr, mux)
 }
 
 type uiServer struct {
 	demo       bool
+	all        bool
 	staleAfter time.Duration
 }
 
@@ -92,6 +101,15 @@ func (s uiServer) serveStatus(w http.ResponseWriter, r *http.Request) {
 		_ = enc.Encode(buildDemoUISnapshot(s.staleAfter))
 		return
 	}
+	if s.all {
+		snap, err := buildGlobalUISnapshot(s.staleAfter)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, snap)
+		return
+	}
 
 	rt, err := Open(OpenOpts{Mutating: false})
 	if err != nil {
@@ -113,6 +131,10 @@ func (s uiServer) serveRetireSessionActor(w http.ResponseWriter, r *http.Request
 	}
 	if s.demo {
 		http.Error(w, "demo mode is read-only; no actor retire event is written", http.StatusConflict)
+		return
+	}
+	if s.all {
+		http.Error(w, "all-project mode is read-only; use a repo-specific UI or CLI for mutations", http.StatusConflict)
 		return
 	}
 	var req struct {
@@ -143,6 +165,10 @@ func (s uiServer) serveReleaseClaim(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.demo {
 		http.Error(w, "demo mode is read-only; no claim release event is written", http.StatusConflict)
+		return
+	}
+	if s.all {
+		http.Error(w, "all-project mode is read-only; use a repo-specific UI or CLI for mutations", http.StatusConflict)
 		return
 	}
 	var req struct {
@@ -198,6 +224,10 @@ func (s uiServer) serveTransferLeader(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "demo mode is read-only; no leader transfer event is written", http.StatusConflict)
 		return
 	}
+	if s.all {
+		http.Error(w, "all-project mode is read-only; use a repo-specific UI or CLI for mutations", http.StatusConflict)
+		return
+	}
 	var req struct {
 		Actor  string `json:"actor"`
 		Reason string `json:"reason"`
@@ -226,6 +256,10 @@ func (s uiServer) serveStartCommsSession(w http.ResponseWriter, r *http.Request)
 	}
 	if s.demo {
 		http.Error(w, "demo mode is read-only; no comms session start event is written", http.StatusConflict)
+		return
+	}
+	if s.all {
+		http.Error(w, "all-project mode is read-only; use a repo-specific UI or CLI for mutations", http.StatusConflict)
 		return
 	}
 	var req struct {
@@ -270,6 +304,10 @@ func (s uiServer) serveEndCommsSession(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.demo {
 		http.Error(w, "demo mode is read-only; no comms session end event is written", http.StatusConflict)
+		return
+	}
+	if s.all {
+		http.Error(w, "all-project mode is read-only; use a repo-specific UI or CLI for mutations", http.StatusConflict)
 		return
 	}
 	var req struct {
@@ -640,6 +678,156 @@ func buildDemoUISnapshot(staleAfter time.Duration) uiSnapshot {
 		Events:  currentEvents,
 		Updated: base.Add(18 * time.Second),
 	}
+}
+
+func buildGlobalUISnapshot(staleAfter time.Duration) (uiSnapshot, error) {
+	now := time.Now()
+	dataHome, err := paths.UserDataHome()
+	if err != nil {
+		return uiSnapshot{}, err
+	}
+	root := filepath.Join(dataHome, "comms")
+	out := uiSnapshot{
+		Project: uiProject{
+			Name:             "All comms projects",
+			Root:             root,
+			Hash:             "global",
+			LogPath:          root,
+			MutationMessage:  "All-project mode is read-only; use a repo-specific UI or CLI to start/end sessions.",
+			StaleAfter:       staleAfter.String(),
+			MutationsEnabled: false,
+		},
+		Active:        []uiCommsSession{},
+		Actions:       []uiAction{},
+		Sessions:      []uiSession{},
+		CommsSessions: []uiCommsSession{},
+		Claims:        []uiClaim{},
+		Findings:      []uiFinding{},
+		Notes:         []uiNote{},
+		Docs:          []string{},
+		Lessons:       listGlobalLessons(),
+		Events:        []uiEvent{},
+		Updated:       now.UTC(),
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			out.Actions = buildUIActions(out)
+			return out, nil
+		}
+		return uiSnapshot{}, err
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || entry.Name() == "global" {
+			continue
+		}
+		hash := entry.Name()
+		logDir := filepath.Join(root, hash)
+		repoRoot := strings.TrimSpace(readSmallFile(filepath.Join(logDir, "repo-path.txt")))
+		repoName := hash
+		if repoRoot != "" {
+			repoName = filepath.Base(repoRoot)
+		}
+		events, err := event.Read(filepath.Join(logDir, "log.jsonl"))
+		if err != nil {
+			continue
+		}
+		st := state.Fold(events)
+		active, archived := buildCommsSessionViews(events)
+		for i := range active {
+			active[i] = prefixCommsSessionForProject(active[i], repoName, hash)
+			out.Active = append(out.Active, active[i])
+		}
+		for i := range archived {
+			archived[i] = prefixCommsSessionForProject(archived[i], repoName, hash)
+			out.CommsSessions = append(out.CommsSessions, archived[i])
+		}
+		sessions := collectActiveSessions(st, now.Add(-4*time.Hour))
+		markLeaderSessions(sessions)
+		for _, s := range sessions {
+			out.Sessions = append(out.Sessions, uiSession{
+				Actor:       s.Actor,
+				Label:       s.Label,
+				BaseName:    s.BaseName,
+				Hostname:    s.Hostname,
+				TS:          s.TS,
+				Leader:      s.Leader,
+				SessionID:   hash + ":" + s.SessionID,
+				SessionName: projectSessionName(repoName, s.SessionName),
+			})
+		}
+		for _, c := range sortedClaims(st) {
+			out.Claims = append(out.Claims, uiClaim{
+				ID:          c.ID,
+				Actor:       c.Actor,
+				Scope:       c.Scope.String(),
+				Intent:      c.Intent,
+				TS:          c.TS,
+				Age:         shortAge(now.Sub(c.TS)),
+				Stale:       now.Sub(c.TS) >= staleAfter,
+				StoleID:     c.StolenFromID,
+				SessionID:   hash + ":" + c.SessionID,
+				SessionName: projectSessionName(repoName, c.SessionName),
+			})
+		}
+		for _, f := range recentFindings(st, now.Add(-24*time.Hour), 12) {
+			out.Findings = append(out.Findings, uiFinding{
+				ID: f.ID, Actor: f.Actor, Category: f.Category, Summary: repoName + ": " + f.Summary,
+				Priority: f.Priority, TS: f.TS, SessionID: hash + ":" + f.SessionID, SessionName: projectSessionName(repoName, f.SessionName),
+			})
+		}
+		for _, n := range recentNotes(st, now.Add(-24*time.Hour), 8) {
+			out.Notes = append(out.Notes, uiNote{
+				ID: n.ID, Actor: n.Actor, Body: repoName + ": " + n.Body,
+				Priority: n.Priority, TS: n.TS, SessionID: hash + ":" + n.SessionID, SessionName: projectSessionName(repoName, n.SessionName),
+			})
+		}
+		if repoRoot != "" {
+			for _, doc := range listDocs(filepath.Join(repoRoot, ".comms", "docs")) {
+				out.Docs = append(out.Docs, repoName+"/"+doc)
+			}
+		}
+	}
+	sort.Slice(out.Active, func(i, j int) bool { return out.Active[i].StartedAt.After(out.Active[j].StartedAt) })
+	sort.Slice(out.CommsSessions, func(i, j int) bool { return out.CommsSessions[i].EndedAt.After(out.CommsSessions[j].EndedAt) })
+	sort.Slice(out.Claims, func(i, j int) bool { return out.Claims[i].TS.Before(out.Claims[j].TS) })
+	sort.Slice(out.Findings, func(i, j int) bool { return out.Findings[i].TS.After(out.Findings[j].TS) })
+	sort.Slice(out.Notes, func(i, j int) bool { return out.Notes[i].TS.After(out.Notes[j].TS) })
+	if len(out.Active) > 0 {
+		out.Current = &out.Active[0]
+		out.Events = out.Current.Events
+	} else if len(out.CommsSessions) > 0 {
+		out.Events = out.CommsSessions[0].Events
+	}
+	out.Actions = buildUIActions(out)
+	return out, nil
+}
+
+func readSmallFile(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	if len(b) > 4096 {
+		b = b[:4096]
+	}
+	return string(b)
+}
+
+func prefixCommsSessionForProject(in uiCommsSession, repoName, hash string) uiCommsSession {
+	in.ID = hash + ":" + in.ID
+	in.Name = projectSessionName(repoName, in.Name)
+	for i := range in.Events {
+		in.Events[i].ID = hash + ":" + in.Events[i].ID
+	}
+	return in
+}
+
+func projectSessionName(repoName, sessionName string) string {
+	if strings.TrimSpace(sessionName) == "" {
+		return repoName + " / legacy"
+	}
+	return repoName + " / " + sessionName
 }
 
 func buildUIActions(snap uiSnapshot) []uiAction {

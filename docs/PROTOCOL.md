@@ -210,6 +210,10 @@ Every mutating command acquires an exclusive `flock(2)` on `<logdir>/.lock` befo
 
 `comms ui` serves a read-mostly local dashboard over HTTP. The backend exposes:
 
+`comms ui --all` serves the same API shape in read-only global mode by scanning
+all repo log directories under the comms data directory. It does not merge files
+on disk; it prefixes project/session labels in the response.
+
 | Endpoint                   | Method | Purpose                                                           |
 | -------------------------- | ------ | ----------------------------------------------------------------- |
 | `/api/status`              | GET    | Current project snapshot, active state, archives, per-session logs, and action metadata. |
