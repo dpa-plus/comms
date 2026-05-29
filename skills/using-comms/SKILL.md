@@ -50,9 +50,10 @@ UI backend, use:
 curl -fsS http://127.0.0.1:7878/api/status
 ```
 
-The backend advertises `actions`, `current_session.events`, and
-`comms_sessions[].events`; those are filtered views over the append-only JSONL
-log.
+The backend advertises `actions`, including `release_claim`,
+`retire_session_actor`, and `transfer_leader`. It also returns
+`current_session.events` and `comms_sessions[].events`; those are filtered
+views over the append-only JSONL log.
 
 ## Session Roster Admin
 

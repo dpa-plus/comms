@@ -289,6 +289,51 @@ func TestUIServeRetireSessionActor(t *testing.T) {
 	}
 }
 
+func TestUIServeReleaseClaim(t *testing.T) {
+	repo := setupUITestRepo(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("COMMS_ACTOR", "human-eli")
+	t.Setenv("USER", "eli")
+	t.Chdir(repo)
+
+	rt, err := Open(OpenOpts{Mutating: true})
+	if err != nil {
+		t.Fatalf("open runtime: %v", err)
+	}
+	claimID := "01JX2Q3Y7W5B6N9P0R1S2T3U8A"
+	if err := rt.Append(event.Event{
+		TS:    time.Now().Add(-5 * time.Minute).UTC(),
+		ID:    claimID,
+		Actor: "human-eli",
+		Type:  event.TypeClaim,
+		Scope: []string{"src/foo.ts"},
+		Data:  map[string]interface{}{"intent": "finish work"},
+	}); err != nil {
+		t.Fatalf("append setup event: %v", err)
+	}
+	if err := rt.Close(); err != nil {
+		t.Fatalf("close runtime: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/claim/release", strings.NewReader(`{"claim_id":"`+claimID[:10]+`","result":"done"}`))
+	rec := httptest.NewRecorder()
+	uiServer{staleAfter: 90 * time.Minute}.serveReleaseClaim(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var snap uiSnapshot
+	if err := json.Unmarshal(rec.Body.Bytes(), &snap); err != nil {
+		t.Fatalf("decode snapshot: %v", err)
+	}
+	if len(snap.Claims) != 0 {
+		t.Fatalf("released claim should be gone: %+v", snap.Claims)
+	}
+	if got := actionByIDForTest(snap.Actions, "release_claim"); got.Enabled {
+		t.Fatalf("release action should be disabled with no claims: %+v", got)
+	}
+}
+
 func TestUIServeRetireClaimOnlyActor(t *testing.T) {
 	repo := setupUITestRepo(t)
 	t.Setenv("HOME", t.TempDir())

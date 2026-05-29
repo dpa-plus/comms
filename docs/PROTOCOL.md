@@ -207,6 +207,7 @@ Every mutating command acquires an exclusive `flock(2)` on `<logdir>/.lock` befo
 | `/api/status`              | GET    | Current project snapshot, active state, archives, per-session logs, and action metadata. |
 | `/api/comms-session/start` | POST   | Append a `hello` event with `comms_session_start=true`. Requires `COMMS_ACTOR`. |
 | `/api/comms-session/end`   | POST   | Append a `release` event with `comms_session_end=true` and all active claim refs. Requires `COMMS_ACTOR`. |
+| `/api/claim/release`       | POST   | Append a normal `release` event for one active claim. Body: `claim_id`, optional `result`/`reason`. Requires `COMMS_ACTOR`. |
 | `/api/session/retire`      | POST   | Append a `release` event with `session_retire=true`; releases that actor's claims. Requires `COMMS_ACTOR`. |
 | `/api/session/lead`        | POST   | Append a `release` event with `leader_transfer=true`. Requires `COMMS_ACTOR`. |
 
@@ -218,6 +219,7 @@ what the backend currently allows:
   "actions": [
     {"id": "start_comms_session", "label": "Start Comms Session", "method": "POST", "path": "/api/comms-session/start", "enabled": true},
     {"id": "end_comms_session", "label": "End Comms Session", "method": "POST", "path": "/api/comms-session/end", "enabled": false, "reason": "no active comms session to end"},
+    {"id": "release_claim", "label": "Release Claim", "method": "POST", "path": "/api/claim/release", "enabled": true},
     {"id": "retire_session_actor", "label": "Retire Session Actor", "method": "POST", "path": "/api/session/retire", "enabled": true},
     {"id": "transfer_leader", "label": "Transfer Leader", "method": "POST", "path": "/api/session/lead", "enabled": true},
     {"id": "select_session_log", "label": "Select Session Event Log", "enabled": true}
