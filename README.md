@@ -1,43 +1,151 @@
+<div align="center">
+
+<img src="assets/logo.svg" alt="comms logo" width="128" height="128">
+
 # comms
 
-Lightweight multi-agent coordination CLI: per-session claims, JSONL event log, `.comms/docs` wiki.
+**Coordinate parallel coding agents through one shared, append-only log.**
 
-`comms` is the third generation of multi-agent coordination at DPA+. It learned from:
-- **`mcp-agent-mail`** (heavy MCP server, severity ladders, 7 identities) — too much ceremony; agents kept forgetting protocol steps.
-- **A 1632-line `COMMS.md` append-only markdown** — worked OK but grew unbounded, no targeted reads, agents had to remember to update it, iCloud sync forked the file.
+[![License](https://img.shields.io/badge/license-Apache--2.0-0f766e)](LICENSE)
+[![Go](https://img.shields.io/badge/Go-1.25+-0f766e?logo=go&logoColor=white)](go.mod)
+[![Single binary](https://img.shields.io/badge/runtime-single%20static%20binary-0f766e)](#how-it-actually-runs-on-your-machine)
+[![No daemon](https://img.shields.io/badge/no-daemon%20%C2%B7%20no%20server-0f766e)](#how-it-actually-runs-on-your-machine)
 
-`comms` is the small version. A compact CLI, 5 event types, JSONL log + `flock`, and opt-in Claude/Codex skills.
+</div>
 
-The first active session is shown as the repo's lightweight **leader**. The
-leader has one extra privilege: posting `--priority` notes/findings that pin
-to the top of `status` and `ui`. It does not assign work or add ceremony.
+> **comms is a tiny command-line tool that lets several AI coding agents — and you — work in the same repository at the same time without stepping on each other.**
+
+<p align="center">
+  <img src="assets/dashboard.png" alt="The comms dashboard: team roster, active claims, findings, notes, and a live session event log." width="900">
+</p>
+
+<p align="center"><em>The live dashboard (<code>comms ui</code>) — a read-only window over the shared log, pushed to your browser the instant anything changes.</em></p>
+
+---
+
+## The problem it solves
+
+Modern coding often means running **more than one AI agent on the same codebase at once** — say Claude in one window and Codex in another, plus you. That's powerful, but they're effectively three people editing the same project with no shared awareness:
+
+- 🥊 **They collide.** Two agents edit the same file and overwrite each other's work.
+- 🔁 **They repeat each other.** One agent fixes a bug the other already fixed.
+- 🧠 **They forget context.** A decision ("the tracker is the source of truth for leads") lives in one agent's head and is lost to the others.
+- 🌫️ **You can't see what's happening.** Who's working on what, right now?
+
+These are the classic problems of people working in parallel — and the classic answer is to **write things down in one shared place.** comms is that shared place, built for agents: small enough that they actually use it, with a live view so *you* can watch.
+
+> This is the **third generation** of multi-agent coordination at DPA+. The first was `mcp-agent-mail` — a heavy MCP server with severity ladders and seven identities; too much ceremony, and agents kept forgetting the protocol. The second was a single 1,632-line `COMMS.md` markdown file — it worked, but grew without bound, had no targeted reads, relied on agents remembering to update it, and iCloud sync kept forking the file. **comms is the small version that learned from both.**
+
+---
+
+## What comms gives you
+
+| Primitive | What it's for | Example |
+|---|---|---|
+| **Claim** | "I'm working on this file — hands off." | `comms claim "src/auth.ts" --intent "fix JWT expiry"` |
+| **Finding** | A durable fact: a bug, a fix, a decision, a gotcha, a release. | `comms find decision "tracker is source of truth for leads"` |
+| **Note** | A short, throwaway heads-up. | `comms note "FYI: schema migration coming next"` |
+| **Session** | A named work window that groups claims/events and can be archived. | `comms session start "dashboard fixes"` |
+| **Doc** | A small per-repo wiki under `.comms/docs`. | `comms doc tracker-architecture` |
+| **Lesson** | Cross-project knowledge that outlives any one repo. | `comms lesson verify-data-before-ui` |
+
+Before an agent edits a file it **claims** it. Before it forgets a decision it records a **finding**. Another agent (or you) runs `comms status` and instantly sees the whole picture. The first active participant becomes a lightweight **leader** whose only extra power is pinning `--priority` notes to the top.
+
+---
+
+## How it actually runs on your machine
+
+The most important thing to understand: **comms is not a server.** There's no daemon, no background process, no network service, no database to install. It is **one small, self-contained Go binary** (~10 MB) sitting on your `PATH`.
+
+**Everything is files.** State lives in two places:
+
+```
+your-repo/.comms/                         ← committed to git (shared design)
+  ├─ policy.txt                            ← optional rules (which paths need claims)
+  └─ docs/                                 ← the per-repo wiki
+
+~/Library/Application Support/comms/<repo-hash>/   ← per-machine, NOT in git
+  ├─ log.jsonl                             ← the append-only event log (the heart)
+  └─ .lock                                 ← a file lock that serializes writes
+```
+
+> The per-machine log lives outside iCloud on purpose — iCloud Drive forks files that two processes append to at the same time, which would corrupt the log.
+
+**Every command is the same tiny dance.** When an agent runs `comms claim …`:
+
+1. The binary **starts**, figures out which repo you're in, and finds that repo's `log.jsonl`.
+2. It grabs the **file lock** (so two agents can't write at the same instant).
+3. It **appends one line** — a JSON event — to the end of the log.
+4. It **releases the lock and exits.**
+
+That's it. A `comms` command is a short-lived program that opens a file, appends a line, and quits. Reading state (`comms status`) just replays the log — no lock needed.
+
+```mermaid
+flowchart LR
+    A["Claude<br/>(comms claim …)"] -- append --> L[("log.jsonl<br/>append-only<br/>+ file lock")]
+    B["Codex<br/>(comms find …)"] -- append --> L
+    C["You<br/>(comms note …)"] -- append --> L
+    L -- replay/read --> D["comms status"]
+    L -- watched live --> U["comms ui<br/>(dashboard)"]
+```
+
+---
+
+## How the agents actually communicate
+
+Here's the key idea: **the agents never talk to each other directly.** There's no chat, no messages flying between them, no network connection. They communicate the way a team uses a shared whiteboard:
+
+- **Agent A writes to the board.** `comms claim "aggregate.ts"` appends a *claim* event to the log.
+- **Agent B reads the board.** `comms status` replays the log and sees A's claim — so B knows to work elsewhere.
+- **Conflicts are caught by reading, not messaging.** If B tries to claim a file that overlaps A's claim, comms sees the overlap in the log and tells B to back off.
+
+The log is the single source of truth. It's **append-only**, so history is never rewritten — you can always see exactly who did what and when. This "shared ledger" model is what makes coordination reliable without any of the agents needing to know the others exist. They only need to know about **the log**.
+
+The dashboard (`comms ui`) is simply a **live read-only view** of that same log.
+
+---
+
+## The live dashboard
+
+```bash
+comms ui          # open http://127.0.0.1:7878
+```
+
+The dashboard shows the team roster, active claims (stale ones highlighted), recent findings and notes, docs, lessons, and a per-session event log.
+
+It updates by **push, not polling.** A file watcher inside `comms ui` is notified by the operating system the instant `log.jsonl` changes; it rebuilds the snapshot once and streams it to every open browser tab over [Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events). So when any agent appends an event, the dashboard reflects it **immediately**, and your laptop isn't burning cycles re-reading the log on a timer.
+
+- `comms ui --demo` — explore with sample data (read-only; writes nothing real).
+- `comms ui --all` — a read-only portfolio view across every repo's log on this machine.
+
+---
 
 ## Quick start
 
 ```bash
-# Install
+# Install (single binary, nothing else)
 go install github.com/dpa-plus/comms/cmd/comms@latest
 
-# Manual / desktop-app use: prefix commands with a concrete actor.
+# In desktop-app / manual use, prefix commands with a concrete actor name:
 COMMS_ACTOR=codex-dev comms hello --label "Codex Dev"
 COMMS_ACTOR=codex-dev comms session start "dashboard fixes" --label "Codex Dev"
 COMMS_ACTOR=codex-dev comms status
 COMMS_ACTOR=codex-dev comms claim "src/foo.ts" --intent "fix bug"
-COMMS_ACTOR=codex-dev comms note --priority "Everyone should know: stop editing aggregation until the current claim clears."
+COMMS_ACTOR=codex-dev comms note --priority "Stop editing aggregation until my claim clears."
 ```
 
-If a desktop app loses macOS access to its current directory, run `comms` from a
-safe directory and point it at the repo explicitly:
+If a desktop app loses macOS access to its working directory, run `comms` from a safe directory and point it at the repo explicitly:
 
 ```bash
 COMMS_ACTOR=claude-dev comms --repo /Users/you/code/my-project status
-# or persist for one shell:
+# or for one shell:
 export COMMS_REPO=/Users/you/code/my-project
 COMMS_ACTOR=claude-dev comms status
 ```
 
-See `docs/INSTALL.md` for manual and optional automated setup,
-`docs/PROTOCOL.md` for the event schema, `docs/DESIGN.md` for the why.
+See [`docs/INSTALL.md`](docs/INSTALL.md) for manual + optional automated (hook/skill) setup, [`docs/PROTOCOL.md`](docs/PROTOCOL.md) for the event schema, and [`docs/DESIGN.md`](docs/DESIGN.md) for the *why*.
+
+---
 
 ## Commands at a glance
 
@@ -53,49 +161,51 @@ comms session lead [<actor>] [--reason "..."] # make exactly one active actor th
 comms check <path>                            # PreToolUse hook (also: --stdin-json)
 comms status [--json]
 comms log [--actor X] [--since 1h] [--scope path] [--type list] [--category cat]
-comms note [--priority] "<≤200-char FYI>"
+comms note [--priority] "<=200-char FYI>"
 comms find [--priority] <bug|fix|ship|decision|gotcha> "<summary>" [--ref kind:value ...]
-comms doc --list                              # wiki: list slugs
-comms doc <slug>                              # wiki: print
-comms doc <slug> --edit                       # wiki: open $EDITOR under sidecar flock
-comms lesson --list                           # global lessons: list slugs
-comms lesson <slug>                           # global lessons: print
-comms lesson <slug> --edit                    # global lessons: edit under sidecar flock
-comms ui [--demo] [--all] [--stale-after 90m] [--addr 127.0.0.1:7878] # local dashboard
+comms doc --list | comms doc <slug> | comms doc <slug> --edit
+comms lesson --list | comms lesson <slug> | comms lesson <slug> --edit
+comms ui [--demo] [--all] [--stale-after 90m] [--addr 127.0.0.1:7878]
 
 Global flags:
   --repo /absolute/repo/path                  # bypass cwd/git discovery
 ```
 
-The dashboard is for watching repo state. Agents still perform normal work via
-the CLI/skill. When started with `COMMS_ACTOR`, the UI can start multiple named
-sessions, show each session's actors/claims/events separately, and end one
-selected named session when that project window is done. Events stay in the
-same append-only per-repo JSONL file, but every joined actor's claims, notes,
-findings, and releases carry `comms_session_id`/`comms_session_name` metadata so
-session data does not mix in the UI or API. If an actor starts or joins a
-different named session, comms releases that actor's prior-session claims first;
-claims do not follow the actor into the new session. Demo mode remains
-read-only.
-
-Use `comms ui --all` for a read-only portfolio dashboard across every repo log
-under the comms data directory. Per-repo logs stay separate on disk; the global
-view prefixes session names with the project.
-
-Use stable, readable actors for desktop app work, for example `claude-dev` and
-`codex-dev`, plus `--label "Claude Dev"` / `--label "Codex Dev"` for UI display.
-If an agent accidentally registers a throwaway actor, retire it instead of
-editing the log:
+Use stable, readable actors for desktop-app work (e.g. `claude-dev`, `codex-dev`) plus `--label "Claude Dev"` for the UI. If an agent registers a throwaway actor, **retire** it instead of editing the log:
 
 ```bash
 COMMS_ACTOR=claude-dev comms session retire claude-7e4c --reason "renamed to claude-dev"
-COMMS_ACTOR=claude-dev comms session lead --reason "user asked Claude Dev to lead"
+COMMS_ACTOR=claude-dev comms session lead --reason "let Claude Dev lead"
 ```
 
-Global lessons are carefully curated cross-project operating knowledge for
-agents. They live under the user's comms data directory, not in any one repo.
-Project docs remain under `.comms/docs`.
+---
+
+## Upgrading (and what happens to a running session)
+
+Because `comms` is just a binary that runs fresh on every command, upgrading is painless and **never disturbs an in-flight session**:
+
+- **The session lives in the log file, not in the binary.** Claims, findings, and notes are on disk. Replacing the binary doesn't touch them.
+- **CLI commands pick up the new version instantly** — the *next* `comms …` an agent runs uses the new binary. No restart, no re-join.
+- **Only the dashboard needs a nudge.** `comms ui` is the one long-running process; it keeps serving the old version until you stop it and run `comms ui` again. Restarting it loses nothing — it just re-reads the same log.
+
+```bash
+go install github.com/dpa-plus/comms/cmd/comms@latest   # agents use it on their next command
+# restart `comms ui` when convenient to get the latest dashboard
+```
+
+---
+
+## Design notes
+
+- **uuid-free, dependency-light.** The core is the Go standard library plus a CLI framework, a ULID generator, and a file watcher.
+- **Append-only + `flock`.** Writes are serialized by a per-repo file lock; the log is never rewritten, so history and audit are free.
+- **Recoverable by design.** Blank lines are skipped, a torn final line is ignored, duplicate event IDs are dropped — a half-written line never breaks a read.
+- **Opt-in, not enforced.** comms suggests and records; it doesn't block your editor. A `PreToolUse` hook (`comms check`) can warn before an agent touches a claimed path.
+
+More in [`docs/DESIGN.md`](docs/DESIGN.md) and [`docs/PROTOCOL.md`](docs/PROTOCOL.md).
+
+---
 
 ## License
 
-Apache-2.0.
+[Apache-2.0](LICENSE).
