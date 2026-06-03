@@ -68,9 +68,10 @@ To watch the repo state in a browser:
 comms ui
 ```
 
-Then open `http://127.0.0.1:7878`. The dashboard refreshes from the JSONL log
-every two seconds. The log path is shown in the dashboard header and is
-normally:
+Then open `http://127.0.0.1:7878`. The dashboard streams live updates over
+Server-Sent Events: a file watcher in the `comms ui` process detects each change
+to the JSONL log and pushes a fresh snapshot to the browser instantly, so there
+is no polling. The log path is shown in the dashboard header and is normally:
 
 ```text
 ~/Library/Application Support/comms/<repo-hash>/log.jsonl

@@ -8,6 +8,9 @@
 *.so
 *.dylib
 
+# Local build of the comms binary (Makefile `build` target -> ./comms)
+/comms
+
 # Test binary, built with `go test -c`
 *.test
 
