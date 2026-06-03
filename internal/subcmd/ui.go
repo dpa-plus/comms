@@ -1,6 +1,7 @@
 package subcmd
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,7 +34,9 @@ func NewUICmd() *cobra.Command {
 		Long: `Serve a local dashboard for the current repo.
 
 The UI binds to 127.0.0.1 by default, reads the same JSONL event log as the
-CLI, and auto-refreshes in the browser.
+CLI, and streams live updates to the browser over Server-Sent Events: a file
+watcher detects each change to the log and pushes a fresh snapshot instantly,
+so the browser never polls.
 
 Claims older than --stale-after are highlighted as suspicious. The UI can
 append start/end boundary events when COMMS_ACTOR is set; it never edits or
@@ -57,10 +60,11 @@ func runUI(addr string, demo, all bool, staleAfter time.Duration) error {
 	if staleAfter < time.Minute {
 		return fmt.Errorf("ui: --stale-after must be at least 1m")
 	}
-	server := uiServer{demo: demo, all: all, staleAfter: staleAfter}
+	server := uiServer{demo: demo, all: all, staleAfter: staleAfter, hub: newHub()}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", server.servePage)
 	mux.HandleFunc("/api/status", server.serveStatus)
+	mux.HandleFunc("/api/events", server.serveEvents)
 	mux.HandleFunc("/api/comms-session/start", server.serveStartCommsSession)
 	mux.HandleFunc("/api/comms-session/end", server.serveEndCommsSession)
 	mux.HandleFunc("/api/session/retire", server.serveRetireSessionActor)
@@ -75,6 +79,17 @@ func runUI(addr string, demo, all bool, staleAfter time.Duration) error {
 	if all {
 		fmt.Println("All-project mode: view across all comms repo logs; claim release is enabled when COMMS_ACTOR is set.")
 	}
+
+	// Prime the hub so the first browser to connect paints immediately, then
+	// start the fsnotify watcher that pushes every later change. Demo data is
+	// static, so it primes once and never needs a watcher.
+	server.publishSnapshot()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if !demo {
+		go server.watchLog(ctx)
+	}
+
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           mux,
@@ -90,6 +105,7 @@ type uiServer struct {
 	demo       bool
 	all        bool
 	staleAfter time.Duration
+	hub        *hub // fans pushed snapshots out to connected SSE clients
 }
 
 // guardMutation enforces the security preconditions shared by every
@@ -196,34 +212,16 @@ func (s uiServer) serveStatus(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden: cross-origin request rejected", http.StatusForbidden)
 		return
 	}
-	if s.demo {
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		enc := json.NewEncoder(w)
-		enc.SetIndent("", "  ")
-		_ = enc.Encode(buildDemoUISnapshot(s.staleAfter))
-		return
-	}
-	if s.all {
-		snap, err := buildGlobalUISnapshot(s.staleAfter)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		writeJSON(w, http.StatusOK, snap)
-		return
-	}
-
-	rt, err := Open(OpenOpts{Mutating: false})
+	// Shared with the SSE push path so the polled and pushed snapshots are byte
+	// identical. Compact JSON (no indentation) keeps the payload small and is
+	// required for SSE framing; the UI decodes JSON, so it's transparent.
+	body, err := s.snapshotJSON()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer rt.Close()
-
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	_ = enc.Encode(buildUISnapshot(rt, s.staleAfter))
+	_, _ = w.Write(body)
 }
 
 func (s uiServer) serveRetireSessionActor(w http.ResponseWriter, r *http.Request) {
@@ -2067,7 +2065,6 @@ th {
     <button id="startComms" type="button">Start Comms Session</button>
     <button id="endComms" class="danger" type="button">End Comms Session</button>
     <button id="theme" type="button" aria-label="Toggle dark mode">Dark</button>
-    <button id="refresh" type="button">Refresh</button>
   </div>
 </header>
 <section id="stats" class="stats" aria-label="Comms summary"></section>
@@ -2182,7 +2179,9 @@ function renderStats(data) {
 async function load() {
   const res = await fetch('/api/status', { cache: 'no-store' });
   if (!res.ok) throw new Error(await res.text());
-  const data = await res.json();
+  applySnapshot(await res.json());
+}
+function applySnapshot(data) {
   hideError();
   el('project').textContent = data.project.name + ' / comms';
   el('projectMeta').innerHTML = esc(data.project.hash) + ' · ' + esc(data.project.root) + (data.project.demo ? ' · <span class="demo-mark">demo mode</span>' : '');
@@ -2277,9 +2276,9 @@ function renderSessionChoices(data) {
   if (!choices.some(c => c.id === selectedSessionID)) selectedSessionID = choices[0].id;
   sel.disabled = false;
   // Only rebuild the <option> set when it actually changed, and never while the
-  // user has the dropdown open (focused). The 2s auto-refresh would otherwise
-  // collapse an open menu and reset the selection every cycle. We still keep the
-  // selected log in sync below.
+  // user has the dropdown open (focused). A live snapshot push that arrived
+  // mid-interaction would otherwise collapse an open menu and reset the
+  // selection. We still keep the selected log in sync below.
   const sig = JSON.stringify(choices.map(c => [c.id, c.label]));
   if (sel.dataset.sig !== sig && document.activeElement !== sel) {
     sel.innerHTML = choices.map(c => '<option value="' + esc(c.id) + '">' + esc(c.label) + '</option>').join('');
@@ -2386,7 +2385,6 @@ el('theme').addEventListener('click', () => {
   localStorage.setItem('theme', next);
   applyTheme(next);
 });
-el('refresh').addEventListener('click', () => load().catch(showError));
 function showError(err) {
   el('error').style.display = 'block';
   el('error').textContent = 'Error: ' + err.message.trim();
@@ -2395,8 +2393,29 @@ function hideError() {
   el('error').style.display = 'none';
   el('error').textContent = '';
 }
+function setLive(on) {
+  document.body.classList.toggle('disconnected', !on);
+  if (!on) el('updated').textContent = 'reconnecting…';
+}
+// Push, not poll. Open one EventSource: the server primes us with the current
+// snapshot the instant we connect and pushes a fresh one on every change, so
+// there is no polling loop. A single initial fetch gives a fast first paint and
+// a graceful fallback if the stream can't be established. EventSource reconnects
+// on its own after a drop.
 load().catch(showError);
-setInterval(() => load().catch(showError), 2000);
+let eventStream = null;
+function connectStream() {
+  if (eventStream) eventStream.close();
+  eventStream = new EventSource('/api/events');
+  eventStream.addEventListener('open', () => setLive(true));
+  eventStream.addEventListener('snapshot', e => {
+    setLive(true);
+    try { applySnapshot(JSON.parse(e.data)); }
+    catch (err) { showError(err); }
+  });
+  eventStream.addEventListener('error', () => setLive(false));
+}
+connectStream();
 </script>
 </body>
 </html>`
