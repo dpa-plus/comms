@@ -286,6 +286,11 @@ func (s uiServer) watchLog(ctx context.Context) {
 	const debounce = 150 * time.Millisecond
 	var timer *time.Timer
 	var timerC <-chan time.Time
+	defer func() {
+		if timer != nil {
+			timer.Stop()
+		}
+	}()
 	arm := func() {
 		if timer == nil {
 			timer = time.NewTimer(debounce)
