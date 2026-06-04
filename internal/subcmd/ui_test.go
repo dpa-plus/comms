@@ -150,6 +150,53 @@ func TestBuildGlobalUISnapshotAttachesLegacyClaimsToProjectCurrentSession(t *tes
 	}
 }
 
+func TestBuildGlobalUISnapshotOrdersPriorityFindingsFirst(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dataHome, err := paths.UserDataHome()
+	if err != nil {
+		t.Fatalf("user data home: %v", err)
+	}
+	now := time.Now().UTC()
+	mk := func(hash, name string, ts time.Time, priority bool, summary string) {
+		repoRoot := filepath.Join(home, name)
+		if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+			t.Fatalf("mkdir repo: %v", err)
+		}
+		logDir := filepath.Join(dataHome, "comms", hash)
+		if err := os.MkdirAll(logDir, 0o700); err != nil {
+			t.Fatalf("mkdir log dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(logDir, "repo-path.txt"), []byte(repoRoot+"\n"), 0o600); err != nil {
+			t.Fatalf("write repo path: %v", err)
+		}
+		data := map[string]interface{}{"category": "decision", "summary": summary}
+		if priority {
+			data["priority"] = true
+		}
+		ev := event.Event{TS: ts, ID: event.NewID(ts), Actor: "claude-dev", Type: event.TypeFinding, Data: data}
+		if err := event.Append(filepath.Join(logDir, "log.jsonl"), ev); err != nil {
+			t.Fatalf("append finding: %v", err)
+		}
+	}
+	// Project A: a NEWER, non-priority finding. Project B: an OLDER, priority one.
+	mk("aaaa11112222", "proj-a", now.Add(-2*time.Minute), false, "newer normal finding")
+	mk("bbbb33334444", "proj-b", now.Add(-30*time.Minute), true, "older PRIORITY finding")
+
+	snap, err := buildGlobalUISnapshot(90 * time.Minute)
+	if err != nil {
+		t.Fatalf("build global snapshot: %v", err)
+	}
+	if len(snap.Findings) != 2 {
+		t.Fatalf("want 2 merged findings, got %d", len(snap.Findings))
+	}
+	// The priority finding must sort first in the merged all-projects view even
+	// though it is older — matching the per-repo view's priority-first ordering.
+	if !snap.Findings[0].Priority {
+		t.Fatalf("priority finding must sort first in the merged view, got: %+v", snap.Findings)
+	}
+}
+
 func TestBuildGlobalUISnapshotPopulatesPerProjectContainers(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
