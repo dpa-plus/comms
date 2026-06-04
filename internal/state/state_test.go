@@ -92,6 +92,57 @@ func TestFoldSessionRetireRemovesSessionAndClaims(t *testing.T) {
 	}
 }
 
+func TestFoldReleasesEveryBatchClaimedScopeAtSameTimestamp(t *testing.T) {
+	// Regression for the dangling-claim bug: batch claim used to future-stamp
+	// each scope (now, now+1ms, now+2ms). A release at real-now could then sort
+	// BEFORE the later claims, so Fold's delete missed them and they stayed
+	// active forever. The fix stamps every batch claim with one timestamp
+	// (monotonic IDs keep them ordered); a release at that same instant must now
+	// release ALL of them.
+	now := time.Now().UTC()
+	c1 := mkEvent(t, now, "codex-dev", event.TypeClaim, []string{"a.ts"}, map[string]interface{}{"intent": "batch"})
+	c2 := mkEvent(t, now, "codex-dev", event.TypeClaim, []string{"b.ts"}, map[string]interface{}{"intent": "batch"})
+	c3 := mkEvent(t, now, "codex-dev", event.TypeClaim, []string{"c.ts"}, map[string]interface{}{"intent": "batch"})
+	rel := mkEvent(t, now, "codex-dev", event.TypeRelease, nil, map[string]interface{}{
+		"refs":   []interface{}{c1.ID, c2.ID, c3.ID},
+		"result": "all done",
+	})
+	s := Fold([]event.Event{c1, c2, c3, rel})
+	if len(s.Claims) != 0 {
+		t.Fatalf("all 3 batch claims should be released, got %d dangling: %+v", len(s.Claims), s.Claims)
+	}
+	if len(s.Releases) != 1 || len(s.Releases[0].Scopes) != 3 {
+		t.Fatalf("the release should record all 3 released scopes, got %+v", s.Releases)
+	}
+}
+
+func TestFoldExcludesHousekeepingReleasesFromCompletedFeed(t *testing.T) {
+	// Regression: session lifecycle releases (retire / leader / session-end) carry
+	// refs but are coordination admin, not finished work — they must not show up
+	// in the "recently completed" feed alongside real claim releases.
+	now := time.Now().UTC()
+	hello := mkEvent(t, now, "codex-dev", event.TypeHello, nil, map[string]interface{}{})
+	claimA := mkEvent(t, now, "codex-dev", event.TypeClaim, []string{"a.ts"}, map[string]interface{}{"intent": "work"})
+	claimB := mkEvent(t, now, "codex-dev", event.TypeClaim, []string{"b.ts"}, map[string]interface{}{"intent": "work"})
+	relWork := mkEvent(t, now.Add(time.Second), "codex-dev", event.TypeRelease, nil, map[string]interface{}{
+		"refs":   []interface{}{claimA.ID},
+		"result": "PR #1 merged",
+	})
+	retire := mkEvent(t, now.Add(2*time.Second), "human-eli", event.TypeRelease, nil, map[string]interface{}{
+		"refs":           []interface{}{claimB.ID},
+		"session_retire": true,
+		"retired_actor":  "codex-dev",
+		"reason":         "renamed",
+	})
+	s := Fold([]event.Event{hello, claimA, claimB, relWork, retire})
+	if len(s.Releases) != 1 {
+		t.Fatalf("only the real claim release belongs in the completed feed, got %d: %+v", len(s.Releases), s.Releases)
+	}
+	if s.Releases[0].Result != "PR #1 merged" {
+		t.Fatalf("wrong release recorded in feed: %+v", s.Releases[0])
+	}
+}
+
 func TestFoldLeaderTransfer(t *testing.T) {
 	now := time.Now().UTC()
 	events := []event.Event{

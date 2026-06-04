@@ -181,6 +181,13 @@ func runClaimBatch(scopeRaws []string, intent string) error {
 		os.Exit(1)
 	}
 
+	// Every claim in the batch shares ONE real timestamp; event.NewID is
+	// monotonic, so the IDs stay strictly ordered within the millisecond. We must
+	// NOT advance the timestamp per scope: future-stamping let a subsequent
+	// real-time release sort BEFORE the not-yet-reached claims, so Fold's delete
+	// missed them and they dangled active forever. Fold sorts by TS with a stable
+	// sort, so equal-TS claims keep append order and any later release folds after
+	// them.
 	now := time.Now().UTC()
 	ids := make([]string, 0, len(scopes))
 	evs := make([]event.Event, 0, len(scopes))
@@ -197,7 +204,6 @@ func runClaimBatch(scopeRaws []string, intent string) error {
 		}
 		evs = append(evs, ev)
 		ids = append(ids, ev.ID)
-		now = now.Add(time.Millisecond) // keep event IDs/timestamps distinct
 	}
 	// Append every claim and fold once, not once per scope — shorter lock hold.
 	if err := rt.AppendBatch(evs); err != nil {
