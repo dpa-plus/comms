@@ -327,6 +327,25 @@ func recentFindings(s *state.State, cutoff time.Time, max int) []*state.Finding 
 	return out
 }
 
+func recentReleases(s *state.State, cutoff time.Time, max int) []*state.Release {
+	if s == nil {
+		return nil
+	}
+	out := make([]*state.Release, 0, len(s.Releases))
+	for i := len(s.Releases) - 1; i >= 0; i-- {
+		r := s.Releases[i]
+		if r.TS.Before(cutoff) {
+			continue
+		}
+		out = append(out, r)
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].TS.After(out[j].TS) })
+	if max > 0 && len(out) > max {
+		out = out[:max]
+	}
+	return out
+}
+
 func recentNotes(s *state.State, cutoff time.Time, max int) []*state.Note {
 	if s == nil {
 		return nil

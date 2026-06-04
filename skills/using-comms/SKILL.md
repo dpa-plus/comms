@@ -49,14 +49,26 @@ see both.
 
 ## Operator UI
 
-The user may run `COMMS_ACTOR=human-eli comms ui` to watch the repo. The UI has
-**Start Comms Session** and **End Comms Session** controls for named sessions,
-active named-session cards, and a **Session Event Log** selector for active vs
-archived session logs.
+The user watches coordination in a local dashboard. Easiest: **double-click
+"Comms Dashboard" on the Desktop** (a launcher that starts the dashboard and
+opens the browser). From a terminal it's just `comms ui`, which auto-opens the
+browser when run interactively (`--no-open` to suppress, `--open` to force).
 
-The user may run `comms ui --all` for a read-only dashboard across every repo
-that has a comms log. Do not use `--all` for mutations; start/join/end named
-sessions from the repo-specific CLI/UI so events land in the correct repo log.
+`comms ui` is **unified by default**: one tab with a left **Projects sidebar**
+listing every comms project on this machine. Selecting a project scopes the
+whole view — roster, active claims, recent findings/notes, a **Recently
+Completed** feed (from claim-release results), and the per-session event log —
+to that project, with live SSE updates the instant any project's log changes.
+A project shows as active when it has recent findings/notes/completed work, even
+with no named session and all claims released. Scope to one repo with
+`comms ui --repo /path`. The launcher sets `COMMS_ACTOR=human-eli` so the
+operator can release claims from the dashboard.
+
+The UI has **Start/End Comms Session** controls and a **Session Event Log**
+selector. Start/end-session are currently enabled in single-repo mode; claim
+**release works in the unified view too** (routed to the owning repo). The Docs
+and Global Lessons panels were removed from the dashboard — `comms doc` /
+`comms lesson` remain CLI-only.
 
 ## Repo Path Recovery
 
@@ -133,6 +145,14 @@ Use narrower anchors when practical:
 ```bash
 COMMS_ACTOR=claude-dev comms claim "frontend/src/lib/aggregate.ts#L40-90" --intent "rewrite aggregation loop"
 COMMS_ACTOR=claude-dev comms claim "src/auth.ts#validateToken" --intent "tighten JWT expiry check"
+```
+
+Claim several scopes for one task in a single call — each gets its own claim
+event under the shared `--intent`, and the batch is all-or-nothing (if any
+scope conflicts, nothing is claimed):
+
+```bash
+COMMS_ACTOR=claude-dev comms claim "src/auth.ts" "src/routes/login.ts" "src/__tests__/auth.test.ts" --intent "rework auth flow"
 ```
 
 ## Release

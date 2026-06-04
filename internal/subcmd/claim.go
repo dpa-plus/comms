@@ -3,6 +3,7 @@ package subcmd
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/dpa-plus/comms/internal/event"
@@ -26,16 +27,25 @@ func NewClaimCmd() *cobra.Command {
 		stealReason string
 	)
 	cmd := &cobra.Command{
-		Use:   `claim "<scope>"`,
-		Short: "Open an exclusive claim on a scope",
-		Long: `Open an exclusive claim. Scope is path[#anchor] (POSIX path, optional
-line range L<n>-<m> or symbol name).
+		Use:   `claim "<scope>" ["<scope>" ...]`,
+		Short: "Open exclusive claims on one or more scopes",
+		Long: `Open an exclusive claim on each scope. A scope is path[#anchor] (POSIX path,
+optional line range L<n>-<m> or symbol name). Pass several scopes to claim a
+whole task's worth of files in one call — each gets its own claim event under
+the shared --intent, and the batch is all-or-nothing: if ANY scope conflicts
+with another actor's active claim, nothing is claimed.
 
-If the scope conflicts with another actor's active claim, exits 1 with a
-structured stderr report telling you exactly which next-command to run.`,
-		Args: cobra.ExactArgs(1),
+On conflict, exits 1 with a structured stderr report telling you exactly which
+next-command to run.`,
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runClaim(args[0], intent, stealID, stealReason)
+			if stealID != "" && len(args) != 1 {
+				Fatalf(2, "claim: --steal takes exactly one scope")
+			}
+			if len(args) == 1 {
+				return runClaim(args[0], intent, stealID, stealReason)
+			}
+			return runClaimBatch(args, intent)
 		},
 	}
 	cmd.Flags().StringVar(&intent, "intent", "", "one-line description of the change you're making (required)")
@@ -127,6 +137,96 @@ func runClaim(scopeRaw, intent, stealID, stealReason string) error {
 		fmt.Printf("@%s claimed %s\n  ID: %s\n", rt.Actor, scope.String(), ev.ID)
 	}
 	return nil
+}
+
+// runClaimBatch claims several scopes in one locked pass. It validates policy
+// and conflicts for ALL scopes first and only appends events if every scope is
+// clear, so a multi-file task boundary is claimed atomically (or not at all).
+func runClaimBatch(scopeRaws []string, intent string) error {
+	if intent == "" {
+		Fatalf(2, "claim: --intent is required")
+	}
+	scopes := make([]overlap.Scope, 0, len(scopeRaws))
+	for _, raw := range scopeRaws {
+		sc, err := overlap.Parse(raw)
+		if err != nil {
+			Fatalf(2, "claim: %v", err)
+		}
+		scopes = append(scopes, sc)
+	}
+
+	rt, err := Open(OpenOpts{Mutating: true})
+	if err != nil {
+		return err
+	}
+	defer rt.Close()
+
+	for _, sc := range scopes {
+		if rt.Policy.RequiresAnchor(sc.Path) && sc.Anchor.Kind == overlap.AnchorWhole {
+			Fatalf(1, "claim: anchor required for risky file %q (policy: .comms/policy.txt). Add #L<n>-<m> or #<symbol>.", sc.Path)
+		}
+	}
+
+	var blocked []*state.Claim
+	for _, sc := range scopes {
+		blocked = append(blocked, rt.State.ConflictsFor(sc, rt.Actor)...)
+	}
+	if len(blocked) > 0 {
+		render.WriteConflict(os.Stderr, render.Conflict{
+			AttemptedScope:  joinScopeStrings(scopes),
+			AttemptedActor:  rt.Actor,
+			AttemptedIntent: intent,
+			Holders:         dedupeClaimsByID(blocked),
+		})
+		os.Exit(1)
+	}
+
+	now := time.Now().UTC()
+	ids := make([]string, 0, len(scopes))
+	for _, sc := range scopes {
+		data := map[string]interface{}{"intent": intent}
+		stampActiveCommsSession(rt, data)
+		ev := event.Event{
+			TS:    now,
+			ID:    event.NewID(now),
+			Actor: rt.Actor,
+			Type:  event.TypeClaim,
+			Scope: []string{sc.String()},
+			Data:  data,
+		}
+		if err := rt.Append(ev); err != nil {
+			return err
+		}
+		ids = append(ids, ev.ID)
+		now = now.Add(time.Millisecond) // keep event IDs/timestamps distinct
+	}
+
+	fmt.Printf("@%s claimed %d scopes:\n", rt.Actor, len(scopes))
+	for i, sc := range scopes {
+		fmt.Printf("  • %s  (ID: %s)\n", sc.String(), short(ids[i]))
+	}
+	return nil
+}
+
+func joinScopeStrings(scopes []overlap.Scope) string {
+	parts := make([]string, len(scopes))
+	for i, sc := range scopes {
+		parts[i] = sc.String()
+	}
+	return strings.Join(parts, ", ")
+}
+
+func dedupeClaimsByID(in []*state.Claim) []*state.Claim {
+	seen := map[string]struct{}{}
+	out := make([]*state.Claim, 0, len(in))
+	for _, c := range in {
+		if _, ok := seen[c.ID]; ok {
+			continue
+		}
+		seen[c.ID] = struct{}{}
+		out = append(out, c)
+	}
+	return out
 }
 
 func filterOutClaim(in []*state.Claim, id string) []*state.Claim {
