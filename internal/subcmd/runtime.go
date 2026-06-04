@@ -219,12 +219,10 @@ func (r *Runtime) AppendBatch(evs []event.Event) error {
 	if len(evs) == 0 {
 		return nil
 	}
-	for _, ev := range evs {
-		if err := event.Append(r.Paths.Log, ev); err != nil {
-			return err
-		}
-		r.Events = append(r.Events, ev)
+	if err := event.AppendBatch(r.Paths.Log, evs); err != nil {
+		return err
 	}
+	r.Events = append(r.Events, evs...)
 	r.State = state.Fold(r.Events)
 	return nil
 }
