@@ -31,27 +31,34 @@ func NewUICmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "ui",
 		Short: "Serve a local dashboard",
-		Long: `Serve a local dashboard for the current repo.
+		Long: `Serve a local dashboard.
 
-The UI binds to 127.0.0.1 by default, reads the same JSONL event log as the
+By default the dashboard is UNIFIED: it shows every comms project on this
+machine in one place, with a sidebar to pick which project/session to view.
+Run it once and you see all your agents across all repos — no need to start a
+UI per project. Scope it to a single repo with --repo /path/to/repo.
+
+The UI binds to 127.0.0.1 by default, reads the same JSONL event logs as the
 CLI, and streams live updates to the browser over Server-Sent Events: a file
-watcher detects each change to the log and pushes a fresh snapshot instantly,
-so the browser never polls.
+watcher detects each change to a log and pushes a fresh snapshot instantly, so
+the browser never polls.
 
 Claims older than --stale-after are highlighted as suspicious. The UI can
 append start/end boundary events when COMMS_ACTOR is set; it never edits or
-deletes existing log lines. The dashboard slices the append-only JSONL into
-per-session logs for the current comms session and archived comms sessions.
+deletes existing log lines.
 
 Use --demo to show deterministic sample data without writing fake events to
 the real comms log.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runUI(addr, demo, all, staleAfter)
+			// Unified (all-projects) is the default. Scope to a single repo only
+			// when the user explicitly points at one via --repo or COMMS_REPO.
+			unified := all || (globalRepoRoot == "" && os.Getenv("COMMS_REPO") == "")
+			return runUI(addr, demo, unified, staleAfter)
 		},
 	}
 	cmd.Flags().StringVar(&addr, "addr", addr, "listen address")
 	cmd.Flags().BoolVar(&demo, "demo", false, "serve deterministic sample data without touching the real log")
-	cmd.Flags().BoolVar(&all, "all", false, "serve a dashboard across every repo log under the comms data directory")
+	cmd.Flags().BoolVar(&all, "all", false, "deprecated: the unified all-projects view is now the default; scope to one repo with --repo")
 	cmd.Flags().DurationVar(&staleAfter, "stale-after", staleAfter, "highlight claims older than this duration")
 	return cmd
 }
@@ -75,9 +82,10 @@ func runUI(addr string, demo, all bool, staleAfter time.Duration) error {
 	fmt.Printf("Claims older than %s are marked stale. Press Ctrl-C to stop.\n", staleAfter)
 	if demo {
 		fmt.Println("Demo mode: serving sample data only; no fake events are written.")
-	}
-	if all {
-		fmt.Println("All-project mode: view across all comms repo logs; claim release is enabled when COMMS_ACTOR is set.")
+	} else if all {
+		fmt.Println("Unified mode: showing every comms project on this machine; pick a project/session in the sidebar.")
+	} else {
+		fmt.Println("Single-repo mode (--repo): scoped to one repo. Run without --repo to see all projects.")
 	}
 
 	// Prime the hub so the first browser to connect paints immediately, then
@@ -578,7 +586,30 @@ type uiSnapshot struct {
 	Docs          []string         `json:"docs"`
 	Lessons       []string         `json:"lessons"`
 	Events        []uiEvent        `json:"events"`
-	Updated       time.Time        `json:"updated"`
+	// ProjectSessions is populated only in unified (all-projects) mode. Each
+	// entry is one project's own data with UN-prefixed ids/names, so the
+	// dashboard's sidebar can scope the whole view to a single project. The
+	// flat arrays above stay populated (project-prefixed) for the "All
+	// projects" merged view and backward compatibility.
+	ProjectSessions []uiProjectSession `json:"project_sessions,omitempty"`
+	Updated         time.Time          `json:"updated"`
+}
+
+// uiProjectSession is one project's self-contained slice of the unified
+// snapshot. Field names mirror uiSnapshot so the frontend can render a scoped
+// project view through the same code paths as the merged view.
+type uiProjectSession struct {
+	RepoHash      string           `json:"repo_hash"`
+	RepoName      string           `json:"repo_name"`
+	Root          string           `json:"root"`
+	LogPath       string           `json:"log_path"`
+	Current       *uiCommsSession  `json:"current_session,omitempty"`
+	Active        []uiCommsSession `json:"active_comms_sessions"`
+	CommsSessions []uiCommsSession `json:"comms_sessions"`
+	Sessions      []uiSession      `json:"sessions"`
+	Claims        []uiClaim        `json:"claims"`
+	Findings      []uiFinding      `json:"findings"`
+	Notes         []uiNote         `json:"notes"`
 }
 
 type uiProject struct {
@@ -927,6 +958,8 @@ func buildGlobalUISnapshot(staleAfter time.Duration) (uiSnapshot, error) {
 			candidates[key] = candidate
 		}
 	}
+	cutoff := now.Add(-4 * time.Hour)
+	findingCutoff := now.Add(-24 * time.Hour)
 	for _, key := range candidateKeys {
 		candidate := candidates[key]
 		hash := candidate.hash
@@ -935,55 +968,79 @@ func buildGlobalUISnapshot(staleAfter time.Duration) (uiSnapshot, error) {
 		events := candidate.events
 		st := state.Fold(events)
 		active, archived := buildCommsSessionViews(events)
-		active = filterActiveCommsSessionViews(active, st, now.Add(-4*time.Hour))
-		for i := range active {
-			active[i] = prefixCommsSessionForProject(active[i], repoName, hash)
-			out.Active = append(out.Active, active[i])
-		}
-		for i := range archived {
-			archived[i] = prefixCommsSessionForProject(archived[i], repoName, hash)
-			out.CommsSessions = append(out.CommsSessions, archived[i])
-		}
-		sessions := collectActiveSessions(st, now.Add(-4*time.Hour))
+		active = filterActiveCommsSessionViews(active, st, cutoff)
+		sessions := collectActiveSessions(st, cutoff)
 		markLeaderSessions(sessions)
+
+		// Per-project container: this project's own data with UN-prefixed
+		// ids/names, so the unified UI can scope the whole dashboard to just
+		// this project. The merged (prefixed) flat arrays are derived from it
+		// below so the "All projects" view stays exactly as before.
+		ps := uiProjectSession{
+			RepoHash:      hash,
+			RepoName:      repoName,
+			Root:          repoRoot,
+			LogPath:       filepath.Join(root, hash, "log.jsonl"),
+			Active:        append([]uiCommsSession(nil), active...),
+			CommsSessions: append([]uiCommsSession(nil), archived...),
+		}
 		for _, s := range sessions {
-			out.Sessions = append(out.Sessions, uiSession{
-				Actor:       s.Actor,
-				Label:       s.Label,
-				BaseName:    s.BaseName,
-				Hostname:    s.Hostname,
-				TS:          s.TS,
-				Leader:      s.Leader,
-				SessionID:   projectSessionID(hash, s.SessionID),
-				SessionName: projectSessionName(repoName, s.SessionName),
+			ps.Sessions = append(ps.Sessions, uiSession{
+				Actor: s.Actor, Label: s.Label, BaseName: s.BaseName, Hostname: s.Hostname,
+				TS: s.TS, Leader: s.Leader, SessionID: s.SessionID, SessionName: s.SessionName,
 			})
 		}
 		for _, c := range sortedClaims(st) {
-			out.Claims = append(out.Claims, uiClaim{
-				ID:          c.ID,
-				Actor:       c.Actor,
-				Scope:       c.Scope.String(),
-				Intent:      c.Intent,
-				TS:          c.TS,
-				Age:         shortAge(now.Sub(c.TS)),
-				Stale:       now.Sub(c.TS) >= staleAfter,
-				StoleID:     c.StolenFromID,
-				RepoHash:    hash,
-				SessionID:   projectSessionID(hash, c.SessionID),
-				SessionName: projectSessionName(repoName, c.SessionName),
+			ps.Claims = append(ps.Claims, uiClaim{
+				ID: c.ID, Actor: c.Actor, Scope: c.Scope.String(), Intent: c.Intent, TS: c.TS,
+				Age: shortAge(now.Sub(c.TS)), Stale: now.Sub(c.TS) >= staleAfter, StoleID: c.StolenFromID,
+				RepoHash: hash, SessionID: c.SessionID, SessionName: c.SessionName,
 			})
 		}
-		for _, f := range recentFindings(st, now.Add(-24*time.Hour), 12) {
-			out.Findings = append(out.Findings, uiFinding{
-				ID: f.ID, Actor: f.Actor, Category: f.Category, Summary: repoName + ": " + f.Summary,
-				Priority: f.Priority, TS: f.TS, SessionID: projectSessionID(hash, f.SessionID), SessionName: projectSessionName(repoName, f.SessionName),
+		for _, f := range recentFindings(st, findingCutoff, 12) {
+			ps.Findings = append(ps.Findings, uiFinding{
+				ID: f.ID, Actor: f.Actor, Category: f.Category, Summary: f.Summary,
+				Priority: f.Priority, TS: f.TS, SessionID: f.SessionID, SessionName: f.SessionName,
 			})
 		}
-		for _, n := range recentNotes(st, now.Add(-24*time.Hour), 8) {
-			out.Notes = append(out.Notes, uiNote{
-				ID: n.ID, Actor: n.Actor, Body: repoName + ": " + n.Body,
-				Priority: n.Priority, TS: n.TS, SessionID: projectSessionID(hash, n.SessionID), SessionName: projectSessionName(repoName, n.SessionName),
+		for _, n := range recentNotes(st, findingCutoff, 8) {
+			ps.Notes = append(ps.Notes, uiNote{
+				ID: n.ID, Actor: n.Actor, Body: n.Body, Priority: n.Priority, TS: n.TS,
+				SessionID: n.SessionID, SessionName: n.SessionName,
 			})
+		}
+		attachClaimsToProjectSession(&ps)
+		out.ProjectSessions = append(out.ProjectSessions, ps)
+
+		// Merged (project-prefixed) flat arrays, derived from the container in
+		// the same order/shape the previous code produced.
+		for _, s := range ps.Active {
+			out.Active = append(out.Active, prefixCommsSessionForProject(cloneCommsSession(s), repoName, hash))
+		}
+		for _, s := range ps.CommsSessions {
+			out.CommsSessions = append(out.CommsSessions, prefixCommsSessionForProject(cloneCommsSession(s), repoName, hash))
+		}
+		for _, s := range ps.Sessions {
+			s.SessionID = projectSessionID(hash, s.SessionID)
+			s.SessionName = projectSessionName(repoName, s.SessionName)
+			out.Sessions = append(out.Sessions, s)
+		}
+		for _, c := range ps.Claims {
+			c.SessionID = projectSessionID(hash, c.SessionID)
+			c.SessionName = projectSessionName(repoName, c.SessionName)
+			out.Claims = append(out.Claims, c)
+		}
+		for _, f := range ps.Findings {
+			f.Summary = repoName + ": " + f.Summary
+			f.SessionID = projectSessionID(hash, f.SessionID)
+			f.SessionName = projectSessionName(repoName, f.SessionName)
+			out.Findings = append(out.Findings, f)
+		}
+		for _, n := range ps.Notes {
+			n.Body = repoName + ": " + n.Body
+			n.SessionID = projectSessionID(hash, n.SessionID)
+			n.SessionName = projectSessionName(repoName, n.SessionName)
+			out.Notes = append(out.Notes, n)
 		}
 		if repoRoot != "" {
 			for _, doc := range listDocs(filepath.Join(repoRoot, ".comms", "docs")) {
@@ -1162,6 +1219,35 @@ func attachClaimsToActiveSessions(snap *uiSnapshot) {
 	}
 	if len(snap.Active) > 0 {
 		snap.Current = &snap.Active[0]
+	}
+}
+
+// cloneCommsSession returns a copy whose Events/Claims slices are independent,
+// so prefixing the clone's event ids does not mutate the un-prefixed original
+// stored in a uiProjectSession.
+func cloneCommsSession(in uiCommsSession) uiCommsSession {
+	in.Events = append([]uiEvent(nil), in.Events...)
+	in.Claims = append([]uiClaim(nil), in.Claims...)
+	return in
+}
+
+// attachClaimsToProjectSession is attachClaimsToActiveSessions for a single
+// project's un-prefixed container: hang each active session's claims off it and
+// point Current at the first active session.
+func attachClaimsToProjectSession(ps *uiProjectSession) {
+	if ps == nil {
+		return
+	}
+	for i := range ps.Active {
+		ps.Active[i].Claims = nil
+		for _, claim := range ps.Claims {
+			if claimMatchesSessionID(claim, ps.Active[i].ID) {
+				ps.Active[i].Claims = append(ps.Active[i].Claims, claim)
+			}
+		}
+	}
+	if len(ps.Active) > 0 {
+		ps.Current = &ps.Active[0]
 	}
 }
 
@@ -1823,10 +1909,8 @@ main {
   box-shadow: var(--shadow);
   min-height: 0;
 }
-.signals .panel:nth-child(1) { flex: 1.25 1 0; }
-.signals .panel:nth-child(2) { flex: .9 1 0; }
-.signals .panel:nth-child(3),
-.signals .panel:nth-child(4) { flex: .8 1 0; }
+.signals .panel:nth-child(1) { flex: 1.3 1 0; }
+.signals .panel:nth-child(2) { flex: 1 1 0; }
 .row {
   padding: 14px 16px;
   border-bottom: 1px solid var(--soft);
@@ -1958,8 +2042,52 @@ th {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* ── Unified (all-projects) layout: a left sidebar of projects ── */
+.sidebar { grid-area: sidebar; display: none; }
+body.unified .sidebar { display: flex; }
+body.unified main {
+  grid-template-columns: minmax(208px, 244px) minmax(218px, 262px) minmax(520px, 1fr) minmax(280px, 344px);
+  grid-template-areas:
+    "sidebar roster claims signals"
+    "sidebar events events events";
+}
+.project-row {
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--soft);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.project-row:last-child { border-bottom: 0; }
+.project-row:hover { background: var(--surface-2); }
+.project-row.selected { background: var(--teal-soft); box-shadow: inset 3px 0 0 var(--teal); }
+.project-row .pdot { width: 8px; height: 8px; border-radius: 99px; background: var(--muted); flex: 0 0 auto; }
+.project-row.live .pdot { background: var(--teal); }
+.project-row.alert .pdot { background: var(--red); }
+.project-row .pbody { min-width: 0; flex: 1 1 auto; }
+.project-row .pname { font-weight: 680; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-row .pmeta { color: var(--muted); font-size: 12px; margin-top: 2px; }
+
+/* ── Polish: accessible cues, scanning hierarchy, friendly empty states ── */
+.claim-stale td:first-child { box-shadow: inset 4px 0 0 var(--red); }
+.events tbody tr:nth-child(even) td { background: var(--surface-2); }
+.row.priority-row { box-shadow: inset 3px 0 0 var(--amber); }
+.filter-input:not(:placeholder-shown) { border-color: var(--blue); background: var(--soft); }
+.stat.warn { background: var(--red-soft); border-color: var(--red); }
+.empty-state { text-align: center; padding: 30px 18px; color: var(--muted); }
+.empty-state .es-icon { font-size: 20px; color: var(--teal); font-weight: 700; }
+.empty-state .es-title { color: var(--text); font-weight: 680; margin-top: 6px; }
+.empty-state .es-sub { font-size: 12px; margin-top: 3px; }
+.es-clear { color: var(--blue); cursor: pointer; text-decoration: underline; margin-left: 6px; }
+
 @media (max-width: 1180px) {
   body { overflow: auto; }
+  body.unified main {
+    grid-template-columns: 1fr;
+    grid-template-areas: "sidebar" "roster" "claims" "signals" "events";
+  }
+  body.unified .sidebar { max-height: 320px; }
   header { height: auto; min-height: 76px; align-items: flex-start; padding-top: 12px; padding-bottom: 12px; }
   .stats { padding: 14px 16px 2px; }
   .stat { flex: 1 1 160px; }
@@ -2070,6 +2198,10 @@ th {
 <section id="stats" class="stats" aria-label="Comms summary"></section>
 <div id="error" class="error-banner"></div>
 <main>
+  <section class="panel sidebar">
+    <h2>Projects</h2>
+    <div id="projectList" class="scroll"></div>
+  </section>
   <section class="panel roster">
     <h2>Team Roster</h2>
     <div id="sessions" class="scroll"></div>
@@ -2093,14 +2225,6 @@ th {
     <section class="panel">
       <h2>Recent Notes</h2>
       <div id="notes" class="scroll"></div>
-    </section>
-    <section class="panel">
-      <h2>Docs</h2>
-      <div id="docs" class="scroll"></div>
-    </section>
-    <section class="panel">
-      <h2>Global Lessons</h2>
-      <div id="lessons" class="scroll"></div>
     </section>
   </div>
   <section class="panel events">
@@ -2152,6 +2276,59 @@ function actionByID(data, id) {
 }
 let selectedSessionID = localStorage.getItem('selectedSessionID') || 'current';
 let latestData = null;
+let latestView = null;
+let selectedProjectHash = localStorage.getItem('selectedProjectHash') || '';
+function isUnified(data) { return Array.isArray(data.project_sessions) && data.project_sessions.length > 0; }
+// currentView returns the slice of the snapshot the panels should render: a
+// single project's container when one is selected in unified mode, otherwise the
+// snapshot itself (the merged "All projects" view, or a single-repo snapshot).
+function currentView(data) {
+  const ps = data.project_sessions || [];
+  if (!ps.length || !selectedProjectHash) return data;
+  return ps.find(p => p.repo_hash === selectedProjectHash) || data;
+}
+function renderProjectList(data) {
+  const list = el('projectList');
+  if (!list) return;
+  const projects = data.project_sessions || [];
+  if (!projects.length) { list.innerHTML = ''; list.dataset.sig = ''; return; }
+  const rows = [];
+  const totalActive = projects.reduce((a, p) => a + (p.active_comms_sessions || []).length, 0);
+  rows.push({ hash: '', name: 'All projects', meta: projects.length + ' project' + (projects.length === 1 ? '' : 's') + ' · ' + totalActive + ' active', cls: totalActive ? 'live' : '' });
+  for (const p of projects) {
+    const act = (p.active_comms_sessions || []).length;
+    const arch = (p.comms_sessions || []).length;
+    const claims = (p.claims || []).length;
+    const stale = (p.claims || []).some(c => c.stale);
+    rows.push({
+      hash: p.repo_hash,
+      name: p.repo_name,
+      meta: act + ' active · ' + arch + ' archived' + (claims ? ' · ' + claims + ' claim' + (claims === 1 ? '' : 's') : ''),
+      cls: stale ? 'alert' : (act ? 'live' : '')
+    });
+  }
+  const sig = JSON.stringify(rows.map(r => [r.hash, r.name, r.meta, r.cls, r.hash === selectedProjectHash]));
+  if (list.dataset.sig === sig) return; // nothing changed; don't thrash the DOM
+  list.dataset.sig = sig;
+  list.innerHTML = rows.map(r =>
+    '<div class="project-row ' + r.cls + (r.hash === selectedProjectHash ? ' selected' : '') + '" data-project-hash="' + esc(r.hash) + '" role="button" tabindex="0">' +
+      '<span class="pdot"></span>' +
+      '<div class="pbody"><div class="pname">' + esc(r.name) + '</div><div class="pmeta">' + esc(r.meta) + '</div></div>' +
+    '</div>'
+  ).join('');
+  list.querySelectorAll('[data-project-hash]').forEach(row => {
+    const pick = () => selectProject(row.getAttribute('data-project-hash'));
+    row.addEventListener('click', pick);
+    row.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
+  });
+}
+function selectProject(hash) {
+  selectedProjectHash = hash || '';
+  if (selectedProjectHash) localStorage.setItem('selectedProjectHash', selectedProjectHash);
+  else localStorage.removeItem('selectedProjectHash');
+  selectedSessionID = 'current'; // re-default the session log within the new project
+  if (latestData) applySnapshot(latestData);
+}
 function filterText(id) {
   return (el(id)?.value || '').trim().toLowerCase();
 }
@@ -2183,52 +2360,57 @@ async function load() {
 }
 function applySnapshot(data) {
   hideError();
-  el('project').textContent = data.project.name + ' / comms';
-  el('projectMeta').innerHTML = esc(data.project.hash) + ' · ' + esc(data.project.root) + (data.project.demo ? ' · <span class="demo-mark">demo mode</span>' : '');
-  el('logPath').textContent = 'Log: ' + data.project.log_path;
-  el('updated').textContent = 'updated ' + fmtTime(data.updated);
   latestData = data;
-  renderStats(data);
+  const unified = isUnified(data);
+  document.body.classList.toggle('unified', unified);
+  // Self-heal a stale project selection (project gone, or no longer unified).
+  if (selectedProjectHash && !(data.project_sessions || []).some(p => p.repo_hash === selectedProjectHash)) {
+    selectedProjectHash = '';
+    localStorage.removeItem('selectedProjectHash');
+  }
+  const view = currentView(data);
+  latestView = view;
+  // Header reflects the selected project (or the all-projects roll-up).
+  const sel = unified && selectedProjectHash ? (data.project_sessions || []).find(p => p.repo_hash === selectedProjectHash) : null;
+  el('project').textContent = (sel ? sel.repo_name : data.project.name) + ' / comms';
+  el('projectMeta').innerHTML = esc(sel ? sel.repo_hash : data.project.hash) + ' · ' + esc(sel ? sel.root : data.project.root) + (data.project.demo ? ' · <span class="demo-mark">demo mode</span>' : '');
+  el('logPath').textContent = 'Log: ' + (sel ? sel.log_path : data.project.log_path);
+  el('updated').textContent = 'updated ' + fmtTime(data.updated);
+  renderProjectList(data);
+  renderStats(view);
   const startAction = actionByID(data, 'start_comms_session');
   const endAction = actionByID(data, 'end_comms_session');
-  const releaseAction = actionByID(data, 'release_claim');
-  const retireAction = actionByID(data, 'retire_session_actor');
   el('startComms').disabled = !startAction.enabled;
   el('startComms').title = startAction.reason || mutationHelp(data);
   el('endComms').disabled = !endAction.enabled;
   el('endComms').title = endAction.reason || mutationHelp(data);
-  el('sessions').innerHTML = renderRows(data.sessions, s => {
+  el('sessions').innerHTML = renderRows(view.sessions, s => {
     const title = s.label ? esc(s.label) + ' <span class="meta-inline">@' + esc(s.actor) + '</span>' : '@' + esc(s.actor);
     return '<div class="row session-row"><div><div class="actor">' + title + (s.leader ? ' <span class="pill leader">leader</span>' : '') + '</div><div class="meta">' + esc(s.base_name || 'session') + ' · ' + esc(s.hostname || 'unknown host') + ' · hello ' + fmtTime(s.ts) + '</div>' + (s.session_name ? '<div class="meta">in session: ' + esc(s.session_name) + '</div>' : '') + '</div></div>';
   },
     'No active sessions in the last 4h.');
-  el('currentSession').innerHTML = renderRows(data.active_comms_sessions, s =>
-    '<div class="row"><div class="actor">' + esc(s.name || 'Unnamed session') + '</div><div class="meta">Started ' + fmtTime(s.started_at) + ' · ' + esc(s.event_count) + ' event(s) · ' + esc(s.claim_count) + ' claim(s) · ' + esc(s.finding_count) + ' finding(s) · ' + esc(s.note_count) + ' note(s)</div><div class="meta">' + esc((s.actors || []).map(a => '@' + a).join(', ')) + '</div></div>',
+  el('currentSession').innerHTML = renderRows(view.active_comms_sessions, s =>
+    '<div class="row"><div class="actor">' + esc(s.name || 'Unnamed session') + '</div><div class="meta">Started ' + fmtTime(s.started_at) + ' · ' + esc(s.event_count || 0) + ' event(s) · ' + esc(s.claim_count || 0) + ' claim(s) · ' + esc(s.finding_count || 0) + ' finding(s) · ' + esc(s.note_count || 0) + ' note(s)</div><div class="meta">' + esc((s.actors || []).map(a => '@' + a).join(', ')) + '</div></div>',
     'No named comms session is open. Use Start Comms Session, or ask an agent to run comms session start "<name>".');
-  el('commsSessions').innerHTML = renderRows(data.comms_sessions, s =>
-    '<div class="row"><div class="actor">' + esc(s.name || 'Archived session') + '</div><div class="meta">' + fmtTime(s.started_at) + ' → ' + fmtTime(s.ended_at) + '</div><div class="meta">ended by @' + esc(s.ended_by) + ' · ' + esc(s.reason || 'comms session ended') + '</div><div class="meta">' + esc(s.event_count) + ' event(s) · ' + esc(s.claim_count) + ' claim(s) · ' + esc(s.finding_count) + ' finding(s) · ' + esc(s.note_count) + ' note(s)</div><div class="meta">' + esc((s.actors || []).map(a => '@' + a).join(', ')) + '</div></div>',
+  el('commsSessions').innerHTML = renderRows(view.comms_sessions, s =>
+    '<div class="row"><div class="actor">' + esc(s.name || 'Archived session') + '</div><div class="meta">' + fmtTime(s.started_at) + ' → ' + fmtTime(s.ended_at) + '</div><div class="meta">ended by @' + esc(s.ended_by) + ' · ' + esc(s.reason || 'comms session ended') + '</div><div class="meta">' + esc(s.event_count || 0) + ' event(s) · ' + esc(s.claim_count || 0) + ' claim(s) · ' + esc(s.finding_count || 0) + ' finding(s) · ' + esc(s.note_count || 0) + ' note(s)</div><div class="meta">' + esc((s.actors || []).map(a => '@' + a).join(', ')) + '</div></div>',
     'No archived comms sessions yet. Use End Comms Session when the project work window is done.');
-  renderSessionChoices(data);
-  renderClaims(data);
-  el('findings').innerHTML = renderRows(data.findings, f =>
-    '<div class="row">' + (f.priority ? '<span class="pill priority">priority</span> ' : '') + '<span class="pill finding">' + esc(f.category) + '</span><div class="intent">' + esc(f.summary) + '</div><div class="meta">@' + esc(f.actor) + ' · ' + fmtTime(f.ts) + '</div></div>',
+  renderSessionChoices(view);
+  renderClaims(data, view);
+  el('findings').innerHTML = renderRows(view.findings, f =>
+    '<div class="row' + (f.priority ? ' priority-row' : '') + '">' + (f.priority ? '<span class="pill priority">priority</span> ' : '') + '<span class="pill finding">' + esc(f.category) + '</span><div class="intent">' + esc(f.summary) + '</div><div class="meta">@' + esc(f.actor) + ' · ' + fmtTime(f.ts) + '</div></div>',
     'No findings in the last 24h.');
-  el('notes').innerHTML = renderRows(data.notes, n =>
-    '<div class="row">' + (n.priority ? '<span class="pill priority">priority</span>' : '') + '<div>' + esc(n.body) + '</div><div class="meta">@' + esc(n.actor) + ' · ' + fmtTime(n.ts) + '</div></div>',
+  el('notes').innerHTML = renderRows(view.notes, n =>
+    '<div class="row' + (n.priority ? ' priority-row' : '') + '">' + (n.priority ? '<span class="pill priority">priority</span> ' : '') + '<div>' + esc(n.body) + '</div><div class="meta">@' + esc(n.actor) + ' · ' + fmtTime(n.ts) + '</div></div>',
     'No notes in the last 24h.');
-  el('docs').innerHTML = renderRows(data.docs, d =>
-    '<div class="row"><span class="scope">' + esc(d) + '</span><div class="copy">comms doc ' + esc(d) + '</div></div>',
-    'No docs yet.');
-  el('lessons').innerHTML = renderRows(data.lessons || [], d =>
-    '<div class="row"><span class="scope">' + esc(d) + '</span><div class="copy">comms lesson ' + esc(d) + '</div></div>',
-    'No global lessons yet.');
 }
-function renderClaims(data) {
+function renderClaims(data, view) {
+  view = view || data;
   const releaseAction = actionByID(data, 'release_claim');
   const retireAction = actionByID(data, 'retire_session_actor');
   const claimFilter = filterText('claimFilter');
-  const chosen = allSessionChoices(data).find(c => c.id === selectedSessionID);
-  const sourceClaims = chosen && chosen.active ? (chosen.session.claims || []) : (chosen ? [] : (data.claims || []));
+  const chosen = allSessionChoices(view).find(c => c.id === selectedSessionID);
+  const sourceClaims = chosen && chosen.active ? (chosen.session.claims || []) : (chosen ? [] : (view.claims || []));
   const claims = sourceClaims
     .filter(c => includesFilter([c.actor, c.session_name, c.scope, c.intent, c.age, c.id], claimFilter));
   const scopeText = chosen ? (chosen.active ? 'Showing active claims for "' + (chosen.session.name || chosen.session.id) + '". ' : 'Archived sessions have no active claims. ') : 'Showing all active claims. ';
@@ -2244,13 +2426,19 @@ function renderClaims(data) {
       const action = actions.length ? actions.join(' ') : (c.stale ? '<span class="pill stale">stale</span>' : '<span class="meta">active</span>');
       return '<tr class="' + (c.stale ? 'claim-stale' : '') + '"><td><span class="actor">@' + esc(c.actor) + '</span></td><td>' + esc(c.session_name || 'legacy') + '</td><td><div class="scope">' + esc(c.scope) + '</div><div class="copy">' + esc(c.id.slice(0, 10)) + '</div></td><td>' + esc(c.intent) + '</td><td>' + esc(c.age) + (c.stale ? '<div><span class="pill stale">stale</span></div>' : '') + '</td><td>' + action + '</td></tr>';
     },
-    claimFilter ? 'No claims match this filter.' : (chosen && !chosen.active ? 'No active claims in archived sessions.' : 'No active claims in this session.'));
+    claimFilter
+      ? 'No claims matching "' + esc(claimFilter) + '" <span class="es-clear" data-clear="claimFilter" role="button" tabindex="0">Clear</span>'
+      : (chosen && !chosen.active
+          ? 'No active claims in archived sessions.'
+          : '<div class="empty-state"><div class="es-icon">&#10003;</div><div class="es-title">No active claims</div><div class="es-sub">All work in this view is released.</div></div>'));
   document.querySelectorAll('[data-release-claim]').forEach(button => {
     button.addEventListener('click', () => releaseClaim(button.getAttribute('data-release-claim'), button.getAttribute('data-release-actor'), button.getAttribute('data-release-scope'), button.getAttribute('data-release-repo'), button.getAttribute('data-release-session')).catch(showError));
   });
   document.querySelectorAll('[data-retire-actor]').forEach(button => {
     button.addEventListener('click', () => retireActor(button.getAttribute('data-retire-actor')).catch(showError));
   });
+  const clear = el('claims').querySelector('[data-clear="claimFilter"]');
+  if (clear) clear.addEventListener('click', () => { el('claimFilter').value = ''; renderClaims(latestData, latestView); });
 }
 function allSessionChoices(data) {
   const out = [];
@@ -2295,12 +2483,14 @@ function renderSelectedSessionLog(data) {
   }
   const s = chosen.session;
   const range = chosen.active ? 'Active session "' + (s.name || s.id) + '" started ' + fmtTime(s.started_at) : 'Archived session "' + (s.name || s.id) + '" ' + fmtTime(s.started_at) + ' → ' + fmtTime(s.ended_at);
-  el('eventHint').textContent = range + ' · ' + s.event_count + ' event(s). The physical JSONL remains append-only; this table is filtered to the selected session.';
+  el('eventHint').textContent = range + ' · ' + (s.event_count || 0) + ' event(s). The physical JSONL remains append-only; this table is filtered to the selected session.';
   const eventFilter = filterText('eventFilter');
   const events = (s.events || []).filter(ev => includesFilter([fmtTime(ev.ts), ev.type, ev.actor, (ev.scope || []).join(', '), ev.summary], eventFilter));
   el('events').innerHTML = renderTable(events, ['When', 'Type', 'Actor', 'Scope', 'Summary'], ev =>
     '<tr><td>' + fmtTime(ev.ts) + '</td><td><span class="pill ' + esc(ev.type) + '">' + esc(ev.type) + '</span></td><td>@' + esc(ev.actor) + '</td><td><span class="scope">' + esc((ev.scope || []).join(', ')) + '</span></td><td>' + esc(ev.summary) + '</td></tr>',
-    eventFilter ? 'No events match this filter.' : 'No log events in this session.');
+    eventFilter ? 'No events matching "' + esc(eventFilter) + '" <span class="es-clear" data-clear="eventFilter" role="button" tabindex="0">Clear</span>' : 'No log events in this session.');
+  const evClear = el('events').querySelector('[data-clear="eventFilter"]');
+  if (evClear) evClear.addEventListener('click', () => { el('eventFilter').value = ''; renderSelectedSessionLog(latestView); });
 }
 async function startCommsSession() {
   const name = window.prompt('Name for the new comms session? Agents can join it with: comms session join "<name>"', 'dashboard fixes');
@@ -2315,7 +2505,7 @@ async function startCommsSession() {
   await load();
 }
 async function endCommsSession() {
-  const chosen = latestData ? allSessionChoices(latestData).find(c => c.id === selectedSessionID && c.active) : null;
+  const chosen = latestView ? allSessionChoices(latestView).find(c => c.id === selectedSessionID && c.active) : null;
   if (!chosen) throw new Error('Select an active named session in the Session Event Log dropdown first.');
   const reason = window.prompt('End "' + (chosen.session.name || chosen.session.id) + '"? This releases claims in that named session and archives its log for later analysis.', 'project work session done');
   if (reason === null) return;
@@ -2355,30 +2545,26 @@ async function releaseClaim(claimID, actor, scope, repoHash, sessionID) {
   await load();
 }
 el('startComms').addEventListener('click', () => {
-  el('startComms').disabled = true;
-  startCommsSession().catch(err => {
-    el('startComms').disabled = false;
-    showError(err);
-  });
+  const b = el('startComms'); const label = b.textContent;
+  b.disabled = true; b.textContent = 'Starting…';
+  startCommsSession().catch(showError).finally(() => { b.disabled = false; b.textContent = label; });
 });
 el('endComms').addEventListener('click', () => {
-  el('endComms').disabled = true;
-  endCommsSession().catch(err => {
-    el('endComms').disabled = false;
-    showError(err);
-  });
+  const b = el('endComms'); const label = b.textContent;
+  b.disabled = true; b.textContent = 'Ending…';
+  endCommsSession().catch(showError).finally(() => { b.disabled = false; b.textContent = label; });
 });
 el('sessionSelect').addEventListener('change', () => {
   selectedSessionID = el('sessionSelect').value;
   localStorage.setItem('selectedSessionID', selectedSessionID);
-  if (latestData) renderSelectedSessionLog(latestData);
-  if (latestData) renderClaims(latestData);
+  if (latestView) renderSelectedSessionLog(latestView);
+  if (latestData) renderClaims(latestData, latestView);
 });
 el('claimFilter').addEventListener('input', () => {
-  if (latestData) renderClaims(latestData);
+  if (latestData) renderClaims(latestData, latestView);
 });
 el('eventFilter').addEventListener('input', () => {
-  if (latestData) renderSelectedSessionLog(latestData);
+  if (latestView) renderSelectedSessionLog(latestView);
 });
 el('theme').addEventListener('click', () => {
   const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';

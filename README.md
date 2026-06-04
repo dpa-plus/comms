@@ -19,7 +19,7 @@
   <img src="assets/dashboard.png" alt="The comms dashboard: team roster, active claims, findings, notes, and a live session event log." width="900">
 </p>
 
-<p align="center"><em>The live dashboard (<code>comms ui</code>) — a read-only window over the shared log, pushed to your browser the instant anything changes.</em></p>
+<p align="center"><em>The unified dashboard (<code>comms ui</code>) — every project in one tab. Pick one in the Projects sidebar to scope the whole view; it's pushed to your browser the instant anything changes.</em></p>
 
 ---
 
@@ -108,15 +108,15 @@ The dashboard (`comms ui`) is simply a **live read-only view** of that same log.
 ## The live dashboard
 
 ```bash
-comms ui          # open http://127.0.0.1:7878
+comms ui                 # http://127.0.0.1:7878 — every project, one tab
 ```
 
-The dashboard shows the team roster, active claims (stale ones highlighted), recent findings and notes, docs, lessons, and a per-session event log.
+`comms ui` is **unified by default**: it shows *every* comms project on this machine in one window. A **Projects sidebar** on the left lists each project (and its sessions); click one and the whole dashboard — team roster, active claims (stale ones flagged), recent findings and notes, and the per-session event log — scopes to it. Run it **once** and watch all your agents across every repo, switching between them in the same tab. No starting a UI per project, and agents never have to "open" anything — they just write to their logs, which this one dashboard already sees.
 
-It updates by **push, not polling.** A file watcher inside `comms ui` is notified by the operating system the instant `log.jsonl` changes; it rebuilds the snapshot once and streams it to every open browser tab over [Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events). So when any agent appends an event, the dashboard reflects it **immediately**, and your laptop isn't burning cycles re-reading the log on a timer.
+It updates by **push, not polling.** A file watcher inside `comms ui` is notified by the operating system the instant any project's `log.jsonl` changes; it rebuilds the snapshot once and streams it to every open browser tab over [Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events). So when any agent anywhere appends an event, the right project lights up in the sidebar **immediately**, and your laptop isn't burning cycles re-reading logs on a timer.
 
+- `comms ui --repo /path/to/repo` — scope to a single repo (no sidebar).
 - `comms ui --demo` — explore with sample data (read-only; writes nothing real).
-- `comms ui --all` — a read-only portfolio view across every repo's log on this machine.
 
 ---
 
@@ -165,7 +165,7 @@ comms note [--priority] "<=200-char FYI>"
 comms find [--priority] <bug|fix|ship|decision|gotcha> "<summary>" [--ref kind:value ...]
 comms doc --list | comms doc <slug> | comms doc <slug> --edit
 comms lesson --list | comms lesson <slug> | comms lesson <slug> --edit
-comms ui [--demo] [--all] [--stale-after 90m] [--addr 127.0.0.1:7878]
+comms ui [--repo <path>] [--demo] [--stale-after 90m] [--addr 127.0.0.1:7878]  # unified by default
 
 Global flags:
   --repo /absolute/repo/path                  # bypass cwd/git discovery
