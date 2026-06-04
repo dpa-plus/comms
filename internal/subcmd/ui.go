@@ -70,6 +70,8 @@ func runUI(addr string, demo, all bool, staleAfter time.Duration) error {
 	server := uiServer{demo: demo, all: all, staleAfter: staleAfter, hub: newHub()}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", server.servePage)
+	mux.HandleFunc("/favicon.svg", server.serveFavicon)
+	mux.HandleFunc("/favicon.ico", server.serveFavicon)
 	mux.HandleFunc("/api/status", server.serveStatus)
 	mux.HandleFunc("/api/events", server.serveEvents)
 	mux.HandleFunc("/api/comms-session/start", server.serveStartCommsSession)
@@ -206,6 +208,12 @@ func (s uiServer) servePage(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write([]byte(uiHTML))
+}
+
+func (s uiServer) serveFavicon(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	_, _ = w.Write([]byte(faviconSVG))
 }
 
 func (s uiServer) serveStatus(w http.ResponseWriter, r *http.Request) {
@@ -1653,12 +1661,44 @@ func shortAge(d time.Duration) string {
 	return fmt.Sprintf("%dd", int(d.Hours()/24))
 }
 
+// faviconSVG is the comms logo (assets/logo.svg), served at /favicon.svg so the
+// browser tab shows the brand mark instead of a generic globe.
+const faviconSVG = `<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="comms logo">
+  <defs>
+    <linearGradient id="tile" x1="256" y1="16" x2="256" y2="496" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1b2733"/>
+      <stop offset="1" stop-color="#0a0f14"/>
+    </linearGradient>
+    <linearGradient id="bubble" x1="120" y1="124" x2="404" y2="332" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5fdccf"/>
+      <stop offset="1" stop-color="#0f766e"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.46" r="0.55">
+      <stop stop-color="#2dd4bf" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#2dd4bf" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="116" fill="url(#tile)"/>
+  <rect x="17" y="17" width="478" height="478" rx="115" fill="none" stroke="#2a3a48" stroke-width="2"/>
+  <rect x="56" y="60" width="400" height="360" fill="url(#glow)"/>
+  <path d="M176 322 L150 380 L228 324 Z" fill="url(#bubble)"/>
+  <rect x="100" y="124" width="312" height="200" rx="56" fill="url(#bubble)"/>
+  <g fill="#0a141a" opacity="0.92">
+    <rect x="144" y="166" width="130" height="22" rx="11"/>
+    <rect x="144" y="213" width="212" height="22" rx="11"/>
+    <rect x="144" y="260" width="158" height="22" rx="11"/>
+  </g>
+  <circle cx="378" cy="224" r="15" fill="#0a141a"/>
+  <circle cx="378" cy="224" r="6.5" fill="#5fdccf"/>
+</svg>`
+
 const uiHTML = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>comms dashboard</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <style>
 :root {
   color-scheme: light;
