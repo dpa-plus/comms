@@ -2031,8 +2031,8 @@ button:disabled:hover { border-color: var(--line-strong); background: var(--surf
   margin: 0 auto;
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
-  padding: 16px 24px 4px;
+  gap: 8px;
+  padding: 18px 24px 6px;
   background: transparent;
 }
 .stat {
@@ -2040,24 +2040,26 @@ button:disabled:hover { border-color: var(--line-strong); background: var(--surf
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  min-width: 150px;
-  height: 48px;
-  padding: 8px 14px;
+  min-width: 148px;
+  height: 50px;
+  padding: 0 15px;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 8px;
-  box-shadow: var(--shadow);
+  border-radius: 10px;
+  transition: border-color .14s ease, background .14s ease;
 }
+.stat:hover { border-color: var(--line-strong); }
 .stat-label {
   color: var(--muted);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 650;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 .stat-value {
   color: var(--text);
-  font-size: 18px;
-  font-weight: 760;
+  font-size: 19px;
+  font-weight: 720;
   font-variant-numeric: tabular-nums;
 }
 .stat.warn .stat-value { color: var(--red); }
@@ -2084,7 +2086,7 @@ main {
 .panel {
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 10px;
   box-shadow: var(--shadow);
   overflow: hidden;
   min-height: 0;
@@ -2093,12 +2095,13 @@ main {
 }
 .panel h2 {
   margin: 0;
-  padding: 14px 16px;
-  font-size: 12px;
+  padding: 13px 16px;
+  font-size: 11px;
+  font-weight: 650;
   text-transform: uppercase;
+  letter-spacing: 0.05em;
   color: var(--muted);
   border-bottom: 1px solid var(--line);
-  letter-spacing: 0;
 }
 .panel-title {
   display: flex;
