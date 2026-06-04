@@ -230,9 +230,14 @@ func Fold(events []event.Event) *State {
 				delete(s.Claims, ref)
 			}
 			// An actual claim release (refs present) is a completed unit of work;
-			// record it for the "recently completed" feed. Session-end / retire /
-			// leader-transfer releases carry no refs and are skipped here.
-			if len(refs) > 0 {
+			// record it for the "recently completed" feed. Session lifecycle
+			// releases — retire, leader-transfer, comms-session-end — ALSO carry
+			// refs (the claims they sweep), but they are coordination admin, not
+			// finished work, so exclude them from the feed.
+			isHousekeeping := boolOf(ev.Data, "session_retire") ||
+				boolOf(ev.Data, "leader_transfer") ||
+				boolOf(ev.Data, "comms_session_end")
+			if len(refs) > 0 && !isHousekeeping {
 				s.Releases = append(s.Releases, &Release{
 					ID:          ev.ID,
 					TS:          ev.TS,
