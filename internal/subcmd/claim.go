@@ -183,6 +183,7 @@ func runClaimBatch(scopeRaws []string, intent string) error {
 
 	now := time.Now().UTC()
 	ids := make([]string, 0, len(scopes))
+	evs := make([]event.Event, 0, len(scopes))
 	for _, sc := range scopes {
 		data := map[string]interface{}{"intent": intent}
 		stampActiveCommsSession(rt, data)
@@ -194,11 +195,13 @@ func runClaimBatch(scopeRaws []string, intent string) error {
 			Scope: []string{sc.String()},
 			Data:  data,
 		}
-		if err := rt.Append(ev); err != nil {
-			return err
-		}
+		evs = append(evs, ev)
 		ids = append(ids, ev.ID)
 		now = now.Add(time.Millisecond) // keep event IDs/timestamps distinct
+	}
+	// Append every claim and fold once, not once per scope — shorter lock hold.
+	if err := rt.AppendBatch(evs); err != nil {
+		return err
 	}
 
 	fmt.Printf("@%s claimed %d scopes:\n", rt.Actor, len(scopes))

@@ -207,6 +207,28 @@ func (r *Runtime) Append(ev event.Event) error {
 	return nil
 }
 
+// AppendBatch writes several events to the log and re-folds the state ONCE,
+// instead of once per event the way Append does. Use it for multi-event
+// commands (batch claim, release --all-mine) where the intermediate folded
+// state between events is never read — it removes N-1 redundant full replays
+// and shortens the flock hold window. Caller MUST hold the flock.
+func (r *Runtime) AppendBatch(evs []event.Event) error {
+	if r.lockH == nil {
+		return fmt.Errorf("subcmd: AppendBatch called without holding flock")
+	}
+	if len(evs) == 0 {
+		return nil
+	}
+	for _, ev := range evs {
+		if err := event.Append(r.Paths.Log, ev); err != nil {
+			return err
+		}
+		r.Events = append(r.Events, ev)
+	}
+	r.State = state.Fold(r.Events)
+	return nil
+}
+
 // Close releases the flock if held. Always safe to call.
 func (r *Runtime) Close() error {
 	if r == nil {

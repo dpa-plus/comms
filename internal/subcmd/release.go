@@ -98,6 +98,7 @@ func runRelease(args []string, latest, allMine bool, reason, result string) erro
 
 func appendReleaseEvent(rt *Runtime, targets []*state.Claim, reason, result string) error {
 	now := time.Now().UTC()
+	evs := make([]event.Event, 0, len(targets))
 	for _, c := range targets {
 		isArbitrated := c.Actor != rt.Actor
 		if isArbitrated && reason == "" {
@@ -135,9 +136,8 @@ func appendReleaseEvent(rt *Runtime, targets []*state.Claim, reason, result stri
 			Type:  event.TypeRelease,
 			Data:  data,
 		}
-		if err := rt.Append(ev); err != nil {
-			return err
-		}
+		evs = append(evs, ev)
 	}
-	return nil
+	// Append every release and fold once, not once per claim — shorter lock hold.
+	return rt.AppendBatch(evs)
 }
