@@ -149,6 +149,19 @@ See [`docs/INSTALL.md`](docs/INSTALL.md) for manual + optional automated (hook/s
 
 ---
 
+## Teach your agents to use it
+
+comms ships a **skill** — [`skills/using-comms/SKILL.md`](skills/using-comms/SKILL.md) — that teaches an AI agent the protocol: when to `claim`, what to record as a `finding`, how to coordinate, and how to recover. There's one for **Claude** and one for **Codex** — the same file works for both (they share the skill format), so install it for whichever agents you run:
+
+```bash
+cp -r skills/using-comms ~/.claude/skills/    # Claude
+cp -r skills/using-comms ~/.codex/skills/     # Codex
+```
+
+The agent then follows it whenever you say **`using-comms`**.
+
+---
+
 ## Commands at a glance
 
 ```
