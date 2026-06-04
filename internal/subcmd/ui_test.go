@@ -150,6 +150,91 @@ func TestBuildGlobalUISnapshotAttachesLegacyClaimsToProjectCurrentSession(t *tes
 	}
 }
 
+func TestBuildGlobalUISnapshotPopulatesPerProjectContainers(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dataHome, err := paths.UserDataHome()
+	if err != nil {
+		t.Fatalf("user data home: %v", err)
+	}
+	now := time.Now().UTC()
+	projects := []struct{ hash, name, scope string }{
+		{"hashalpha0001", "alpha", "src/a.ts"},
+		{"hashbeta00002", "beta", "src/b.ts"},
+	}
+	for _, p := range projects {
+		repoRoot := filepath.Join(home, p.name)
+		if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+			t.Fatalf("mkdir repo: %v", err)
+		}
+		logDir := filepath.Join(dataHome, "comms", p.hash)
+		if err := os.MkdirAll(logDir, 0o700); err != nil {
+			t.Fatalf("mkdir log dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(logDir, "repo-path.txt"), []byte(repoRoot+"\n"), 0o600); err != nil {
+			t.Fatalf("write repo path: %v", err)
+		}
+		for _, ev := range []event.Event{
+			{TS: now.Add(-10 * time.Minute), ID: event.NewID(now.Add(-10 * time.Minute)), Actor: "claude-dev", Type: event.TypeHello, Data: map[string]interface{}{"base_name": "claude"}},
+			{TS: now.Add(-9 * time.Minute), ID: event.NewID(now.Add(-9 * time.Minute)), Actor: "claude-dev", Type: event.TypeClaim, Scope: []string{p.scope}, Data: map[string]interface{}{"intent": "work on " + p.name}},
+			{TS: now.Add(-8 * time.Minute), ID: event.NewID(now.Add(-8 * time.Minute)), Actor: "claude-dev", Type: event.TypeFinding, Data: map[string]interface{}{"category": "fix", "summary": p.name + " finding"}},
+		} {
+			if err := event.Append(filepath.Join(logDir, "log.jsonl"), ev); err != nil {
+				t.Fatalf("append event: %v", err)
+			}
+		}
+	}
+
+	snap, err := buildGlobalUISnapshot(90 * time.Minute)
+	if err != nil {
+		t.Fatalf("build global snapshot: %v", err)
+	}
+	if len(snap.ProjectSessions) != 2 {
+		t.Fatalf("expected 2 project_sessions, got %d", len(snap.ProjectSessions))
+	}
+	byHash := map[string]uiProjectSession{}
+	for _, ps := range snap.ProjectSessions {
+		byHash[ps.RepoHash] = ps
+	}
+	for _, p := range projects {
+		ps, ok := byHash[p.hash]
+		if !ok {
+			t.Fatalf("missing project_session for %s", p.hash)
+		}
+		if ps.RepoName != p.name {
+			t.Fatalf("project %s name = %q, want %q", p.hash, ps.RepoName, p.name)
+		}
+		// Container data must be UN-prefixed and self-contained.
+		if len(ps.Claims) != 1 || ps.Claims[0].Scope != p.scope {
+			t.Fatalf("project %s container claims = %+v", p.hash, ps.Claims)
+		}
+		if ps.Claims[0].RepoHash != p.hash {
+			t.Fatalf("project %s container claim should carry its repo hash, got %q", p.hash, ps.Claims[0].RepoHash)
+		}
+		if strings.HasPrefix(ps.Claims[0].SessionName, p.name+" /") {
+			t.Fatalf("container claim session_name must be UN-prefixed, got %q", ps.Claims[0].SessionName)
+		}
+		if len(ps.Findings) != 1 || ps.Findings[0].Summary != p.name+" finding" {
+			t.Fatalf("container finding must be un-prefixed, got %+v", ps.Findings)
+		}
+		if ps.Current == nil || len(ps.Current.Claims) != 1 {
+			t.Fatalf("project %s current session should hold its claim, got %+v", p.hash, ps.Current)
+		}
+	}
+	// The merged flat arrays still aggregate across projects, project-prefixed.
+	if len(snap.Claims) != 2 {
+		t.Fatalf("merged claims = %d, want 2 (one per project)", len(snap.Claims))
+	}
+	if len(snap.Findings) != 2 {
+		t.Fatalf("merged findings = %d, want 2", len(snap.Findings))
+	}
+	for _, f := range snap.Findings {
+		if !strings.Contains(f.Summary, ": ") {
+			t.Fatalf("merged finding should be project-prefixed, got %q", f.Summary)
+		}
+	}
+}
+
 func TestBuildGlobalUISnapshotDedupesDuplicateRepoRoots(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
