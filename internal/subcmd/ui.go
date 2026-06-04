@@ -1884,6 +1884,17 @@ header {
   z-index: 5;
 }
 h1 { margin: 0; font-size: 19px; font-weight: 740; }
+.hdr-session {
+  display: inline-block;
+  margin-left: 10px;
+  padding: 2px 11px;
+  border-radius: 999px;
+  background: var(--teal-soft);
+  color: var(--teal);
+  font-size: 13px;
+  font-weight: 700;
+  vertical-align: 2px;
+}
 .sub { color: var(--muted); font-size: 12px; margin-top: 5px; }
 .log-path {
   color: var(--muted);
@@ -2602,8 +2613,14 @@ function applySnapshot(data) {
   latestView = view;
   // Header reflects the selected project (or the all-projects roll-up).
   const sel = unified && selectedProjectHash ? (data.project_sessions || []).find(p => p.repo_hash === selectedProjectHash) : null;
-  el('project').textContent = (sel ? sel.repo_name : data.project.name) + ' / comms';
-  el('projectMeta').innerHTML = esc(sel ? sel.repo_hash : data.project.hash) + ' · ' + esc(sel ? sel.root : data.project.root) + (data.project.demo ? ' · <span class="demo-mark">demo mode</span>' : '');
+  // Show the active comms-session name(s) in the header — that's the name
+  // agents use ("acme-build"), so it must not be hidden behind the repo
+  // name. Only when a single project is in focus (not the merged all view).
+  const focused = sel || !isUnified(data);
+  const activeSessNames = focused ? (view.active_comms_sessions || []).map(s => s.name).filter(Boolean) : [];
+  const repoLabel = sel ? sel.repo_name : data.project.name;
+  el('project').innerHTML = esc(repoLabel) + activeSessNames.map(n => ' <span class="hdr-session">' + esc(n) + '</span>').join('');
+  el('projectMeta').innerHTML = (activeSessNames.length ? 'session in repo · ' : '') + esc(sel ? sel.repo_hash : data.project.hash) + ' · ' + esc(sel ? sel.root : data.project.root) + (data.project.demo ? ' · <span class="demo-mark">demo mode</span>' : '');
   el('logPath').textContent = 'Log: ' + (sel ? sel.log_path : data.project.log_path);
   el('updated').textContent = 'updated ' + fmtTime(data.updated);
   renderProjectList(data);
