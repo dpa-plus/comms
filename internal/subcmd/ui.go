@@ -9,8 +9,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -27,6 +29,8 @@ func NewUICmd() *cobra.Command {
 	addr := "127.0.0.1:7878"
 	demo := false
 	all := false
+	forceOpen := false
+	noOpen := false
 	staleAfter := 90 * time.Minute
 	cmd := &cobra.Command{
 		Use:   "ui",
@@ -47,23 +51,28 @@ Claims older than --stale-after are highlighted as suspicious. The UI can
 append start/end boundary events when COMMS_ACTOR is set; it never edits or
 deletes existing log lines.
 
+When run interactively, the dashboard opens in your browser automatically; use
+--no-open to suppress that, or --open to force it (e.g. over SSH).
+
 Use --demo to show deterministic sample data without writing fake events to
 the real comms log.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Unified (all-projects) is the default. Scope to a single repo only
 			// when the user explicitly points at one via --repo or COMMS_REPO.
 			unified := all || (globalRepoRoot == "" && os.Getenv("COMMS_REPO") == "")
-			return runUI(addr, demo, unified, staleAfter)
+			return runUI(addr, demo, unified, staleAfter, forceOpen, noOpen)
 		},
 	}
 	cmd.Flags().StringVar(&addr, "addr", addr, "listen address")
 	cmd.Flags().BoolVar(&demo, "demo", false, "serve deterministic sample data without touching the real log")
 	cmd.Flags().BoolVar(&all, "all", false, "deprecated: the unified all-projects view is now the default; scope to one repo with --repo")
+	cmd.Flags().BoolVar(&forceOpen, "open", false, "open the dashboard in your browser (default: auto when run interactively)")
+	cmd.Flags().BoolVar(&noOpen, "no-open", false, "do not open a browser (useful for scripts, cron, and hooks)")
 	cmd.Flags().DurationVar(&staleAfter, "stale-after", staleAfter, "highlight claims older than this duration")
 	return cmd
 }
 
-func runUI(addr string, demo, all bool, staleAfter time.Duration) error {
+func runUI(addr string, demo, all bool, staleAfter time.Duration, forceOpen, noOpen bool) error {
 	if staleAfter < time.Minute {
 		return fmt.Errorf("ui: --stale-after must be at least 1m")
 	}
@@ -108,7 +117,68 @@ func runUI(addr string, demo, all bool, staleAfter time.Duration) error {
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-	return srv.ListenAndServe()
+
+	// Bind explicitly so we only open the browser once the port is actually
+	// listening (no race between `open` and the server being ready).
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("ui: listen on %s: %w", addr, err)
+	}
+	if wantBrowser(forceOpen, noOpen) {
+		url := browseURL(addr)
+		go func() {
+			if err := launchBrowser(url); err != nil {
+				fmt.Fprintf(os.Stderr, "comms ui: couldn't open a browser (%v); open %s yourself\n", err, url)
+			}
+		}()
+	}
+	return srv.Serve(ln)
+}
+
+// wantBrowser decides whether to auto-open the dashboard: --no-open always wins,
+// --open always opens, otherwise open only when stdout is an interactive
+// terminal (so PreToolUse hooks, scripts, cron, and systemd never spawn one).
+func wantBrowser(forceOpen, noOpen bool) bool {
+	if noOpen {
+		return false
+	}
+	if forceOpen {
+		return true
+	}
+	return stdoutIsTTY()
+}
+
+func stdoutIsTTY() bool {
+	fi, err := os.Stdout.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
+}
+
+// browseURL turns a listen address into a URL a browser can reach, rewriting a
+// wildcard/empty host to loopback.
+func browseURL(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "http://" + addr
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	return "http://" + net.JoinHostPort(host, port)
+}
+
+// launchBrowser opens url in the user's default browser, best effort.
+func launchBrowser(url string) error {
+	switch runtime.GOOS {
+	case "darwin":
+		return exec.Command("open", url).Start()
+	case "windows":
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+	default:
+		return exec.Command("xdg-open", url).Start()
+	}
 }
 
 type uiServer struct {
@@ -591,6 +661,7 @@ type uiSnapshot struct {
 	Claims        []uiClaim        `json:"claims"`
 	Findings      []uiFinding      `json:"findings"`
 	Notes         []uiNote         `json:"notes"`
+	Releases      []uiRelease      `json:"releases"`
 	Docs          []string         `json:"docs"`
 	Lessons       []string         `json:"lessons"`
 	Events        []uiEvent        `json:"events"`
@@ -618,6 +689,7 @@ type uiProjectSession struct {
 	Claims        []uiClaim        `json:"claims"`
 	Findings      []uiFinding      `json:"findings"`
 	Notes         []uiNote         `json:"notes"`
+	Releases      []uiRelease      `json:"releases"`
 }
 
 type uiProject struct {
@@ -702,6 +774,28 @@ type uiNote struct {
 	TS          time.Time `json:"ts"`
 	SessionID   string    `json:"session_id,omitempty"`
 	SessionName string    `json:"session_name,omitempty"`
+}
+
+type uiRelease struct {
+	ID          string    `json:"id"`
+	Actor       string    `json:"actor"`
+	Result      string    `json:"result"`
+	Scopes      []string  `json:"scopes,omitempty"`
+	TS          time.Time `json:"ts"`
+	SessionID   string    `json:"session_id,omitempty"`
+	SessionName string    `json:"session_name,omitempty"`
+}
+
+// toUIReleases converts state releases (recent first) to the UI shape.
+func toUIReleases(rs []*state.Release) []uiRelease {
+	out := make([]uiRelease, 0, len(rs))
+	for _, r := range rs {
+		out = append(out, uiRelease{
+			ID: r.ID, Actor: r.Actor, Result: r.Result, Scopes: r.Scopes,
+			TS: r.TS, SessionID: r.SessionID, SessionName: r.SessionName,
+		})
+	}
+	return out
 }
 
 type uiEvent struct {
@@ -791,6 +885,7 @@ func buildUISnapshot(rt *Runtime, staleAfter time.Duration) uiSnapshot {
 	for _, n := range recentNotes(rt.State, now.Add(-24*time.Hour), 8) {
 		out.Notes = append(out.Notes, uiNote{ID: n.ID, Actor: n.Actor, Body: n.Body, Priority: n.Priority, TS: n.TS, SessionID: n.SessionID, SessionName: n.SessionName})
 	}
+	out.Releases = toUIReleases(recentReleases(rt.State, now.Add(-24*time.Hour), 12))
 	attachClaimsToActiveSessions(&out)
 	if out.Current != nil {
 		out.Events = out.Current.Events
@@ -875,6 +970,10 @@ func buildDemoUISnapshot(staleAfter time.Duration) uiSnapshot {
 			{ID: "01JX2Q3Q0R6B6N9P0R1S2T3U4V", Actor: "claude-dev", Body: "FYI Prisma schema migration coming next session", TS: base.Add(-8 * time.Minute)},
 			{ID: "01JX2Q3P0Q5B6N9P0R1S2T3U4V", Actor: "codex-9b2c", Body: "@claude-dev can I take src/auth/token.ts when you're done?", TS: base.Add(-14 * time.Minute)},
 		},
+		Releases: []uiRelease{
+			{ID: "01JX2Q3M6M6B6N9P0R1S2T3U4V", Actor: "claude-dev", Result: "tests green, merged PR #214", Scopes: []string{"frontend/src/Dashboard.tsx"}, TS: base.Add(-6 * time.Minute)},
+			{ID: "01JX2Q3L5L5B6N9P0R1S2T3U4V", Actor: "codex-dev", Result: "fixed lead double-counting; added regression test", Scopes: []string{"src/aggregate/lead_counter.ts#L40-90"}, TS: base.Add(-22 * time.Minute)},
+		},
 		Docs:    []string{"lead-counting", "tracker-architecture", "ui"},
 		Lessons: []string{"verify-data-before-ui", "claim-smallest-scope", "capture-filter-context"},
 		Events:  currentEvents,
@@ -906,6 +1005,7 @@ func buildGlobalUISnapshot(staleAfter time.Duration) (uiSnapshot, error) {
 		Claims:        []uiClaim{},
 		Findings:      []uiFinding{},
 		Notes:         []uiNote{},
+		Releases:      []uiRelease{},
 		Docs:          []string{},
 		Lessons:       listGlobalLessons(),
 		Events:        []uiEvent{},
@@ -1017,6 +1117,7 @@ func buildGlobalUISnapshot(staleAfter time.Duration) (uiSnapshot, error) {
 				SessionID: n.SessionID, SessionName: n.SessionName,
 			})
 		}
+		ps.Releases = toUIReleases(recentReleases(st, findingCutoff, 12))
 		attachClaimsToProjectSession(&ps)
 		out.ProjectSessions = append(out.ProjectSessions, ps)
 
@@ -1050,6 +1151,16 @@ func buildGlobalUISnapshot(staleAfter time.Duration) (uiSnapshot, error) {
 			n.SessionName = projectSessionName(repoName, n.SessionName)
 			out.Notes = append(out.Notes, n)
 		}
+		for _, r := range ps.Releases {
+			if r.Result != "" {
+				r.Result = repoName + ": " + r.Result
+			} else {
+				r.Result = repoName
+			}
+			r.SessionID = projectSessionID(hash, r.SessionID)
+			r.SessionName = projectSessionName(repoName, r.SessionName)
+			out.Releases = append(out.Releases, r)
+		}
 		if repoRoot != "" {
 			for _, doc := range listDocs(filepath.Join(repoRoot, ".comms", "docs")) {
 				out.Docs = append(out.Docs, repoName+"/"+doc)
@@ -1061,6 +1172,7 @@ func buildGlobalUISnapshot(staleAfter time.Duration) (uiSnapshot, error) {
 	sort.Slice(out.Claims, func(i, j int) bool { return out.Claims[i].TS.Before(out.Claims[j].TS) })
 	sort.Slice(out.Findings, func(i, j int) bool { return out.Findings[i].TS.After(out.Findings[j].TS) })
 	sort.Slice(out.Notes, func(i, j int) bool { return out.Notes[i].TS.After(out.Notes[j].TS) })
+	sort.Slice(out.Releases, func(i, j int) bool { return out.Releases[i].TS.After(out.Releases[j].TS) })
 	if len(out.Active) > 0 {
 		out.Current = &out.Active[0]
 		out.Events = out.Current.Events
@@ -1949,8 +2061,9 @@ main {
   box-shadow: var(--shadow);
   min-height: 0;
 }
-.signals .panel:nth-child(1) { flex: 1.3 1 0; }
+.signals .panel:nth-child(1) { flex: 1.2 1 0; }
 .signals .panel:nth-child(2) { flex: 1 1 0; }
+.signals .panel:nth-child(3) { flex: 1 1 0; }
 .row {
   padding: 14px 16px;
   border-bottom: 1px solid var(--soft);
@@ -2119,7 +2232,10 @@ body.unified main {
 .empty-state .es-icon { font-size: 20px; color: var(--teal); font-weight: 700; }
 .empty-state .es-title { color: var(--text); font-weight: 680; margin-top: 6px; }
 .empty-state .es-sub { font-size: 12px; margin-top: 3px; }
+.empty-state .es-cta { margin-top: 14px; }
 .es-clear { color: var(--blue); cursor: pointer; text-decoration: underline; margin-left: 6px; }
+.rel-result { font-weight: 620; line-height: 1.34; }
+.rel-result + .meta.scope { margin-top: 5px; color: var(--teal); }
 
 @media (max-width: 1180px) {
   body { overflow: auto; }
@@ -2266,6 +2382,10 @@ body.unified main {
       <h2>Recent Notes</h2>
       <div id="notes" class="scroll"></div>
     </section>
+    <section class="panel">
+      <h2>Recently Completed</h2>
+      <div id="releases" class="scroll"></div>
+    </section>
   </div>
   <section class="panel events">
     <div class="panel-title">
@@ -2334,17 +2454,33 @@ function renderProjectList(data) {
   if (!projects.length) { list.innerHTML = ''; list.dataset.sig = ''; return; }
   const rows = [];
   const totalActive = projects.reduce((a, p) => a + (p.active_comms_sessions || []).length, 0);
-  rows.push({ hash: '', name: 'All projects', meta: projects.length + ' project' + (projects.length === 1 ? '' : 's') + ' · ' + totalActive + ' active', cls: totalActive ? 'live' : '' });
+  const totalClaims = projects.reduce((a, p) => a + (p.claims || []).length, 0);
+  rows.push({
+    hash: '', name: 'All projects',
+    meta: projects.length + ' project' + (projects.length === 1 ? '' : 's') + (totalActive ? ' · ' + totalActive + ' active' : '') + (totalClaims ? ' · ' + totalClaims + ' claim' + (totalClaims === 1 ? '' : 's') : ''),
+    cls: (totalActive || totalClaims) ? 'live' : ''
+  });
   for (const p of projects) {
+    // Reflect ANY recent activity, not just named sessions + open claims — a
+    // project used without a named session (or whose claims are all released)
+    // still has findings/notes/completed work and must not look dead.
     const act = (p.active_comms_sessions || []).length;
-    const arch = (p.comms_sessions || []).length;
     const claims = (p.claims || []).length;
+    const findings = (p.findings || []).length;
+    const notes = (p.notes || []).length;
+    const done = (p.releases || []).length;
     const stale = (p.claims || []).some(c => c.stale);
+    const active = act || claims || findings || notes || done;
+    const bits = [];
+    if (act) bits.push(act + ' active');
+    if (claims) bits.push(claims + ' claim' + (claims === 1 ? '' : 's'));
+    if (findings) bits.push(findings + ' finding' + (findings === 1 ? '' : 's'));
+    if (done) bits.push(done + ' done');
     rows.push({
       hash: p.repo_hash,
       name: p.repo_name,
-      meta: act + ' active · ' + arch + ' archived' + (claims ? ' · ' + claims + ' claim' + (claims === 1 ? '' : 's') : ''),
-      cls: stale ? 'alert' : (act ? 'live' : '')
+      meta: bits.length ? bits.join(' · ') : 'no recent activity',
+      cls: stale ? 'alert' : (active ? 'live' : '')
     });
   }
   const sig = JSON.stringify(rows.map(r => [r.hash, r.name, r.meta, r.cls, r.hash === selectedProjectHash]));
@@ -2443,6 +2579,11 @@ function applySnapshot(data) {
   el('notes').innerHTML = renderRows(view.notes, n =>
     '<div class="row' + (n.priority ? ' priority-row' : '') + '">' + (n.priority ? '<span class="pill priority">priority</span> ' : '') + '<div>' + esc(n.body) + '</div><div class="meta">@' + esc(n.actor) + ' · ' + fmtTime(n.ts) + '</div></div>',
     'No notes in the last 24h.');
+  el('releases').innerHTML = renderRows(view.releases, r =>
+    '<div class="row"><div class="rel-result">' + esc(r.result || 'released a claim') + '</div>' +
+    ((r.scopes && r.scopes.length) ? '<div class="meta scope">' + esc(r.scopes.join(', ')) + '</div>' : '') +
+    '<div class="meta">@' + esc(r.actor) + ' · ' + fmtTime(r.ts) + '</div></div>',
+    'No completed work in the last 24h.');
 }
 function renderClaims(data, view) {
   view = view || data;
@@ -2454,6 +2595,11 @@ function renderClaims(data, view) {
   const claims = sourceClaims
     .filter(c => includesFilter([c.actor, c.session_name, c.scope, c.intent, c.age, c.id], claimFilter));
   const scopeText = chosen ? (chosen.active ? 'Showing active claims for "' + (chosen.session.name || chosen.session.id) + '". ' : 'Archived sessions have no active claims. ') : 'Showing all active claims. ';
+  // Archive CTA: when an active named session has no open claims left, offer to
+  // archive it right from the empty state (it ended cleanly).
+  const endAction = actionByID(data, 'end_comms_session');
+  const canArchive = endAction.enabled && chosen && chosen.active && chosen.id !== 'current' && claims.length === 0 && !claimFilter;
+  const archiveBtn = canArchive ? '<div class="es-cta"><button class="small primary" type="button" data-archive-session>Archive this session</button></div>' : '';
   el('claims').innerHTML = '<div class="hint">' + esc(scopeText) + 'Claims older than ' + esc(data.project.stale_after) + ' are marked stale. ' + esc(mutationHelp(data)) + '</div>' +
     renderTable(claims, ['Actor', 'Session', 'Scope', 'Intent', 'Age', 'Action'], c => {
       const actions = [];
@@ -2470,7 +2616,7 @@ function renderClaims(data, view) {
       ? 'No claims matching "' + esc(claimFilter) + '" <span class="es-clear" data-clear="claimFilter" role="button" tabindex="0">Clear</span>'
       : (chosen && !chosen.active
           ? 'No active claims in archived sessions.'
-          : '<div class="empty-state"><div class="es-icon">&#10003;</div><div class="es-title">No active claims</div><div class="es-sub">All work in this view is released.</div></div>'));
+          : '<div class="empty-state"><div class="es-icon">&#10003;</div><div class="es-title">No active claims</div><div class="es-sub">All work in this view is released.</div>' + archiveBtn + '</div>'));
   document.querySelectorAll('[data-release-claim]').forEach(button => {
     button.addEventListener('click', () => releaseClaim(button.getAttribute('data-release-claim'), button.getAttribute('data-release-actor'), button.getAttribute('data-release-scope'), button.getAttribute('data-release-repo'), button.getAttribute('data-release-session')).catch(showError));
   });
@@ -2479,6 +2625,8 @@ function renderClaims(data, view) {
   });
   const clear = el('claims').querySelector('[data-clear="claimFilter"]');
   if (clear) clear.addEventListener('click', () => { el('claimFilter').value = ''; renderClaims(latestData, latestView); });
+  const archiveEl = el('claims').querySelector('[data-archive-session]');
+  if (archiveEl) archiveEl.addEventListener('click', () => endCommsSession().catch(showError));
 }
 function allSessionChoices(data) {
   const out = [];

@@ -32,6 +32,11 @@ type State struct {
 	// Findings and Notes in chronological order. Caller filters by `since`.
 	Findings []*Finding
 	Notes    []*Note
+
+	// Releases of actual claims (refs present), in chronological order — the
+	// "recently completed work" trail. Session-end/retire/leader releases are
+	// excluded. Caller filters by `since`.
+	Releases []*Release
 }
 
 // Claim is an active exclusive claim on a scope.
@@ -106,6 +111,18 @@ type Note struct {
 	Actor       string
 	Body        string
 	Priority    bool
+	SessionID   string
+	SessionName string
+}
+
+// Release records a completed claim release: the outcome string plus the scopes
+// that were freed, so the UI can show a "recently completed" feed.
+type Release struct {
+	ID          string
+	TS          time.Time
+	Actor       string
+	Result      string
+	Scopes      []string
 	SessionID   string
 	SessionName string
 }
@@ -205,8 +222,26 @@ func Fold(events []event.Event) *State {
 			// data.refs may be a single string or a []string for backward compat;
 			// we accept either.
 			refs := refList(ev.Data, "refs")
+			var releasedScopes []string
 			for _, ref := range refs {
+				if c, ok := s.Claims[ref]; ok {
+					releasedScopes = append(releasedScopes, c.Scope.String())
+				}
 				delete(s.Claims, ref)
+			}
+			// An actual claim release (refs present) is a completed unit of work;
+			// record it for the "recently completed" feed. Session-end / retire /
+			// leader-transfer releases carry no refs and are skipped here.
+			if len(refs) > 0 {
+				s.Releases = append(s.Releases, &Release{
+					ID:          ev.ID,
+					TS:          ev.TS,
+					Actor:       ev.Actor,
+					Result:      stringOf(ev.Data, "result"),
+					Scopes:      releasedScopes,
+					SessionID:   stringOf(ev.Data, "comms_session_id"),
+					SessionName: stringOf(ev.Data, "comms_session_name"),
+				})
 			}
 			if boolOf(ev.Data, "session_retire") {
 				delete(s.Sessions, stringOf(ev.Data, "retired_actor"))
