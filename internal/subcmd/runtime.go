@@ -87,6 +87,17 @@ func Open(opts OpenOpts) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
+	if p.EphemeralStore() {
+		fmt.Fprintf(os.Stderr,
+			"comms: WARNING: store resolved under a throwaway temp dir:\n"+
+				"         %s\n"+
+				"       This almost always means HOME was overridden (e.g. HOME=/tmp). Events\n"+
+				"       written here are invisible to `comms ui` and to other agents on the\n"+
+				"       repo, so coordination silently breaks. Unset HOME; for protected-folder\n"+
+				"       errors use `cd /tmp` plus --repo \"<abs repo>\" (or COMMS_REPO), which\n"+
+				"       keep HOME intact.\n",
+			p.LogDir)
+	}
 	// Bootstrap WRITES (creates the per-machine log dir + the committed .comms
 	// tree, policy.txt, .gitignore). Read-only commands — status, log, and
 	// especially `check`, which runs on every edit via the PreToolUse hook —
