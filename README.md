@@ -34,7 +34,7 @@ Modern coding often means running **more than one AI agent on the same codebase 
 
 These are the classic problems of people working in parallel — and the classic answer is to **write things down in one shared place.** comms is that shared place, built for agents: small enough that they actually use it, with a live view so *you* can watch.
 
-> This is the **third generation** of multi-agent coordination at DPA+. The first was `mcp-agent-mail` — a heavy MCP server with severity ladders and seven identities; too much ceremony, and agents kept forgetting the protocol. The second was a single 1,632-line `COMMS.md` markdown file — it worked, but grew without bound, had no targeted reads, relied on agents remembering to update it, and iCloud sync kept forking the file. **comms is the small version that learned from both.**
+> This is the **third generation** of multi-agent coordination at DPA+. The first was a single 1,632-line `COMMS.md` markdown file — it worked, but grew without bound, had no targeted reads, relied on agents remembering to update it, and iCloud sync kept forking the file. The second was `mcp-agent-mail` — a heavy MCP server with severity ladders and seven identities; too much ceremony, and agents kept forgetting the protocol. **comms is the small version that learned from both.**
 
 ---
 
