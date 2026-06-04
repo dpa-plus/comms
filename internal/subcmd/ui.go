@@ -533,17 +533,20 @@ func (s uiServer) serveEndCommsSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "demo mode is read-only; no comms session end event is written", http.StatusConflict)
 		return
 	}
-	if s.all {
-		http.Error(w, "all-project mode is read-only; use a repo-specific UI or CLI for mutations", http.StatusConflict)
-		return
-	}
 	var req struct {
 		Reason    string `json:"reason"`
 		Name      string `json:"name"`
 		SessionID string `json:"session_id"`
+		RepoHash  string `json:"repo_hash"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+	// Unified (all-projects) mode: route the end to the repo that owns the
+	// selected project's session, exactly like serveGlobalReleaseClaim does.
+	if s.all {
+		s.serveGlobalEndCommsSession(w, strings.TrimSpace(req.RepoHash), req.SessionID, req.Name, req.Reason)
 		return
 	}
 	rt, ok := s.openMutatingUI(w, OpenOpts{})
@@ -551,12 +554,57 @@ func (s uiServer) serveEndCommsSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer rt.Close()
-	reason := strings.TrimSpace(req.Reason)
+	if code, err := endCommsSessionOnRuntime(rt, req.Name, req.SessionID, req.Reason); err != nil {
+		http.Error(w, err.Error(), code)
+		return
+	}
+	s.writeSnapshot(w, rt)
+}
+
+// serveGlobalEndCommsSession routes an End-Comms-Session mutation from the
+// unified dashboard to the repo that owns the session. repoHash identifies the
+// project the operator selected in the sidebar; it mirrors serveGlobalReleaseClaim.
+func (s uiServer) serveGlobalEndCommsSession(w http.ResponseWriter, repoHash, sessionID, name, reason string) {
+	if repoHash == "" {
+		repoHash = repoHashFromPrefixedSessionID(sessionID)
+	}
+	repoRoot, err := repoRootForGlobalHash(repoHash)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	rt, ok := s.openMutatingUI(w, OpenOpts{RepoRootOverride: repoRoot})
+	if !ok {
+		return
+	}
+	defer rt.Close()
+	if rt.Repo.Hash != repoHash {
+		http.Error(w, "repo hash "+repoHash+" no longer matches "+rt.Repo.Hash+" for "+repoRoot, http.StatusConflict)
+		return
+	}
+	if code, err := endCommsSessionOnRuntime(rt, name, sessionID, reason); err != nil {
+		http.Error(w, err.Error(), code)
+		return
+	}
+	snap, err := buildGlobalUISnapshot(s.staleAfter)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, snap)
+}
+
+// endCommsSessionOnRuntime appends the comms_session_end event for the named or
+// current session on rt (which archives it and releases its claims). It returns
+// (0, nil) on success, or (httpStatus, err) explaining why it could not. Caller
+// holds the flock via openMutatingUI.
+func endCommsSessionOnRuntime(rt *Runtime, reqName, reqSessionID, reqReason string) (int, error) {
+	reason := strings.TrimSpace(reqReason)
 	if reason == "" {
 		reason = "comms session ended from ui"
 	}
-	sessionID := strings.TrimSpace(req.SessionID)
-	sessionName := strings.TrimSpace(req.Name)
+	sessionID := strings.TrimSpace(reqSessionID)
+	sessionName := strings.TrimSpace(reqName)
 	// "current" is the sentinel for the legacy/global window (claims and
 	// sessions with no comms_session_id). Blanking it must drive the no-session
 	// sweep below, NOT the operator fallback — otherwise ending the legacy
@@ -570,8 +618,7 @@ func (s uiServer) serveEndCommsSession(w http.ResponseWriter, r *http.Request) {
 	if sessionID == "" && sessionName != "" {
 		sessionID, sessionName = activeCommsSessionByName(rt.State, sessionName, time.Now().Add(-4*time.Hour))
 		if sessionID == "" {
-			http.Error(w, "no active comms session named "+strings.TrimSpace(req.Name), http.StatusConflict)
-			return
+			return http.StatusConflict, fmt.Errorf("no active comms session named %s", strings.TrimSpace(reqName))
 		}
 	}
 	if sessionID == "" && !explicitCurrent {
@@ -585,8 +632,7 @@ func (s uiServer) serveEndCommsSession(w http.ResponseWriter, r *http.Request) {
 	var endedActors []interface{}
 	if sessionID == "" {
 		if len(rt.State.Sessions) == 0 && len(rt.State.Claims) == 0 {
-			http.Error(w, "no active comms session to end", http.StatusConflict)
-			return
+			return http.StatusConflict, fmt.Errorf("no active comms session to end")
 		}
 		refs = make([]interface{}, 0, len(rt.State.Claims))
 		for _, claim := range sortedClaims(rt.State) {
@@ -620,8 +666,7 @@ func (s uiServer) serveEndCommsSession(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if len(activeActors) == 0 && len(claims) == 0 {
-			http.Error(w, "no active comms session matches "+sessionID, http.StatusConflict)
-			return
+			return http.StatusConflict, fmt.Errorf("no active comms session matches %s", sessionID)
 		}
 		refs = make([]interface{}, 0, len(claims))
 		for _, claim := range claims {
@@ -645,10 +690,9 @@ func (s uiServer) serveEndCommsSession(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	if err := rt.Append(ev); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return http.StatusInternalServerError, err
 	}
-	s.writeSnapshot(w, rt)
+	return 0, nil
 }
 
 type uiSnapshot struct {
@@ -1450,20 +1494,27 @@ func buildUIActions(snap uiSnapshot) []uiAction {
 		return []uiAction{start, end, releaseClaim, retire, lead, logs}
 	}
 	if snap.Project.Hash == "global" {
-		reason := "All-project mode only supports releasing claims; use a repo-specific UI or CLI for other mutations."
+		reason := "All-project mode supports releasing claims and ending a selected project's session; use a repo-specific UI or CLI for other mutations."
 		start.Reason = reason
-		end.Reason = reason
 		retire.Reason = reason
 		lead.Reason = reason
 		if snap.Project.Actor == "" {
-			releaseClaim.Reason = snap.Project.MutationMessage
-			if releaseClaim.Reason == "" {
-				releaseClaim.Reason = "mutating UI actions require COMMS_ACTOR"
+			msg := snap.Project.MutationMessage
+			if msg == "" {
+				msg = "mutating UI actions require COMMS_ACTOR"
 			}
-		} else if len(snap.Claims) > 0 {
-			releaseClaim.Enabled = true
+			releaseClaim.Reason = msg
+			end.Reason = msg
 		} else {
-			releaseClaim.Reason = "no active claim to release"
+			// End is routed to the owning repo (serveGlobalEndCommsSession), the
+			// same way release is — so enable it; the frontend only invokes it for
+			// the selected project's active session.
+			end.Enabled = true
+			if len(snap.Claims) > 0 {
+				releaseClaim.Enabled = true
+			} else {
+				releaseClaim.Reason = "no active claim to release"
+			}
 		}
 		return []uiAction{start, end, releaseClaim, retire, lead, logs}
 	}
@@ -1826,38 +1877,44 @@ const uiHTML = `<!doctype html>
 <style>
 :root {
   color-scheme: light;
-  --bg: #f4f6f8;
+  --bg: #f6f7f9;
   --surface: #ffffff;
-  --surface-2: #f8fafc;
-  --line: #d9e0e8;
-  --text: #16202b;
-  --muted: #667789;
-  --soft: #eef3f7;
-  --teal: #0f766e;
-  --teal-soft: #e4f7f4;
+  --surface-2: #f3f5f8;
+  --line: #e4e8ee;
+  --line-strong: #d3dae3;
+  --text: #1a2230;
+  --muted: #647082;
+  --soft: #eef2f6;
+  --teal: #0d7d72;
+  --teal-soft: #e1f6f2;
   --amber: #b45309;
-  --red: #b42318;
-  --red-soft: #fff1f0;
+  --red: #c0392b;
+  --red-soft: #fdf0ee;
   --blue: #2563eb;
-  --shadow: 0 12px 28px rgba(17, 24, 39, 0.06);
+  --accent: #0d7d72;
+  --shadow: 0 1px 2px rgba(20,30,45,0.05), 0 10px 28px rgba(20,30,45,0.05);
+  --ring: 0 0 0 3px rgba(13,125,114,0.22);
   --content-max: 1680px;
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #0b1116;
-  --surface: #121922;
-  --surface-2: #16202a;
-  --line: #263241;
-  --text: #e8eef5;
-  --muted: #9aa9b8;
-  --soft: #1d2733;
-  --teal: #4fd1c5;
-  --teal-soft: #113a37;
-  --amber: #f6ad55;
-  --red: #ff6b6b;
-  --red-soft: #3b1b1b;
-  --blue: #7aa7ff;
-  --shadow: 0 12px 32px rgba(0, 0, 0, 0.34);
+  --bg: #090d14;
+  --surface: #111722;
+  --surface-2: #161e2b;
+  --line: #212a39;
+  --line-strong: #2f3a4d;
+  --text: #e7eef6;
+  --muted: #94a2b4;
+  --soft: #19212e;
+  --teal: #52d7c9;
+  --teal-soft: #0e3b38;
+  --amber: #f3b15e;
+  --red: #f87171;
+  --red-soft: #361c1f;
+  --blue: #82aaff;
+  --accent: #52d7c9;
+  --shadow: 0 1px 2px rgba(0,0,0,0.4), 0 14px 34px rgba(0,0,0,0.34);
+  --ring: 0 0 0 3px rgba(82,215,201,0.26);
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; }
@@ -1916,37 +1973,50 @@ h1 { margin: 0; font-size: 19px; font-weight: 740; }
   justify-content: flex-end;
 }
 button {
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   background: var(--surface);
   color: var(--text);
   height: 34px;
-  padding: 0 12px;
-  border-radius: 6px;
+  padding: 0 13px;
+  border-radius: 8px;
   font: inherit;
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 600;
   cursor: pointer;
+  transition: background .14s ease, border-color .14s ease, color .14s ease, box-shadow .14s ease, filter .14s ease;
 }
-button:hover { border-color: #aab4c0; background: var(--surface-2); }
-:root[data-theme="dark"] button:hover { border-color: #586679; }
-button.danger {
-  border-color: var(--red);
-  color: var(--red);
-}
+button:hover { border-color: var(--muted); background: var(--surface-2); }
+button:focus-visible { outline: none; box-shadow: var(--ring); border-color: var(--accent); }
+button.danger { color: var(--red); }
+button.danger:hover { border-color: var(--red); background: var(--red-soft); }
 button.primary {
-  border-color: var(--teal);
-  background: var(--teal-soft);
-  color: var(--teal);
+  border-color: transparent;
+  background: var(--teal);
+  color: #03211e;
+  font-weight: 650;
 }
+button.primary:hover { background: var(--teal); filter: brightness(1.07); }
 button.small {
-  height: 26px;
-  padding: 0 8px;
+  height: 28px;
+  padding: 0 10px;
   font-size: 12px;
+  border-radius: 7px;
 }
 button:disabled {
   cursor: not-allowed;
-  opacity: 0.55;
+  opacity: 0.5;
 }
+button:disabled:hover { border-color: var(--line-strong); background: var(--surface); }
+.icon-btn {
+  width: 34px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+}
+.icon-btn:hover { color: var(--text); }
+.icon-btn svg { display: block; }
 .error-banner {
   display: none;
   margin: 12px 18px 0;
@@ -2411,9 +2481,8 @@ body.unified main {
   </div>
   <div class="top-actions">
     <span class="sub"><span class="status-dot"></span><span id="updated">live</span></span>
-    <button id="startComms" type="button">Start Comms Session</button>
     <button id="endComms" class="danger" type="button">End Comms Session</button>
-    <button id="theme" type="button" aria-label="Toggle dark mode">Dark</button>
+    <button id="theme" class="icon-btn" type="button" aria-label="Toggle dark mode"></button>
   </div>
 </header>
 <section id="stats" class="stats" aria-label="Comms summary"></section>
@@ -2474,9 +2543,13 @@ function preferredTheme() {
   if (saved === 'dark' || saved === 'light') return saved;
   return mediaPrefersDark && mediaPrefersDark.matches ? 'dark' : 'light';
 }
+const SUN_ICON = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path></svg>';
+const MOON_ICON = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>';
 function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
-  el('theme').textContent = theme === 'dark' ? 'Light' : 'Dark';
+  // Icon-only toggle: show the icon for the mode you'd switch TO — a sun while
+  // dark, a moon while light.
+  el('theme').innerHTML = theme === 'dark' ? SUN_ICON : MOON_ICON;
   el('theme').setAttribute('aria-label', theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode');
 }
 applyTheme(preferredTheme());
@@ -2493,7 +2566,7 @@ function renderTable(items, headers, fn, label) {
 function mutationHelp(data) {
   if (data.project.demo) return 'Demo mode is read-only.';
   if (data.project.hash === 'global') return data.project.mutation_message || 'All-project mode can release claims; use a repo-specific UI or CLI to start/end sessions.';
-  if (data.project.mutations_enabled) return 'Agents create/release claims; Start creates a named session, End archives the selected named session.';
+  if (data.project.mutations_enabled) return 'Agents start and join named sessions; End archives the selected project\'s session.';
   return data.project.mutation_message || 'Set COMMS_ACTOR before starting comms ui to start or end the comms session here.';
 }
 function actionByID(data, id) {
@@ -2625,12 +2698,10 @@ function applySnapshot(data) {
   el('updated').textContent = 'updated ' + fmtTime(data.updated);
   renderProjectList(data);
   renderStats(view);
-  const startAction = actionByID(data, 'start_comms_session');
   const endAction = actionByID(data, 'end_comms_session');
-  el('startComms').disabled = !startAction.enabled;
-  el('startComms').title = startAction.reason || mutationHelp(data);
-  el('endComms').disabled = !endAction.enabled;
-  el('endComms').title = endAction.reason || mutationHelp(data);
+  const endTarget = endSessionTarget(data);
+  el('endComms').disabled = !(endAction.enabled && endTarget);
+  el('endComms').title = endTarget ? ('End "' + (endTarget.name || endTarget.id) + '" and archive it') : (endAction.reason || mutationHelp(data));
   el('sessions').innerHTML = renderRows(view.sessions, s => {
     const title = s.label ? esc(s.label) + ' <span class="meta-inline">@' + esc(s.actor) + '</span>' : '@' + esc(s.actor);
     return '<div class="row session-row"><div><div class="actor">' + title + (s.leader ? ' <span class="pill leader">leader</span>' : '') + '</div><div class="meta">' + esc(s.base_name || 'session') + ' · ' + esc(s.hostname || 'unknown host') + ' · hello ' + fmtTime(s.ts) + '</div>' + (s.session_name ? '<div class="meta">in session: ' + esc(s.session_name) + '</div>' : '') + '</div></div>';
@@ -2726,12 +2797,17 @@ function renderSessionChoices(data) {
   if (!choices.length) {
     sel.innerHTML = '<option value="">No sessions yet</option>';
     sel.disabled = true;
+    sel.style.display = 'none';
     sel.dataset.sig = '';
-    el('events').innerHTML = empty('No session logs yet. Start a comms session or run comms ui --demo.');
+    el('events').innerHTML = empty('No session logs yet. An agent starts one with comms session start, or run comms ui --demo.');
     return;
   }
   if (!choices.some(c => c.id === selectedSessionID)) selectedSessionID = choices[0].id;
   sel.disabled = false;
+  // The selector only earns its place when there's more than one log to switch
+  // between (the active session plus archives). With a single session it does
+  // nothing, so hide it — the event log just shows that one session.
+  sel.style.display = choices.length > 1 ? '' : 'none';
   // Only rebuild the <option> set when it actually changed, and never while the
   // user has the dropdown open (focused). A live snapshot push that arrived
   // mid-interaction would otherwise collapse an open menu and reset the
@@ -2761,30 +2837,29 @@ function renderSelectedSessionLog(data) {
   const evClear = el('events').querySelector('[data-clear="eventFilter"]');
   if (evClear) evClear.addEventListener('click', () => { el('eventFilter').value = ''; renderSelectedSessionLog(latestView); });
 }
-async function startCommsSession() {
-  const name = window.prompt('Name for the new comms session? Agents can join it with: comms session join "<name>"', 'dashboard fixes');
-  if (name === null) return;
-  const res = await fetch('/api/comms-session/start', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name })
-  });
-  if (!res.ok) throw new Error(await res.text());
-  hideError();
-  await load();
+// endSessionTarget resolves which active named session the End button acts on:
+// the selected project's active session in unified mode (so the request routes
+// to the owning repo via repo_hash), or the single repo's active session.
+function endSessionTarget(data) {
+  if (!data) return null;
+  if (isUnified(data) && !selectedProjectHash) return null; // pick one project first
+  const view = currentView(data);
+  const active = (view.active_comms_sessions || [])[0];
+  if (!active) return null;
+  return { id: active.id, name: active.name, repo_hash: isUnified(data) ? selectedProjectHash : '' };
 }
 async function endCommsSession() {
-  const chosen = latestView ? allSessionChoices(latestView).find(c => c.id === selectedSessionID && c.active) : null;
-  if (!chosen) throw new Error('Select an active named session in the Session Event Log dropdown first.');
-  const reason = window.prompt('End "' + (chosen.session.name || chosen.session.id) + '"? This releases claims in that named session and archives its log for later analysis.', 'project work session done');
+  const target = endSessionTarget(latestData);
+  if (!target) throw new Error('Select a project with an active comms session first.');
+  const reason = window.prompt('End "' + (target.name || target.id) + '"? This releases its claims and archives the session log so you can review it later in the Comms Session Archive.', 'project work session done');
   if (reason === null) return;
   const res = await fetch('/api/comms-session/end', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ reason, session_id: chosen.session.id, name: chosen.session.name })
+    body: JSON.stringify({ reason, session_id: target.id, name: target.name, repo_hash: target.repo_hash })
   });
   if (!res.ok) throw new Error(await res.text());
-  selectedSessionID = '';
+  selectedSessionID = 'current';
   localStorage.removeItem('selectedSessionID');
   hideError();
   await load();
@@ -2813,11 +2888,6 @@ async function releaseClaim(claimID, actor, scope, repoHash, sessionID) {
   hideError();
   await load();
 }
-el('startComms').addEventListener('click', () => {
-  const b = el('startComms'); const label = b.textContent;
-  b.disabled = true; b.textContent = 'Starting…';
-  startCommsSession().catch(showError).finally(() => { b.disabled = false; b.textContent = label; });
-});
 el('endComms').addEventListener('click', () => {
   const b = el('endComms'); const label = b.textContent;
   b.disabled = true; b.textContent = 'Ending…';
