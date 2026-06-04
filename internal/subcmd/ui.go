@@ -318,16 +318,18 @@ func (s uiServer) serveRetireSessionActor(w http.ResponseWriter, r *http.Request
 		http.Error(w, "demo mode is read-only; no actor retire event is written", http.StatusConflict)
 		return
 	}
-	if s.all {
-		http.Error(w, "all-project mode is read-only; use a repo-specific UI or CLI for mutations", http.StatusConflict)
-		return
-	}
 	var req struct {
-		Actor  string `json:"actor"`
-		Reason string `json:"reason"`
+		Actor    string `json:"actor"`
+		Reason   string `json:"reason"`
+		RepoHash string `json:"repo_hash"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+	// Unified mode: route the retire to the repo that owns the actor's session.
+	if s.all {
+		s.serveGlobalRetireSessionActor(w, strings.TrimSpace(req.RepoHash), req.Actor, req.Reason)
 		return
 	}
 	rt, ok := s.openMutatingUI(w, OpenOpts{})
@@ -340,6 +342,36 @@ func (s uiServer) serveRetireSessionActor(w http.ResponseWriter, r *http.Request
 		return
 	}
 	s.writeSnapshot(w, rt)
+}
+
+// serveGlobalRetireSessionActor routes a "remove team member" (retire) from the
+// unified dashboard to the repo that owns the actor's session, mirroring
+// serveGlobalReleaseClaim / serveGlobalEndCommsSession.
+func (s uiServer) serveGlobalRetireSessionActor(w http.ResponseWriter, repoHash, actor, reason string) {
+	repoRoot, err := repoRootForGlobalHash(repoHash)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	rt, ok := s.openMutatingUI(w, OpenOpts{RepoRootOverride: repoRoot})
+	if !ok {
+		return
+	}
+	defer rt.Close()
+	if rt.Repo.Hash != repoHash {
+		http.Error(w, "repo hash "+repoHash+" no longer matches "+rt.Repo.Hash+" for "+repoRoot, http.StatusConflict)
+		return
+	}
+	if _, err := appendSessionRetire(rt, actor, reason); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	snap, err := buildGlobalUISnapshot(s.staleAfter)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, snap)
 }
 
 func (s uiServer) serveReleaseClaim(w http.ResponseWriter, r *http.Request) {
@@ -1494,9 +1526,8 @@ func buildUIActions(snap uiSnapshot) []uiAction {
 		return []uiAction{start, end, releaseClaim, retire, lead, logs}
 	}
 	if snap.Project.Hash == "global" {
-		reason := "All-project mode supports releasing claims and ending a selected project's session; use a repo-specific UI or CLI for other mutations."
+		reason := "All-project mode supports releasing claims, ending a session, and removing a team member; use a repo-specific UI or CLI for other mutations."
 		start.Reason = reason
-		retire.Reason = reason
 		lead.Reason = reason
 		if snap.Project.Actor == "" {
 			msg := snap.Project.MutationMessage
@@ -1505,11 +1536,13 @@ func buildUIActions(snap uiSnapshot) []uiAction {
 			}
 			releaseClaim.Reason = msg
 			end.Reason = msg
+			retire.Reason = msg
 		} else {
-			// End is routed to the owning repo (serveGlobalEndCommsSession), the
-			// same way release is — so enable it; the frontend only invokes it for
-			// the selected project's active session.
+			// End and retire are routed to the owning repo (serveGlobal*), the
+			// same way release is — enable them; the frontend scopes each to the
+			// selected project.
 			end.Enabled = true
+			retire.Enabled = true
 			if len(snap.Claims) > 0 {
 				releaseClaim.Enabled = true
 			} else {
@@ -2281,6 +2314,10 @@ th {
   gap: 10px;
   align-items: start;
 }
+.roster-act { align-self: center; display: flex; }
+.roster-act button { opacity: 0; transition: opacity .14s ease; }
+.session-row:hover .roster-act button,
+.roster-act button:focus-visible { opacity: 1; }
 .copy {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
@@ -2705,11 +2742,17 @@ function applySnapshot(data) {
   const endTarget = endSessionTarget(data);
   el('endComms').disabled = !(endAction.enabled && endTarget);
   el('endComms').title = endTarget ? ('End "' + (endTarget.name || endTarget.id) + '" and archive it') : (endAction.reason || mutationHelp(data));
+  const rosterRetire = actionByID(data, 'retire_session_actor');
+  const rosterRepo = isUnified(data) ? (selectedProjectHash || '') : '';
   el('sessions').innerHTML = renderRows(view.sessions, s => {
     const title = s.label ? esc(s.label) + ' <span class="meta-inline">@' + esc(s.actor) + '</span>' : '@' + esc(s.actor);
-    return '<div class="row session-row"><div><div class="actor">' + title + (s.leader ? ' <span class="pill leader">leader</span>' : '') + '</div><div class="meta">' + esc(s.base_name || 'session') + ' · ' + esc(s.hostname || 'unknown host') + ' · hello ' + fmtTime(s.ts) + '</div>' + (s.session_name ? '<div class="meta">in session: ' + esc(s.session_name) + '</div>' : '') + '</div></div>';
+    const rm = rosterRetire.enabled ? '<div class="roster-act"><button class="small danger" type="button" data-retire-actor="' + esc(s.actor) + '" data-retire-repo="' + esc(rosterRepo) + '" title="Remove @' + esc(s.actor) + ' from the team — releases their claims; history is kept">Remove</button></div>' : '';
+    return '<div class="row session-row"><div><div class="actor">' + title + (s.leader ? ' <span class="pill leader">leader</span>' : '') + '</div><div class="meta">' + esc(s.base_name || 'session') + ' · ' + esc(s.hostname || 'unknown host') + ' · hello ' + fmtTime(s.ts) + '</div>' + (s.session_name ? '<div class="meta">in session: ' + esc(s.session_name) + '</div>' : '') + '</div>' + rm + '</div>';
   },
     'No active sessions in the last 4h.');
+  el('sessions').querySelectorAll('[data-retire-actor]').forEach(b => {
+    b.addEventListener('click', () => retireActor(b.getAttribute('data-retire-actor'), b.getAttribute('data-retire-repo')).catch(showError));
+  });
   el('currentSession').innerHTML = renderRows(view.active_comms_sessions, s =>
     '<div class="row"><div class="actor">' + esc(s.name || 'Unnamed session') + '</div><div class="meta">Started ' + fmtTime(s.started_at) + ' · ' + esc(s.event_count || 0) + ' event(s) · ' + esc(s.claim_count || 0) + ' claim(s) · ' + esc(s.finding_count || 0) + ' finding(s) · ' + esc(s.note_count || 0) + ' note(s)</div><div class="meta">' + esc((s.actors || []).map(a => '@' + a).join(', ')) + '</div></div>',
     'No named comms session is open. Use Start Comms Session, or ask an agent to run comms session start "<name>".');
@@ -2752,7 +2795,7 @@ function renderClaims(data, view) {
     claimBody = '<div class="claim-list">' + claims.map(c => {
       const acts = [];
       if (releaseAction.enabled) acts.push('<button class="small primary" type="button" data-release-claim="' + esc(c.id) + '" data-release-repo="' + esc(c.repo_hash || '') + '" data-release-session="' + esc(c.session_id || '') + '" data-release-actor="' + esc(c.actor) + '" data-release-scope="' + esc(c.scope) + '">Release</button>');
-      if (c.stale && retireAction.enabled) acts.push('<button class="small danger" type="button" data-retire-actor="' + esc(c.actor) + '">Retire</button>');
+      if (c.stale && retireAction.enabled) acts.push('<button class="small danger" type="button" data-retire-actor="' + esc(c.actor) + '" data-retire-repo="' + esc(c.repo_hash || '') + '">Retire</button>');
       const actBox = acts.length ? '<div class="claim-act">' + acts.join('') + '</div>' : '';
       return '<div class="claim-card' + (c.stale ? ' stale' : '') + '">' +
         '<div class="claim-main">' +
@@ -2772,11 +2815,11 @@ function renderClaims(data, view) {
     claimBody = '<div class="empty-state"><div class="es-icon">&#10003;</div><div class="es-title">No active claims</div><div class="es-sub">All work in this view is released.</div>' + archiveBtn + '</div>';
   }
   el('claims').innerHTML = '<div class="hint">' + esc(scopeText) + ' Claims older than ' + esc(data.project.stale_after) + ' are stale. ' + esc(mutationHelp(data)) + '</div>' + claimBody;
-  document.querySelectorAll('[data-release-claim]').forEach(button => {
+  el('claims').querySelectorAll('[data-release-claim]').forEach(button => {
     button.addEventListener('click', () => releaseClaim(button.getAttribute('data-release-claim'), button.getAttribute('data-release-actor'), button.getAttribute('data-release-scope'), button.getAttribute('data-release-repo'), button.getAttribute('data-release-session')).catch(showError));
   });
-  document.querySelectorAll('[data-retire-actor]').forEach(button => {
-    button.addEventListener('click', () => retireActor(button.getAttribute('data-retire-actor')).catch(showError));
+  el('claims').querySelectorAll('[data-retire-actor]').forEach(button => {
+    button.addEventListener('click', () => retireActor(button.getAttribute('data-retire-actor'), button.getAttribute('data-retire-repo')).catch(showError));
   });
   const clear = el('claims').querySelector('[data-clear="claimFilter"]');
   if (clear) clear.addEventListener('click', () => { el('claimFilter').value = ''; renderClaims(latestData, latestView); });
@@ -2867,13 +2910,13 @@ async function endCommsSession() {
   hideError();
   await load();
 }
-async function retireActor(actor) {
-  const reason = window.prompt('Retire @' + actor + '? This releases all active claims held by that actor and removes it from the active roster. History stays in the log.', 'stale actor retired from UI');
+async function retireActor(actor, repoHash) {
+  const reason = window.prompt('Remove @' + actor + ' from the team? This releases all their active claims and removes them from the roster. History stays in the log.', 'removed from team via UI');
   if (reason === null) return;
   const res = await fetch('/api/session/retire', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ actor, reason })
+    body: JSON.stringify({ actor, reason, repo_hash: repoHash || '' })
   });
   if (!res.ok) throw new Error(await res.text());
   hideError();
