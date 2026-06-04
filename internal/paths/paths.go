@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 // Paths bundles all the locations a single comms invocation cares about.
@@ -55,6 +56,28 @@ func For(repoRoot, repoHash string) (Paths, error) {
 		Lock:     filepath.Join(logDir, ".lock"),
 		RepoPath: filepath.Join(logDir, "repo-path.txt"),
 	}, nil
+}
+
+// EphemeralStore reports whether the per-machine store resolved under a
+// throwaway temp dir. That almost always means $HOME was overridden (e.g.
+// HOME=/tmp) — comms keys its store off $HOME, so the events get written to a
+// private log that a normally-launched `comms ui` and other agents never see.
+// Callers should warn loudly when this is true.
+func (p Paths) EphemeralStore() bool { return isEphemeralPath(p.LogDir) }
+
+// isEphemeralPath reports whether path sits under a well-known throwaway temp
+// root. comms never stores there on purpose, so a match means the user-data
+// home was redirected somewhere transient.
+func isEphemeralPath(path string) bool {
+	clean := filepath.Clean(path) + string(filepath.Separator)
+	for _, root := range []string{
+		"/tmp/", "/private/tmp/", "/var/folders/", "/private/var/folders/",
+	} {
+		if strings.HasPrefix(clean, root) {
+			return true
+		}
+	}
+	return false
 }
 
 // DocLockPath returns the sidecar editor-lock path for `comms doc <slug> --edit`.

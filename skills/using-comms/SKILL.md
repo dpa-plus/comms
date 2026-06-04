@@ -90,6 +90,15 @@ export COMMS_REPO=/absolute/repo/path
 COMMS_ACTOR=claude-dev comms session join "session name" --label "Claude Dev"
 ```
 
+**Never override `HOME`** (e.g. `HOME=/tmp comms …`). comms stores its event log
+under `$HOME/Library/Application Support/comms/`, so changing `HOME` silently
+forks every claim/finding/note into a throwaway log that the shared dashboard
+and other agents never see — coordination breaks with no error. To escape a
+protected working directory use `cd /tmp` (changes the *cwd*, not `HOME`) and
+point at the repo with `--repo`/`COMMS_REPO`; leave `HOME` untouched. comms now
+prints a warning when its store resolves under a temp dir — if you see it, drop
+the `HOME=` and re-run your `hello`/`session join`/`claim`.
+
 Prefer moving long-running/background-service repos to `~/code/<project>` so
 agents and launchd jobs avoid macOS protected-folder access problems.
 
