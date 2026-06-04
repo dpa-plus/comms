@@ -1170,8 +1170,20 @@ func buildGlobalUISnapshot(staleAfter time.Duration) (uiSnapshot, error) {
 	sort.Slice(out.Active, func(i, j int) bool { return out.Active[i].StartedAt.After(out.Active[j].StartedAt) })
 	sort.Slice(out.CommsSessions, func(i, j int) bool { return out.CommsSessions[i].EndedAt.After(out.CommsSessions[j].EndedAt) })
 	sort.Slice(out.Claims, func(i, j int) bool { return out.Claims[i].TS.Before(out.Claims[j].TS) })
-	sort.Slice(out.Findings, func(i, j int) bool { return out.Findings[i].TS.After(out.Findings[j].TS) })
-	sort.Slice(out.Notes, func(i, j int) bool { return out.Notes[i].TS.After(out.Notes[j].TS) })
+	// Priority-first, then newest — matches recentFindings/recentNotes so the
+	// merged all-projects view orders the same way the per-repo view does.
+	sort.SliceStable(out.Findings, func(i, j int) bool {
+		if out.Findings[i].Priority != out.Findings[j].Priority {
+			return out.Findings[i].Priority
+		}
+		return out.Findings[i].TS.After(out.Findings[j].TS)
+	})
+	sort.SliceStable(out.Notes, func(i, j int) bool {
+		if out.Notes[i].Priority != out.Notes[j].Priority {
+			return out.Notes[i].Priority
+		}
+		return out.Notes[i].TS.After(out.Notes[j].TS)
+	})
 	sort.Slice(out.Releases, func(i, j int) bool { return out.Releases[i].TS.After(out.Releases[j].TS) })
 	if len(out.Active) > 0 {
 		out.Current = &out.Active[0]
@@ -2078,7 +2090,8 @@ main {
   font-weight: 650;
   overflow-wrap: anywhere;
 }
-.intent { margin-top: 5px; }
+.intent { margin-top: 5px; overflow-wrap: anywhere; }
+.note-body { overflow-wrap: anywhere; }
 .empty { padding: 16px 14px; color: var(--muted); }
 .hint {
   padding: 12px 16px;
@@ -2234,8 +2247,49 @@ body.unified main {
 .empty-state .es-sub { font-size: 12px; margin-top: 3px; }
 .empty-state .es-cta { margin-top: 14px; }
 .es-clear { color: var(--blue); cursor: pointer; text-decoration: underline; margin-left: 6px; }
-.rel-result { font-weight: 620; line-height: 1.34; }
+.rel-result { font-weight: 620; line-height: 1.34; overflow-wrap: anywhere; }
 .rel-result + .meta.scope { margin-top: 5px; color: var(--teal); }
+
+/* ── Active Claims as readable cards (replaces the cramped fixed table) ── */
+.claim-list { padding: 10px 12px 12px; }
+.claim-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.claim-card:last-child { margin-bottom: 0; }
+.claim-card.stale {
+  background: var(--red-soft);
+  border-color: var(--red);
+  box-shadow: inset 3px 0 0 var(--red);
+}
+.claim-main { min-width: 0; flex: 1 1 auto; }
+.claim-top { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.claim-top .actor { font-weight: 680; }
+.claim-sess {
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.claim-age {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.claim-age.is-stale { color: var(--red); font-weight: 650; }
+.claim-card .scope { margin-top: 6px; }
+.claim-intent { margin-top: 6px; color: var(--text); line-height: 1.5; overflow-wrap: anywhere; }
+.claim-act { flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; padding-top: 1px; }
 
 @media (max-width: 1180px) {
   body { overflow: auto; }
@@ -2577,7 +2631,7 @@ function applySnapshot(data) {
     '<div class="row' + (f.priority ? ' priority-row' : '') + '">' + (f.priority ? '<span class="pill priority">priority</span> ' : '') + '<span class="pill finding">' + esc(f.category) + '</span><div class="intent">' + esc(f.summary) + '</div><div class="meta">@' + esc(f.actor) + ' · ' + fmtTime(f.ts) + '</div></div>',
     'No findings in the last 24h.');
   el('notes').innerHTML = renderRows(view.notes, n =>
-    '<div class="row' + (n.priority ? ' priority-row' : '') + '">' + (n.priority ? '<span class="pill priority">priority</span> ' : '') + '<div>' + esc(n.body) + '</div><div class="meta">@' + esc(n.actor) + ' · ' + fmtTime(n.ts) + '</div></div>',
+    '<div class="row' + (n.priority ? ' priority-row' : '') + '">' + (n.priority ? '<span class="pill priority">priority</span> ' : '') + '<div class="note-body">' + esc(n.body) + '</div><div class="meta">@' + esc(n.actor) + ' · ' + fmtTime(n.ts) + '</div></div>',
     'No notes in the last 24h.');
   el('releases').innerHTML = renderRows(view.releases, r =>
     '<div class="row"><div class="rel-result">' + esc(r.result || 'released a claim') + '</div>' +
@@ -2600,23 +2654,33 @@ function renderClaims(data, view) {
   const endAction = actionByID(data, 'end_comms_session');
   const canArchive = endAction.enabled && chosen && chosen.active && chosen.id !== 'current' && claims.length === 0 && !claimFilter;
   const archiveBtn = canArchive ? '<div class="es-cta"><button class="small primary" type="button" data-archive-session>Archive this session</button></div>' : '';
-  el('claims').innerHTML = '<div class="hint">' + esc(scopeText) + 'Claims older than ' + esc(data.project.stale_after) + ' are marked stale. ' + esc(mutationHelp(data)) + '</div>' +
-    renderTable(claims, ['Actor', 'Session', 'Scope', 'Intent', 'Age', 'Action'], c => {
-      const actions = [];
-      if (releaseAction.enabled) {
-        actions.push('<button class="small primary" type="button" data-release-claim="' + esc(c.id) + '" data-release-repo="' + esc(c.repo_hash || '') + '" data-release-session="' + esc(c.session_id || '') + '" data-release-actor="' + esc(c.actor) + '" data-release-scope="' + esc(c.scope) + '">Release</button>');
-      }
-      if (c.stale && retireAction.enabled) {
-        actions.push('<button class="small danger" type="button" data-retire-actor="' + esc(c.actor) + '">Retire</button>');
-      }
-      const action = actions.length ? actions.join(' ') : (c.stale ? '<span class="pill stale">stale</span>' : '<span class="meta">active</span>');
-      return '<tr class="' + (c.stale ? 'claim-stale' : '') + '"><td><span class="actor">@' + esc(c.actor) + '</span></td><td>' + esc(c.session_name || 'legacy') + '</td><td><div class="scope">' + esc(c.scope) + '</div><div class="copy">' + esc(c.id.slice(0, 10)) + '</div></td><td>' + esc(c.intent) + '</td><td>' + esc(c.age) + (c.stale ? '<div><span class="pill stale">stale</span></div>' : '') + '</td><td>' + action + '</td></tr>';
-    },
-    claimFilter
-      ? 'No claims matching "' + esc(claimFilter) + '" <span class="es-clear" data-clear="claimFilter" role="button" tabindex="0">Clear</span>'
-      : (chosen && !chosen.active
-          ? 'No active claims in archived sessions.'
-          : '<div class="empty-state"><div class="es-icon">&#10003;</div><div class="es-title">No active claims</div><div class="es-sub">All work in this view is released.</div>' + archiveBtn + '</div>'));
+  let claimBody;
+  if (claims.length) {
+    // Readable claim CARDS (not a cramped fixed table): intent + scope get the
+    // full column width, so long text never collapses to one word per line.
+    claimBody = '<div class="claim-list">' + claims.map(c => {
+      const acts = [];
+      if (releaseAction.enabled) acts.push('<button class="small primary" type="button" data-release-claim="' + esc(c.id) + '" data-release-repo="' + esc(c.repo_hash || '') + '" data-release-session="' + esc(c.session_id || '') + '" data-release-actor="' + esc(c.actor) + '" data-release-scope="' + esc(c.scope) + '">Release</button>');
+      if (c.stale && retireAction.enabled) acts.push('<button class="small danger" type="button" data-retire-actor="' + esc(c.actor) + '">Retire</button>');
+      const actBox = acts.length ? '<div class="claim-act">' + acts.join('') + '</div>' : '';
+      return '<div class="claim-card' + (c.stale ? ' stale' : '') + '">' +
+        '<div class="claim-main">' +
+          '<div class="claim-top"><span class="actor">@' + esc(c.actor) + '</span>' +
+            (c.session_name ? '<span class="claim-sess">' + esc(c.session_name) + '</span>' : '') +
+            '<span class="claim-age' + (c.stale ? ' is-stale' : '') + '">' + esc(c.age) + (c.stale ? ' · stale' : '') + '</span></div>' +
+          '<div class="scope">' + esc(c.scope) + '</div>' +
+          (c.intent ? '<div class="claim-intent">' + esc(c.intent) + '</div>' : '') +
+        '</div>' + actBox +
+      '</div>';
+    }).join('') + '</div>';
+  } else if (claimFilter) {
+    claimBody = '<div class="empty">No claims matching "' + esc(claimFilter) + '" <span class="es-clear" data-clear="claimFilter" role="button" tabindex="0">Clear</span></div>';
+  } else if (chosen && !chosen.active) {
+    claimBody = '<div class="empty">No active claims in archived sessions.</div>';
+  } else {
+    claimBody = '<div class="empty-state"><div class="es-icon">&#10003;</div><div class="es-title">No active claims</div><div class="es-sub">All work in this view is released.</div>' + archiveBtn + '</div>';
+  }
+  el('claims').innerHTML = '<div class="hint">' + esc(scopeText) + ' Claims older than ' + esc(data.project.stale_after) + ' are stale. ' + esc(mutationHelp(data)) + '</div>' + claimBody;
   document.querySelectorAll('[data-release-claim]').forEach(button => {
     button.addEventListener('click', () => releaseClaim(button.getAttribute('data-release-claim'), button.getAttribute('data-release-actor'), button.getAttribute('data-release-scope'), button.getAttribute('data-release-repo'), button.getAttribute('data-release-session')).catch(showError));
   });
