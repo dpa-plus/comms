@@ -60,7 +60,9 @@ whole view — roster, active claims, recent findings/notes, a **Recently
 Completed** feed (from claim-release results), and the per-session event log —
 to that project, with live SSE updates the instant any project's log changes.
 A project shows as active when it has recent findings/notes/completed work, even
-with no named session and all claims released. Scope to one repo with
+with no named session and all claims released. The header shows the active
+**session name** (the name agents use, e.g. `acme-build`) as a pill next
+to the repo, so the UI matches what agents call the work. Scope to one repo with
 `comms ui --repo /path`. The launcher sets `COMMS_ACTOR=human-eli` so the
 operator can release claims from the dashboard.
 
