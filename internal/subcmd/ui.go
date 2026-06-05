@@ -2393,16 +2393,19 @@ th {
   grid-column: 1 / -1;
   min-height: 420px;
 }
-.session-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: start;
+/* The roster column is narrow, so the actor name + meta take the FULL width and
+   the row actions sit on their own line beneath them — never overlapping the
+   text or spilling past the row. They stay visible (matching the always-on
+   Release buttons in the Claims panel) and wrap if the column gets tight. */
+.session-row > div:first-child { min-width: 0; }
+.roster-act {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 12px;
 }
-.roster-act { align-self: center; display: flex; gap: 6px; flex-shrink: 0; }
-.roster-act button { opacity: 0; transition: opacity .14s ease; white-space: nowrap; }
-.session-row:hover .roster-act button,
-.roster-act button:focus-visible { opacity: 1; }
+.roster-act button { white-space: nowrap; }
 .copy {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
