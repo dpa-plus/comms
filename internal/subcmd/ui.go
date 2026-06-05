@@ -88,6 +88,7 @@ func runUI(addr string, demo, all bool, staleAfter time.Duration, forceOpen, noO
 	mux.HandleFunc("/api/session/retire", server.serveRetireSessionActor)
 	mux.HandleFunc("/api/session/lead", server.serveTransferLeader)
 	mux.HandleFunc("/api/claim/release", server.serveReleaseClaim)
+	mux.HandleFunc("/api/claim/release-all", server.serveReleaseActorClaims)
 
 	fmt.Printf("comms ui listening on http://%s\n", addr)
 	fmt.Printf("Claims older than %s are marked stale. Press Ctrl-C to stop.\n", staleAfter)
@@ -463,6 +464,81 @@ func (s uiServer) serveGlobalReleaseClaim(w http.ResponseWriter, claimID, repoHa
 		result = "released from global UI"
 	}
 	if err := appendReleaseEvent(rt, []*state.Claim{claim}, reason, result); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	snap, err := buildGlobalUISnapshot(s.staleAfter)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, snap)
+}
+
+// serveReleaseActorClaims releases EVERY active claim held by one actor in a
+// single locked pass. The operator reaches for this when an agent dies holding
+// many locks: instead of releasing each claim one by one it frees the whole set
+// at once and leaves the actor on the roster (unlike retire, which also removes
+// them). Each underlying release is recorded as an arbitrated release so the
+// audit log keeps who force-released what, and why.
+func (s uiServer) serveReleaseActorClaims(w http.ResponseWriter, r *http.Request) {
+	if guardMutation(w, r) {
+		return
+	}
+	if s.demo {
+		http.Error(w, "demo mode is read-only; no claim release event is written", http.StatusConflict)
+		return
+	}
+	var req struct {
+		Actor    string `json:"actor"`
+		RepoHash string `json:"repo_hash"`
+		Reason   string `json:"reason"`
+		Result   string `json:"result"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.Actor) == "" {
+		http.Error(w, "actor is required", http.StatusBadRequest)
+		return
+	}
+	// Unified mode: route to the repo that owns the actor's claims.
+	if s.all {
+		s.serveGlobalReleaseActorClaims(w, strings.TrimSpace(req.Actor), strings.TrimSpace(req.RepoHash), req.Reason, req.Result)
+		return
+	}
+	rt, ok := s.openMutatingUI(w, OpenOpts{})
+	if !ok {
+		return
+	}
+	defer rt.Close()
+	if _, err := releaseAllClaimsForActor(rt, req.Actor, req.Reason, req.Result); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	s.writeSnapshot(w, rt)
+}
+
+// serveGlobalReleaseActorClaims routes a bulk "release all of an agent's claims"
+// from the unified dashboard to the repo that owns the actor's claims, mirroring
+// serveGlobalReleaseClaim / serveGlobalRetireSessionActor.
+func (s uiServer) serveGlobalReleaseActorClaims(w http.ResponseWriter, actor, repoHash, reasonText, resultText string) {
+	repoRoot, err := repoRootForGlobalHash(repoHash)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	rt, ok := s.openMutatingUI(w, OpenOpts{RepoRootOverride: repoRoot})
+	if !ok {
+		return
+	}
+	defer rt.Close()
+	if rt.Repo.Hash != repoHash {
+		http.Error(w, "repo hash "+repoHash+" no longer matches "+rt.Repo.Hash+" for "+repoRoot, http.StatusConflict)
+		return
+	}
+	if _, err := releaseAllClaimsForActor(rt, actor, reasonText, resultText); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
@@ -1015,6 +1091,7 @@ func buildDemoUISnapshot(staleAfter time.Duration) uiSnapshot {
 			{ID: "start_comms_session", Label: "Start Comms Session", Method: http.MethodPost, Path: "/api/comms-session/start", Enabled: false, Reason: "demo mode is read-only"},
 			{ID: "end_comms_session", Label: "End Comms Session", Method: http.MethodPost, Path: "/api/comms-session/end", Enabled: false, Reason: "demo mode is read-only"},
 			{ID: "release_claim", Label: "Release Claim", Method: http.MethodPost, Path: "/api/claim/release", Enabled: false, Reason: "demo mode is read-only"},
+			{ID: "release_actor_claims", Label: "Release All Claims", Method: http.MethodPost, Path: "/api/claim/release-all", Enabled: false, Reason: "demo mode is read-only"},
 			{ID: "retire_session_actor", Label: "Retire Session Actor", Method: http.MethodPost, Path: "/api/session/retire", Enabled: false, Reason: "demo mode is read-only"},
 			{ID: "transfer_leader", Label: "Transfer Leader", Method: http.MethodPost, Path: "/api/session/lead", Enabled: false, Reason: "demo mode is read-only"},
 			{ID: "select_session_log", Label: "Select Session Event Log", Enabled: true, Reason: "client-side filtered view over current_session/events and comms_sessions/events"},
@@ -1513,6 +1590,7 @@ func buildUIActions(snap uiSnapshot) []uiAction {
 	start := uiAction{ID: "start_comms_session", Label: "Start Comms Session", Method: http.MethodPost, Path: "/api/comms-session/start"}
 	end := uiAction{ID: "end_comms_session", Label: "End Comms Session", Method: http.MethodPost, Path: "/api/comms-session/end"}
 	releaseClaim := uiAction{ID: "release_claim", Label: "Release Claim", Method: http.MethodPost, Path: "/api/claim/release"}
+	releaseAll := uiAction{ID: "release_actor_claims", Label: "Release All Claims", Method: http.MethodPost, Path: "/api/claim/release-all"}
 	retire := uiAction{ID: "retire_session_actor", Label: "Retire Session Actor", Method: http.MethodPost, Path: "/api/session/retire"}
 	lead := uiAction{ID: "transfer_leader", Label: "Transfer Leader", Method: http.MethodPost, Path: "/api/session/lead"}
 	logs := uiAction{ID: "select_session_log", Label: "Select Session Event Log", Enabled: true, Reason: "client-side filtered view over current_session/events and comms_sessions/events"}
@@ -1521,9 +1599,10 @@ func buildUIActions(snap uiSnapshot) []uiAction {
 		start.Reason = "demo mode is read-only"
 		end.Reason = "demo mode is read-only"
 		releaseClaim.Reason = "demo mode is read-only"
+		releaseAll.Reason = "demo mode is read-only"
 		retire.Reason = "demo mode is read-only"
 		lead.Reason = "demo mode is read-only"
-		return []uiAction{start, end, releaseClaim, retire, lead, logs}
+		return []uiAction{start, end, releaseClaim, releaseAll, retire, lead, logs}
 	}
 	if snap.Project.Hash == "global" {
 		reason := "All-project mode supports releasing claims, ending a session, and removing a team member; use a repo-specific UI or CLI for other mutations."
@@ -1535,6 +1614,7 @@ func buildUIActions(snap uiSnapshot) []uiAction {
 				msg = "mutating UI actions require COMMS_ACTOR"
 			}
 			releaseClaim.Reason = msg
+			releaseAll.Reason = msg
 			end.Reason = msg
 			retire.Reason = msg
 		} else {
@@ -1545,11 +1625,13 @@ func buildUIActions(snap uiSnapshot) []uiAction {
 			retire.Enabled = true
 			if len(snap.Claims) > 0 {
 				releaseClaim.Enabled = true
+				releaseAll.Enabled = true
 			} else {
 				releaseClaim.Reason = "no active claim to release"
+				releaseAll.Reason = "no active claim to release"
 			}
 		}
-		return []uiAction{start, end, releaseClaim, retire, lead, logs}
+		return []uiAction{start, end, releaseClaim, releaseAll, retire, lead, logs}
 	}
 	if !snap.Project.MutationsEnabled {
 		reason := snap.Project.MutationMessage
@@ -1559,9 +1641,10 @@ func buildUIActions(snap uiSnapshot) []uiAction {
 		start.Reason = reason
 		end.Reason = reason
 		releaseClaim.Reason = reason
+		releaseAll.Reason = reason
 		retire.Reason = reason
 		lead.Reason = reason
-		return []uiAction{start, end, releaseClaim, retire, lead, logs}
+		return []uiAction{start, end, releaseClaim, releaseAll, retire, lead, logs}
 	}
 	start.Enabled = true
 	if len(snap.Active) > 0 {
@@ -1576,15 +1659,17 @@ func buildUIActions(snap uiSnapshot) []uiAction {
 	}
 	if len(snap.Claims) > 0 {
 		releaseClaim.Enabled = true
+		releaseAll.Enabled = true
 	} else {
 		releaseClaim.Reason = "no active claim to release"
+		releaseAll.Reason = "no active claim to release"
 	}
 	if len(snap.Sessions) > 0 || len(snap.Claims) > 0 {
 		retire.Enabled = true
 	} else {
 		retire.Reason = "no active session or claim actor to retire"
 	}
-	return []uiAction{start, end, releaseClaim, retire, lead, logs}
+	return []uiAction{start, end, releaseClaim, releaseAll, retire, lead, logs}
 }
 
 func buildCommsSessionViews(events []event.Event) ([]uiCommsSession, []uiCommsSession) {
@@ -2314,8 +2399,8 @@ th {
   gap: 10px;
   align-items: start;
 }
-.roster-act { align-self: center; display: flex; }
-.roster-act button { opacity: 0; transition: opacity .14s ease; }
+.roster-act { align-self: center; display: flex; gap: 6px; flex-shrink: 0; }
+.roster-act button { opacity: 0; transition: opacity .14s ease; white-space: nowrap; }
 .session-row:hover .roster-act button,
 .roster-act button:focus-visible { opacity: 1; }
 .copy {
@@ -2743,13 +2828,34 @@ function applySnapshot(data) {
   el('endComms').disabled = !(endAction.enabled && endTarget);
   el('endComms').title = endTarget ? ('End "' + (endTarget.name || endTarget.id) + '" and archive it') : (endAction.reason || mutationHelp(data));
   const rosterRetire = actionByID(data, 'retire_session_actor');
+  const rosterReleaseAll = actionByID(data, 'release_actor_claims');
   const rosterRepo = isUnified(data) ? (selectedProjectHash || '') : '';
+  // Per-actor active-claim counts, so each roster row can offer a one-click
+  // "release all N of this agent's claims" when (and only when) it holds some.
+  // Also track each actor's owning repo so the bulk release can route correctly
+  // even from the merged "All projects" view (where no single project is
+  // selected) — as long as that actor's claims all live in one repo.
+  const claimCounts = {};
+  const claimRepos = {};
+  (view.claims || []).forEach(c => {
+    claimCounts[c.actor] = (claimCounts[c.actor] || 0) + 1;
+    const h = c.repo_hash || '';
+    if (!(c.actor in claimRepos)) claimRepos[c.actor] = h;
+    else if (claimRepos[c.actor] !== h) claimRepos[c.actor] = ''; // claims span repos → ambiguous
+  });
   el('sessions').innerHTML = renderRows(view.sessions, s => {
     const title = s.label ? esc(s.label) + ' <span class="meta-inline">@' + esc(s.actor) + '</span>' : '@' + esc(s.actor);
-    const rm = rosterRetire.enabled ? '<div class="roster-act"><button class="small danger" type="button" data-retire-actor="' + esc(s.actor) + '" data-retire-repo="' + esc(rosterRepo) + '" title="Remove @' + esc(s.actor) + ' from the team — releases their claims; history is kept">Remove</button></div>' : '';
-    return '<div class="row session-row"><div><div class="actor">' + title + (s.leader ? ' <span class="pill leader">leader</span>' : '') + '</div><div class="meta">' + esc(s.base_name || 'session') + ' · ' + esc(s.hostname || 'unknown host') + ' · hello ' + fmtTime(s.ts) + '</div>' + (s.session_name ? '<div class="meta">in session: ' + esc(s.session_name) + '</div>' : '') + '</div>' + rm + '</div>';
+    const n = claimCounts[s.actor] || 0;
+    const relRepo = rosterRepo || claimRepos[s.actor] || '';
+    const rel = (rosterReleaseAll.enabled && n > 0) ? '<button class="small primary" type="button" data-release-actor="' + esc(s.actor) + '" data-release-repo="' + esc(relRepo) + '" data-release-count="' + n + '" title="Release all ' + n + ' claim(s) held by @' + esc(s.actor) + ' at once — frees the files; keeps them on the team">Release ' + n + '</button>' : '';
+    const rm = rosterRetire.enabled ? '<button class="small danger" type="button" data-retire-actor="' + esc(s.actor) + '" data-retire-repo="' + esc(rosterRepo) + '" title="Remove @' + esc(s.actor) + ' from the team — releases their claims; history is kept">Remove</button>' : '';
+    const acts = (rel || rm) ? '<div class="roster-act">' + rel + rm + '</div>' : '';
+    return '<div class="row session-row"><div><div class="actor">' + title + (s.leader ? ' <span class="pill leader">leader</span>' : '') + '</div><div class="meta">' + esc(s.base_name || 'session') + ' · ' + esc(s.hostname || 'unknown host') + ' · hello ' + fmtTime(s.ts) + '</div>' + (s.session_name ? '<div class="meta">in session: ' + esc(s.session_name) + '</div>' : '') + '</div>' + acts + '</div>';
   },
     'No active sessions in the last 4h.');
+  el('sessions').querySelectorAll('[data-release-actor]').forEach(b => {
+    b.addEventListener('click', () => releaseActorClaims(b.getAttribute('data-release-actor'), b.getAttribute('data-release-repo'), b.getAttribute('data-release-count')).catch(showError));
+  });
   el('sessions').querySelectorAll('[data-retire-actor]').forEach(b => {
     b.addEventListener('click', () => retireActor(b.getAttribute('data-retire-actor'), b.getAttribute('data-retire-repo')).catch(showError));
   });
@@ -2917,6 +3023,20 @@ async function retireActor(actor, repoHash) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ actor, reason, repo_hash: repoHash || '' })
+  });
+  if (!res.ok) throw new Error(await res.text());
+  hideError();
+  await load();
+}
+async function releaseActorClaims(actor, repoHash, count) {
+  const n = (count && Number(count) > 0) ? Number(count) : 0;
+  const many = n ? ('all ' + n + ' active claim' + (n === 1 ? '' : 's')) : 'all active claims';
+  const result = window.prompt('Release ' + many + ' held by @' + actor + '?\n\nThis frees those files for other agents at once (handy when an agent dies holding many locks). @' + actor + ' stays on the team — use Remove if you also want them off the roster.', 'agent died; bulk-released claims via UI');
+  if (result === null) return;
+  const res = await fetch('/api/claim/release-all', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ actor, repo_hash: repoHash || '', result, reason: result })
   });
   if (!res.ok) throw new Error(await res.text());
   hideError();
