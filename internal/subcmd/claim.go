@@ -3,6 +3,7 @@ package subcmd
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -136,6 +137,7 @@ func runClaim(scopeRaw, intent, stealID, stealReason string) error {
 	} else {
 		fmt.Printf("@%s claimed %s\n  ID: %s\n", rt.Actor, scope.String(), ev.ID)
 	}
+	printClaimContext(rt, []overlap.Scope{scope})
 	return nil
 }
 
@@ -214,6 +216,7 @@ func runClaimBatch(scopeRaws []string, intent string) error {
 	for i, sc := range scopes {
 		fmt.Printf("  • %s  (ID: %s)\n", sc.String(), short(ids[i]))
 	}
+	printClaimContext(rt, scopes)
 	return nil
 }
 
@@ -247,4 +250,75 @@ func filterOutClaim(in []*state.Claim, id string) []*state.Claim {
 		out = append(out, c)
 	}
 	return out
+}
+
+// printClaimContext surfaces up to 3 prior findings on the just-claimed path(s)
+// — the decisions/gotchas that explain WHY a file is the way it is — at the exact
+// moment an agent is about to edit it. claim is the most-run command and was
+// context-free; this turns it into the natural read-trigger (most agents never
+// run a separate `comms log --scope` query). Durable findings (decision/gotcha)
+// are preferred over churn (bug/fix/ship). Silent when there is no prior context.
+func printClaimContext(rt *Runtime, scopes []overlap.Scope) {
+	matches := findingsOnScopes(rt.State, scopes, 3)
+	if len(matches) == 0 {
+		return
+	}
+	fmt.Println("  prior context on this path:")
+	for _, f := range matches {
+		summary := f.Summary
+		if len(summary) > 96 {
+			summary = summary[:95] + "…"
+		}
+		age := shortAge(time.Since(f.TS))
+		when := age + " ago"
+		if age == "now" {
+			when = "just now"
+		}
+		fmt.Printf("    • [%s] %s  (@%s, %s)\n", f.Category, summary, f.Actor, when)
+	}
+}
+
+// findingsOnScopes returns prior findings whose path ref overlaps any of the
+// given scopes, durable (decision/gotcha) first then newest, capped at max.
+func findingsOnScopes(s *state.State, scopes []overlap.Scope, max int) []*state.Finding {
+	if s == nil || len(scopes) == 0 {
+		return nil
+	}
+	var out []*state.Finding
+	for _, f := range s.Findings {
+		if findingMatchesAnyScope(f, scopes) {
+			out = append(out, f)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		di, dj := durableCategory(out[i].Category), durableCategory(out[j].Category)
+		if di != dj {
+			return di
+		}
+		return out[i].TS.After(out[j].TS)
+	})
+	if max > 0 && len(out) > max {
+		out = out[:max]
+	}
+	return out
+}
+
+func durableCategory(cat string) bool { return cat == "decision" || cat == "gotcha" }
+
+func findingMatchesAnyScope(f *state.Finding, scopes []overlap.Scope) bool {
+	for _, ref := range f.Refs {
+		if ref.Kind != "path" {
+			continue
+		}
+		rs, err := overlap.Parse(ref.Value)
+		if err != nil {
+			continue
+		}
+		for _, sc := range scopes {
+			if overlap.Scopes(rs, sc) {
+				return true
+			}
+		}
+	}
+	return false
 }

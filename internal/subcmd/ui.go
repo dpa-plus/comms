@@ -932,15 +932,35 @@ type uiClaim struct {
 	SessionName string    `json:"session_name,omitempty"`
 }
 
+type uiRef struct {
+	Kind  string `json:"kind"`
+	Value string `json:"value"`
+}
+
+func toUIRefs(refs []state.Ref) []uiRef {
+	if len(refs) == 0 {
+		return nil
+	}
+	out := make([]uiRef, 0, len(refs))
+	for _, r := range refs {
+		out = append(out, uiRef{Kind: r.Kind, Value: r.Value})
+	}
+	return out
+}
+
 type uiFinding struct {
-	ID          string    `json:"id"`
-	Actor       string    `json:"actor"`
-	Category    string    `json:"category"`
-	Summary     string    `json:"summary"`
-	Priority    bool      `json:"priority"`
-	TS          time.Time `json:"ts"`
-	SessionID   string    `json:"session_id,omitempty"`
-	SessionName string    `json:"session_name,omitempty"`
+	ID       string    `json:"id"`
+	Actor    string    `json:"actor"`
+	Category string    `json:"category"`
+	Summary  string    `json:"summary"`
+	Priority bool      `json:"priority"`
+	TS       time.Time `json:"ts"`
+	// Refs are the finding's attachments (path:/commit:/pr:/doc:). state.Fold
+	// already parses these; the dashboard previously dropped them, leaving the
+	// operator unable to jump from a gotcha to the file/commit it is about.
+	Refs        []uiRef `json:"refs,omitempty"`
+	SessionID   string  `json:"session_id,omitempty"`
+	SessionName string  `json:"session_name,omitempty"`
 }
 
 type uiNote struct {
@@ -1053,7 +1073,7 @@ func buildUISnapshot(rt *Runtime, staleAfter time.Duration) uiSnapshot {
 	for _, f := range recentFindings(rt.State, now.Add(-24*time.Hour), 12) {
 		out.Findings = append(out.Findings, uiFinding{
 			ID: f.ID, Actor: f.Actor, Category: f.Category, Summary: f.Summary, Priority: f.Priority, TS: f.TS,
-			SessionID: f.SessionID, SessionName: f.SessionName,
+			Refs: toUIRefs(f.Refs), SessionID: f.SessionID, SessionName: f.SessionName,
 		})
 	}
 	for _, n := range recentNotes(rt.State, now.Add(-24*time.Hour), 8) {
@@ -1282,6 +1302,7 @@ func buildGlobalUISnapshot(staleAfter time.Duration) (uiSnapshot, error) {
 		for _, f := range recentFindings(st, findingCutoff, 12) {
 			ps.Findings = append(ps.Findings, uiFinding{
 				ID: f.ID, Actor: f.Actor, Category: f.Category, Summary: f.Summary,
+				Refs:     toUIRefs(f.Refs),
 				Priority: f.Priority, TS: f.TS, SessionID: f.SessionID, SessionName: f.SessionName,
 			})
 		}
@@ -2315,6 +2336,15 @@ main {
 }
 .intent { margin-top: 5px; overflow-wrap: anywhere; }
 .note-body { overflow-wrap: anywhere; }
+/* Finding refs (path:/commit:/pr:/doc:) as compact monospace tags so the
+   operator can see, at a glance, which file/commit a gotcha is about. */
+.ref-pills { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.ref-pill {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px; color: var(--muted);
+  background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: 6px; padding: 1px 6px; overflow-wrap: anywhere;
+}
 .empty { padding: 16px 14px; color: var(--muted); }
 .hint {
   padding: 12px 16px;
@@ -2893,8 +2923,14 @@ function applySnapshot(data) {
     'No archived comms sessions yet. Use End Comms Session when the project work window is done.');
   renderSessionChoices(view);
   renderClaims(data, view);
-  el('findings').innerHTML = renderRows(view.findings, f =>
-    '<div class="row' + (f.priority ? ' priority-row' : '') + '">' + (f.priority ? '<span class="pill priority">priority</span> ' : '') + '<span class="pill finding">' + esc(f.category) + '</span><div class="intent">' + esc(f.summary) + '</div><div class="meta">@' + esc(f.actor) + ' · ' + fmtTime(f.ts) + '</div></div>',
+  el('findings').innerHTML = renderRows(view.findings, f => {
+    const refs = (f.refs || []).map(r => {
+      const label = r.kind === 'path' ? r.value : (esc(r.kind) + ':' + esc(r.value));
+      return '<span class="ref-pill" title="' + esc(r.kind) + '">' + (r.kind === 'path' ? esc(r.value) : label) + '</span>';
+    }).join('');
+    const refBox = refs ? '<div class="ref-pills">' + refs + '</div>' : '';
+    return '<div class="row' + (f.priority ? ' priority-row' : '') + '">' + (f.priority ? '<span class="pill priority">priority</span> ' : '') + '<span class="pill finding">' + esc(f.category) + '</span><div class="intent">' + esc(f.summary) + '</div>' + refBox + '<div class="meta">@' + esc(f.actor) + ' · ' + fmtTime(f.ts) + '</div></div>';
+  },
     'No findings in the last 24h.');
   el('notes').innerHTML = renderRows(view.notes, n =>
     '<div class="row' + (n.priority ? ' priority-row' : '') + '">' + (n.priority ? '<span class="pill priority">priority</span> ' : '') + '<div class="note-body">' + esc(n.body) + '</div><div class="meta">@' + esc(n.actor) + ' · ' + fmtTime(n.ts) + '</div></div>',

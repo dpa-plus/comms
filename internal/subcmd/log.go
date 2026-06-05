@@ -140,7 +140,42 @@ func eventScopeOverlaps(ev event.Event, want overlap.Scope) bool {
 			return true
 		}
 	}
+	// Findings/notes carry their target file in data.refs (kind=="path"), not in
+	// the top-level scope[] (which is empty for every finding in real logs), so
+	// match those too. Without this, `comms log --scope <file> --type finding` —
+	// the query an agent runs to learn a file's history — returns nothing even
+	// though hundreds of findings reference the file by path ref.
+	for _, p := range pathRefs(ev.Data) {
+		s, err := overlap.Parse(p)
+		if err != nil {
+			continue
+		}
+		if overlap.Scopes(s, want) {
+			return true
+		}
+	}
 	return false
+}
+
+// pathRefs returns the values of every data.refs entry whose kind is "path".
+func pathRefs(data map[string]interface{}) []string {
+	arr, ok := data["refs"].([]interface{})
+	if !ok {
+		return nil
+	}
+	var out []string
+	for _, x := range arr {
+		obj, ok := x.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if k, _ := obj["kind"].(string); k == "path" {
+			if v, _ := obj["value"].(string); v != "" {
+				out = append(out, v)
+			}
+		}
+	}
+	return out
 }
 
 func printEventHuman(ev event.Event) {
