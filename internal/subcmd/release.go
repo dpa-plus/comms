@@ -3,6 +3,7 @@ package subcmd
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/dpa-plus/comms/internal/event"
@@ -94,6 +95,39 @@ func runRelease(args []string, latest, allMine bool, reason, result string) erro
 		}
 	}
 	return nil
+}
+
+// releaseAllClaimsForActor force-releases every active claim held by `actor`
+// in one locked, single-fold pass. It is the engine behind the UI's "release
+// all of an agent's claims" control: when an agent dies holding many locks the
+// operator frees the whole set in one click instead of releasing each claim by
+// hand. Unlike retire it leaves the actor on the roster — it only frees files.
+// Releasing another actor's claims is an arbitrated release, so `reason` is
+// auto-filled when blank and every event records the original holder for audit.
+// Returns the number of claims released. Caller MUST hold the flock.
+func releaseAllClaimsForActor(rt *Runtime, actor, reason, result string) (int, error) {
+	actor = strings.TrimSpace(actor)
+	if actor == "" {
+		return 0, fmt.Errorf("release: actor is required")
+	}
+	targets := rt.State.ActiveClaimsByActor(actor)
+	if len(targets) == 0 {
+		return 0, fmt.Errorf("release: @%s holds no active claims", actor)
+	}
+	reason = strings.TrimSpace(reason)
+	result = strings.TrimSpace(result)
+	// Operator (rt.Actor) releasing someone else's claims is arbitrated and so
+	// requires a reason; supply a sensible default rather than rejecting the call.
+	if actor != rt.Actor && reason == "" {
+		reason = "all claims released from UI by @" + rt.Actor
+	}
+	if result == "" {
+		result = "released from UI"
+	}
+	if err := appendReleaseEvent(rt, targets, reason, result); err != nil {
+		return 0, err
+	}
+	return len(targets), nil
 }
 
 func appendReleaseEvent(rt *Runtime, targets []*state.Claim, reason, result string) error {
