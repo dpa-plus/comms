@@ -1181,6 +1181,68 @@ func TestUIServeTransferLeader(t *testing.T) {
 	}
 }
 
+func TestUISessionFromLikelyDeadConjunction(t *testing.T) {
+	now := time.Now()
+	stale := 90 * time.Minute
+	cases := []struct {
+		name     string
+		lastSeen time.Time
+		claims   int
+		wantDead bool
+	}{
+		{"silent past window but holds nothing -> benign", now.Add(-3 * time.Hour), 0, false},
+		{"silent past window AND holds a lock -> likely dead", now.Add(-3 * time.Hour), 2, true},
+		{"active now holding locks -> alive", now.Add(-1 * time.Minute), 3, false},
+		{"just under the window holding a lock -> not yet flagged", now.Add(-89 * time.Minute), 1, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := &state.Session{Actor: "a", TS: c.lastSeen, LastSeen: c.lastSeen}
+			us := uiSessionFrom(s, now, c.claims, stale)
+			if us.LikelyDead != c.wantDead {
+				t.Fatalf("LikelyDead=%v want %v (silent %v, claims %d)", us.LikelyDead, c.wantDead, now.Sub(c.lastSeen), c.claims)
+			}
+			if us.ClaimCount != c.claims {
+				t.Fatalf("ClaimCount=%d want %d", us.ClaimCount, c.claims)
+			}
+		})
+	}
+}
+
+// A busy agent that hello'd long ago but keeps working (recent claim) is active
+// everywhere via LastSeen; leader-transfer must agree and allow it. The existing
+// reject test masked this because its stale actor had no post-hello events.
+func TestUIServeTransferLeaderAllowsBusyActorWithOldHello(t *testing.T) {
+	repo := setupUITestRepo(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("COMMS_ACTOR", "human-eli")
+	t.Setenv("USER", "eli")
+	t.Chdir(repo)
+
+	rt, err := Open(OpenOpts{Mutating: true})
+	if err != nil {
+		t.Fatalf("open runtime: %v", err)
+	}
+	for _, ev := range []event.Event{
+		{TS: time.Now().Add(-5 * time.Hour).UTC(), ID: "01JX2Q3Y7W5B6N9P0R1S2T3U7A", Actor: "claude-busy", Type: event.TypeHello, Data: map[string]interface{}{"base_name": "claude"}},
+		{TS: time.Now().Add(-2 * time.Minute).UTC(), ID: "01JX2Q3Y7W5B6N9P0R1S2T3U7B", Actor: "claude-busy", Type: event.TypeClaim, Scope: []string{"src/x.ts"}, Data: map[string]interface{}{"intent": "work"}},
+	} {
+		if err := rt.Append(ev); err != nil {
+			t.Fatalf("append setup event: %v", err)
+		}
+	}
+	if err := rt.Close(); err != nil {
+		t.Fatalf("close runtime: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/session/lead", strings.NewReader(`{"actor":"claude-busy","reason":"lead now"}`))
+	rec := httptest.NewRecorder()
+	uiServer{staleAfter: 90 * time.Minute}.serveTransferLeader(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("busy actor (old hello, recent claim) must be allowed to lead; status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestUIServeTransferLeaderRejectsStaleActor(t *testing.T) {
 	repo := setupUITestRepo(t)
 	t.Setenv("HOME", t.TempDir())

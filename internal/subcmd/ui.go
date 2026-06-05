@@ -875,13 +875,17 @@ type uiSession struct {
 	// event of any type); SilentFor is the human age since then; LikelyDead is
 	// true when the actor holds >=1 claim AND has been silent past the stale
 	// window — the crash signal that's worth an operator's attention.
-	LastSeen    time.Time `json:"last_seen"`
-	SilentFor   string    `json:"silent_for"`
-	ClaimCount  int       `json:"claim_count"`
-	LikelyDead  bool      `json:"likely_dead"`
-	Leader      bool      `json:"leader"`
-	SessionID   string    `json:"session_id,omitempty"`
-	SessionName string    `json:"session_name,omitempty"`
+	LastSeen   time.Time `json:"last_seen"`
+	SilentFor  string    `json:"silent_for"`
+	ClaimCount int       `json:"claim_count"`
+	LikelyDead bool      `json:"likely_dead"`
+	// RepoHash is set only in the unified (all-projects) snapshot so the roster's
+	// per-actor Release button routes to THIS row's repo even in the merged view,
+	// where the same actor name can appear under more than one repo.
+	RepoHash    string `json:"repo_hash,omitempty"`
+	Leader      bool   `json:"leader"`
+	SessionID   string `json:"session_id,omitempty"`
+	SessionName string `json:"session_name,omitempty"`
 }
 
 // uiSessionFrom builds a roster entry with derived liveness. A held lock plus
@@ -1023,8 +1027,7 @@ func buildUISnapshot(rt *Runtime, staleAfter time.Duration) uiSnapshot {
 	} else {
 		out.Project.MutationMessage = err.Error()
 	}
-	sessions := collectActiveSessions(rt.State, now.Add(-activeWindow))
-	markLeaderSessions(sessions)
+	sessions := rosterSessions(rt.State, now.Add(-activeWindow))
 	for _, s := range sessions {
 		cClaims, _ := claimAndFindingCounts(rt.State, s.Actor)
 		out.Sessions = append(out.Sessions, uiSessionFrom(s, now, cClaims, staleAfter))
@@ -1249,8 +1252,7 @@ func buildGlobalUISnapshot(staleAfter time.Duration) (uiSnapshot, error) {
 		st := state.Fold(events)
 		active, archived := buildCommsSessionViews(events)
 		active = filterActiveCommsSessionViews(active, st, cutoff)
-		sessions := collectActiveSessions(st, cutoff)
-		markLeaderSessions(sessions)
+		sessions := rosterSessions(st, cutoff)
 
 		// Per-project container: this project's own data with UN-prefixed
 		// ids/names, so the unified UI can scope the whole dashboard to just
@@ -1266,7 +1268,9 @@ func buildGlobalUISnapshot(staleAfter time.Duration) (uiSnapshot, error) {
 		}
 		for _, s := range sessions {
 			cClaims, _ := claimAndFindingCounts(st, s.Actor)
-			ps.Sessions = append(ps.Sessions, uiSessionFrom(s, now, cClaims, staleAfter))
+			us := uiSessionFrom(s, now, cClaims, staleAfter)
+			us.RepoHash = hash // route this row's Release button to its own repo
+			ps.Sessions = append(ps.Sessions, us)
 		}
 		for _, c := range sortedClaims(st) {
 			ps.Claims = append(ps.Claims, uiClaim{
@@ -2854,25 +2858,17 @@ function applySnapshot(data) {
   const rosterRetire = actionByID(data, 'retire_session_actor');
   const rosterReleaseAll = actionByID(data, 'release_actor_claims');
   const rosterRepo = isUnified(data) ? (selectedProjectHash || '') : '';
-  // Per-actor active-claim counts, so each roster row can offer a one-click
-  // "release all N of this agent's claims" when (and only when) it holds some.
-  // Also track each actor's owning repo so the bulk release can route correctly
-  // even from the merged "All projects" view (where no single project is
-  // selected) — as long as that actor's claims all live in one repo.
-  const claimCounts = {};
-  const claimRepos = {};
-  (view.claims || []).forEach(c => {
-    claimCounts[c.actor] = (claimCounts[c.actor] || 0) + 1;
-    const h = c.repo_hash || '';
-    if (!(c.actor in claimRepos)) claimRepos[c.actor] = h;
-    else if (claimRepos[c.actor] !== h) claimRepos[c.actor] = ''; // claims span repos → ambiguous
-  });
   el('sessions').innerHTML = renderRows(view.sessions, s => {
     const title = s.label ? esc(s.label) + ' <span class="meta-inline">@' + esc(s.actor) + '</span>' : '@' + esc(s.actor);
-    const n = claimCounts[s.actor] || 0;
-    const relRepo = rosterRepo || claimRepos[s.actor] || '';
-    const rel = (rosterReleaseAll.enabled && n > 0) ? '<button class="small primary" type="button" data-release-actor="' + esc(s.actor) + '" data-release-repo="' + esc(relRepo) + '" data-release-count="' + n + '" title="Release all ' + n + ' claim(s) held by @' + esc(s.actor) + ' at once — frees the files; keeps them on the team">Release ' + n + '</button>' : '';
-    const rm = rosterRetire.enabled ? '<button class="small danger" type="button" data-retire-actor="' + esc(s.actor) + '" data-retire-repo="' + esc(rosterRepo) + '" title="Remove @' + esc(s.actor) + ' from the team — releases their claims; history is kept">Remove</button>' : '';
+    // Count and routing come from the server PER ROW (claim_count/repo_hash):
+    // correct even in the merged "All projects" view, where the same actor name
+    // can appear under multiple repos (a client-side per-actor sum would
+    // over-count and mis-route). rowRepo is empty in single-repo mode (the
+    // endpoint then uses the local repo) and the row's own repo otherwise.
+    const n = s.claim_count || 0;
+    const rowRepo = rosterRepo || s.repo_hash || '';
+    const rel = (rosterReleaseAll.enabled && n > 0) ? '<button class="small primary" type="button" data-release-actor="' + esc(s.actor) + '" data-release-repo="' + esc(rowRepo) + '" data-release-count="' + n + '" title="Release all ' + n + ' claim(s) held by @' + esc(s.actor) + ' at once — frees the files; keeps them on the team">Release ' + n + '</button>' : '';
+    const rm = rosterRetire.enabled ? '<button class="small danger" type="button" data-retire-actor="' + esc(s.actor) + '" data-retire-repo="' + esc(rowRepo) + '" title="Remove @' + esc(s.actor) + ' from the team — releases their claims; history is kept">Remove</button>' : '';
     const acts = (rel || rm) ? '<div class="roster-act">' + rel + rm + '</div>' : '';
     // Liveness: every event an agent emits is a passive heartbeat (silent_for is
     // the age since its last one). A held lock + silence past the stale window is
