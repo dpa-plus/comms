@@ -148,7 +148,7 @@ func runSessionStart(name, label string) error {
 		return err
 	}
 	defer rt.Close()
-	if id, _ := activeCommsSessionByName(rt.State, name, time.Now().Add(-4*time.Hour)); id != "" {
+	if id, _ := activeCommsSessionByName(rt.State, name, time.Now().Add(-activeWindow)); id != "" {
 		return fmt.Errorf("session start: %q is already active; use `comms session join %q`", name, name)
 	}
 	helloAt := time.Now().UTC().Add(time.Millisecond)
@@ -173,7 +173,7 @@ func runSessionJoin(name, label string) error {
 		return err
 	}
 	defer rt.Close()
-	id, canonicalName := activeCommsSessionByName(rt.State, name, time.Now().Add(-4*time.Hour))
+	id, canonicalName := activeCommsSessionByName(rt.State, name, time.Now().Add(-activeWindow))
 	if id == "" {
 		return fmt.Errorf("session join: no active comms session named %q; create it with `comms session start %q`", name, name)
 	}
@@ -198,7 +198,7 @@ func runSessionEnd(name, reason string) error {
 		return err
 	}
 	defer rt.Close()
-	id, canonicalName := activeCommsSessionByName(rt.State, name, time.Now().Add(-4*time.Hour))
+	id, canonicalName := activeCommsSessionByName(rt.State, name, time.Now().Add(-activeWindow))
 	if id == "" {
 		return fmt.Errorf("session end: no active comms session named %q", name)
 	}
@@ -300,7 +300,7 @@ func appendLeaderTransfer(rt *Runtime, target, reason string) error {
 		target = rt.Actor
 	}
 	session := rt.State.Sessions[target]
-	if session == nil || !session.TS.After(time.Now().Add(-4*time.Hour)) {
+	if session == nil || !session.TS.After(time.Now().Add(-activeWindow)) {
 		return fmt.Errorf("session lead: @%s is not active; run `COMMS_ACTOR=%s comms hello --label \"...\"` first", target, target)
 	}
 	if reason = strings.TrimSpace(reason); reason == "" {
@@ -416,7 +416,7 @@ func appendSessionHello(rt *Runtime, now time.Time, sessionID, sessionName, labe
 	hostname, _ := os.Hostname()
 	tty := readTTY()
 	baseName := baseNameOfActor(rt.Actor)
-	activeLeader := activeLeaderActor(rt.State, now.Add(-4*time.Hour))
+	activeLeader := activeLeaderActor(rt.State, now.Add(-activeWindow))
 	isLeader := activeLeader == "" || activeLeader == rt.Actor
 	data := map[string]interface{}{
 		"base_name":          baseName,

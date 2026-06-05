@@ -32,6 +32,55 @@ func TestFoldEmpty(t *testing.T) {
 	}
 }
 
+func TestFoldSessionLastSeenTracksAnyEventNotJustHello(t *testing.T) {
+	base := time.Date(2026, 6, 5, 9, 0, 0, 0, time.UTC)
+	helloAt := base
+	claimAt := base.Add(30 * time.Minute)
+	findAt := base.Add(70 * time.Minute)
+	evs := []event.Event{
+		mkEvent(t, helloAt, "codex-dev", event.TypeHello, nil, map[string]interface{}{"base_name": "codex"}),
+		mkEvent(t, claimAt, "codex-dev", event.TypeClaim, []string{"src/a.ts"}, map[string]interface{}{"intent": "work"}),
+		mkEvent(t, findAt, "codex-dev", event.TypeFinding, nil, map[string]interface{}{"category": "fix", "summary": "done"}),
+		// A second actor that only ever said hello — LastSeen must equal its hello.
+		mkEvent(t, base.Add(5*time.Minute), "claude-qa", event.TypeHello, nil, map[string]interface{}{"base_name": "claude"}),
+	}
+	s := Fold(evs)
+
+	codex := s.Sessions["codex-dev"]
+	if codex == nil {
+		t.Fatal("codex-dev session missing")
+	}
+	if !codex.TS.Equal(helloAt) {
+		t.Fatalf("TS should stay the hello time %v, got %v", helloAt, codex.TS)
+	}
+	if !codex.LastSeen.Equal(findAt) {
+		t.Fatalf("LastSeen should be the latest event (finding at %v), got %v", findAt, codex.LastSeen)
+	}
+	if codex.LastSeen.Before(codex.TS) {
+		t.Fatal("LastSeen must never precede the hello TS")
+	}
+
+	qa := s.Sessions["claude-qa"]
+	if qa == nil || !qa.LastSeen.Equal(qa.TS) {
+		t.Fatalf("a hello-only actor's LastSeen should equal its hello TS; got LastSeen=%v TS=%v", qa.LastSeen, qa.TS)
+	}
+}
+
+func TestFoldLastSeenSurvivesOutOfOrderEvents(t *testing.T) {
+	base := time.Date(2026, 6, 5, 9, 0, 0, 0, time.UTC)
+	// Feed events out of wall-clock order; Fold sorts by TS, so LastSeen must be
+	// the max TS regardless of append order.
+	evs := []event.Event{
+		mkEvent(t, base.Add(40*time.Minute), "codex-dev", event.TypeNote, nil, map[string]interface{}{"body": "later"}),
+		mkEvent(t, base, "codex-dev", event.TypeHello, nil, map[string]interface{}{"base_name": "codex"}),
+		mkEvent(t, base.Add(10*time.Minute), "codex-dev", event.TypeClaim, []string{"src/b.ts"}, map[string]interface{}{"intent": "x"}),
+	}
+	s := Fold(evs)
+	if got := s.Sessions["codex-dev"].LastSeen; !got.Equal(base.Add(40 * time.Minute)) {
+		t.Fatalf("LastSeen should be the max TS (base+40m), got %v", got)
+	}
+}
+
 func TestFoldHelloDedupesByActor(t *testing.T) {
 	now := time.Now().UTC()
 	events := []event.Event{

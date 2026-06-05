@@ -57,13 +57,19 @@ type Claim struct {
 
 // Session is the most-recent hello per actor.
 type Session struct {
-	Actor       string
-	Label       string
-	TS          time.Time
-	BaseName    string
-	Hostname    string
-	TTY         string
-	Leader      bool
+	Actor    string
+	Label    string
+	TS       time.Time
+	BaseName string
+	Hostname string
+	TTY      string
+	Leader   bool
+	// LastSeen is the timestamp of this actor's most-recent event of ANY type
+	// (hello/claim/release/finding/note), not just its hello. It is the actor's
+	// passive heartbeat: every command it runs proves it is alive, so liveness
+	// can be judged from real activity instead of a one-shot hello. Always >=
+	// TS. Derived in Fold; consumers should fall back to TS if it is zero.
+	LastSeen    time.Time
 	SessionID   string
 	SessionName string
 }
@@ -148,6 +154,10 @@ func Fold(events []event.Event) *State {
 
 	var windowStart time.Time
 	windowActors := map[string]bool{}
+	// lastSeen[actor] = TS of that actor's most-recent event of ANY type. Because
+	// `sorted` is in ascending TS order, the final write per actor is the max —
+	// the actor's passive heartbeat. Assigned onto each Session after the fold.
+	lastSeen := map[string]time.Time{}
 	windowEvents, windowClaims, windowFindings, windowNotes := 0, 0, 0, 0
 	type sessionWindow struct {
 		start    time.Time
@@ -165,6 +175,9 @@ func Fold(events []event.Event) *State {
 		}
 		windowEvents++
 		windowActors[ev.Actor] = true
+		if ev.Actor != "" {
+			lastSeen[ev.Actor] = ev.TS // ascending TS → last write is the max
+		}
 		switch ev.Type {
 		case event.TypeClaim:
 			windowClaims++
@@ -330,6 +343,16 @@ func Fold(events []event.Event) *State {
 				SessionID:   stringOf(ev.Data, "comms_session_id"),
 				SessionName: stringOf(ev.Data, "comms_session_name"),
 			})
+		}
+	}
+	// Stamp each surviving session with its actor's passive heartbeat. lastSeen is
+	// always >= the hello TS (the hello is itself one of that actor's events), so
+	// LastSeen >= TS; guard defensively anyway.
+	for _, sess := range s.Sessions {
+		if ls := lastSeen[sess.Actor]; ls.After(sess.TS) {
+			sess.LastSeen = ls
+		} else {
+			sess.LastSeen = sess.TS
 		}
 	}
 	return s
