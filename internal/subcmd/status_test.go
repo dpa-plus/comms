@@ -7,6 +7,38 @@ import (
 	"github.com/dpa-plus/comms/internal/state"
 )
 
+func TestRosterSessionsKeepsSilentClaimHolder(t *testing.T) {
+	now := time.Now()
+	s := &state.State{
+		Sessions: map[string]*state.Session{
+			"active":     {Actor: "active", TS: now.Add(-10 * time.Minute), LastSeen: now.Add(-10 * time.Minute)},
+			"deadholder": {Actor: "deadholder", TS: now.Add(-6 * time.Hour), LastSeen: now.Add(-6 * time.Hour)},
+			"deadidle":   {Actor: "deadidle", TS: now.Add(-6 * time.Hour), LastSeen: now.Add(-6 * time.Hour)},
+		},
+		Claims: map[string]*state.Claim{
+			"c1": {ID: "c1", Actor: "deadholder", TS: now.Add(-6 * time.Hour)},
+		},
+	}
+	have := map[string]bool{}
+	for _, sess := range rosterSessions(s, now.Add(-activeWindow)) {
+		have[sess.Actor] = true
+	}
+	if !have["active"] {
+		t.Error("an active actor must be on the roster")
+	}
+	if !have["deadholder"] {
+		t.Error("a >4h-silent actor STILL holding a claim must stay on the roster (the dead-holder case)")
+	}
+	if have["deadidle"] {
+		t.Error("a >4h-silent actor holding nothing must drop off the roster")
+	}
+	// The retained silent holder must render as likely-dead.
+	us := uiSessionFrom(s.Sessions["deadholder"], now, len(s.ActiveClaimsByActor("deadholder")), staleClaimAfter)
+	if !us.LikelyDead {
+		t.Error("the retained silent holder must render LikelyDead=true")
+	}
+}
+
 func TestCollectActiveSessionsUsesLastSeenNotHello(t *testing.T) {
 	now := time.Now()
 	s := &state.State{Sessions: map[string]*state.Session{

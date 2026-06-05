@@ -69,6 +69,11 @@ type Session struct {
 	// passive heartbeat: every command it runs proves it is alive, so liveness
 	// can be judged from real activity instead of a one-shot hello. Always >=
 	// TS. Derived in Fold; consumers should fall back to TS if it is zero.
+	//
+	// Scope is actor-global, NOT session-scoped: it is the max TS over all of the
+	// actor's events regardless of which comms session they belong to. This is
+	// deliberate — liveness is "is this agent's process alive?", which is a
+	// property of the actor, not of any one named session.
 	LastSeen    time.Time
 	SessionID   string
 	SessionName string
@@ -306,6 +311,11 @@ func Fold(events []event.Event) *State {
 					namedWindows = map[string]*sessionWindow{}
 					windowStart = time.Time{}
 					windowActors = map[string]bool{}
+					// lastSeen is window-scoped like windowActors: a global session end
+					// closes the window, so clear it too (no live bug today since every
+					// surviving actor must re-hello, but this keeps a future LastSeen read
+					// from resurrecting a pre-wipe timestamp).
+					lastSeen = map[string]time.Time{}
 					windowEvents, windowClaims, windowFindings, windowNotes = 0, 0, 0, 0
 				} else {
 					for id, claim := range s.Claims {

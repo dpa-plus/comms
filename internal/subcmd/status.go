@@ -17,22 +17,26 @@ import (
 // section format under ~500 tokens. `--json` emits canonical JSON.
 func NewStatusCmd() *cobra.Command {
 	var (
-		asJSON bool
-		since  string
+		asJSON     bool
+		since      string
+		staleAfter time.Duration
 	)
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show active sessions, claims, and recent findings/notes",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runStatus(asJSON, since)
+			return runStatus(asJSON, since, staleAfter)
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "machine-readable JSON output")
 	cmd.Flags().StringVar(&since, "since", "24h", "lookback window for findings/notes (e.g. 1h, 24h, 7d-equivalent in hours)")
+	// Same knob as `comms ui --stale-after`, sharing the default, so the CLI and
+	// dashboard flag a claim STALE / an actor "likely dead" at the same threshold.
+	cmd.Flags().DurationVar(&staleAfter, "stale-after", staleClaimAfter, "age past which a held claim is STALE and a silent holder is flagged likely dead")
 	return cmd
 }
 
-func runStatus(asJSON bool, since string) error {
+func runStatus(asJSON bool, since string, staleAfter time.Duration) error {
 	rt, err := Open(OpenOpts{Mutating: false})
 	if err != nil {
 		return err
@@ -43,38 +47,42 @@ func runStatus(asJSON bool, since string) error {
 	if err != nil {
 		Fatalf(2, "status: %v", err)
 	}
+	if staleAfter <= 0 {
+		staleAfter = staleClaimAfter
+	}
 	cutoff := time.Now().Add(-dur)
 
 	if asJSON {
-		return emitStatusJSON(rt, cutoff)
+		return emitStatusJSON(rt, cutoff, staleAfter)
 	}
-	emitStatusHuman(rt, cutoff, since)
+	emitStatusHuman(rt, cutoff, since, staleAfter)
 	return nil
 }
 
-func emitStatusHuman(rt *Runtime, cutoff time.Time, since string) {
+func emitStatusHuman(rt *Runtime, cutoff time.Time, since string, staleAfter time.Duration) {
 	now := time.Now()
-	allSessions := collectActiveSessions(rt.State, now.Add(-activeWindow))
+	allSessions := rosterSessions(rt.State, now.Add(-activeWindow))
 	allClaims := sortedClaims(rt.State)
 	allDocs := listDocs(rt.Paths.Docs)
 	allLessons := listGlobalLessons()
 	sessions, omittedSessions := limitSlice(allSessions, 10)
-	// Claims are sorted oldest-first, so the cap keeps the oldest (most-likely
-	// stale) claims visible. The cap sits above observed real-world peaks
-	// (~38 simultaneous claims) so the conflict-avoidance list an agent reads
-	// before editing never silently hides an active claim.
-	claims, omittedClaims := limitSlice(allClaims, 50)
+	// When capped, keep the NEWEST claims: the freshest active claims are the live
+	// conflict surface an agent checks before editing (the stalest are surfaced
+	// separately by the LIKELY DEAD / STALE flags). The cap sits above observed
+	// real-world peaks (~38 simultaneous), and the conflict-enforcement path
+	// (comms claim/check) plus --json are uncapped, so no agent can edit into a
+	// hidden conflict.
+	claims, omittedClaims := limitSliceTail(allClaims, 50)
 	findings := recentFindings(rt.State, cutoff, 5)
 	notes := recentNotes(rt.State, cutoff, 3)
 	docs, omittedDocs := limitSlice(allDocs, 10)
 	lessons, omittedLessons := limitSlice(allLessons, 8)
 	omitted := omittedSessions + omittedClaims + omittedDocs + omittedLessons
 
-	fmt.Printf("ACTIVE SESSIONS (active in last 4h)\n")
+	fmt.Printf("ACTIVE SESSIONS (active in last %s)\n", shortAge(activeWindow))
 	if len(sessions) == 0 {
 		fmt.Println("  (none)")
 	} else {
-		markLeaderSessions(sessions)
 		for _, s := range sessions {
 			cClaims, cFindings := claimAndFindingCounts(rt.State, s.Actor)
 			role := ""
@@ -99,7 +107,7 @@ func emitStatusHuman(rt *Runtime, cutoff time.Time, since string) {
 				seen = fmt.Sprintf("seen %s ago", shortAge(silent))
 			}
 			deadFlag := ""
-			if cClaims > 0 && silent >= staleClaimAfter {
+			if cClaims > 0 && silent >= staleAfter {
 				deadFlag = fmt.Sprintf("   ** LIKELY DEAD: holds %d, silent %s **", cClaims, shortAge(silent))
 			}
 			fmt.Printf("  @%-14s%s %s   %d claim%s  %d finding%s%s%s%s\n",
@@ -122,7 +130,7 @@ func emitStatusHuman(rt *Runtime, cutoff time.Time, since string) {
 			// agents actually pipe) was blind to it.
 			age := now.Sub(c.TS)
 			staleTag := ""
-			if age >= staleClaimAfter {
+			if age >= staleAfter {
 				staleTag = "  STALE"
 			}
 			fmt.Printf("  @%-14s %s   %q   (since %s · %s)%s%s\n",
@@ -227,11 +235,10 @@ type statusNote struct {
 	SessionName string    `json:"session_name,omitempty"`
 }
 
-func emitStatusJSON(rt *Runtime, cutoff time.Time) error {
+func emitStatusJSON(rt *Runtime, cutoff time.Time, staleAfter time.Duration) error {
 	now := time.Now()
 	out := statusJSONShape{}
-	sessions := collectActiveSessions(rt.State, now.Add(-activeWindow))
-	markLeaderSessions(sessions)
+	sessions := rosterSessions(rt.State, now.Add(-activeWindow))
 	for _, s := range sessions {
 		out.Sessions = append(out.Sessions, statusSession{Actor: s.Actor, Label: s.Label, TS: s.TS, LastSeen: lastSeenOf(s), Leader: s.Leader, SessionID: s.SessionID, SessionName: s.SessionName})
 	}
@@ -239,7 +246,7 @@ func emitStatusJSON(rt *Runtime, cutoff time.Time) error {
 		age := now.Sub(c.TS)
 		out.Claims = append(out.Claims, statusClaim{
 			ID: c.ID, Actor: c.Actor, Scope: c.Scope.String(),
-			Intent: c.Intent, TS: c.TS, Age: shortAge(age), Stale: age >= staleClaimAfter,
+			Intent: c.Intent, TS: c.TS, Age: shortAge(age), Stale: age >= staleAfter,
 			StoleID: c.StolenFromID, SessionID: c.SessionID, SessionName: c.SessionName,
 		})
 	}
@@ -270,9 +277,10 @@ func emitStatusJSON(rt *Runtime, cutoff time.Time) error {
 // live in one place.
 const activeWindow = 4 * time.Hour
 
-// staleClaimAfter is the age past which a held claim — and, when its holder has
-// also gone silent that long, the holder itself — is flagged in the CLI. It
-// mirrors the dashboard's default --stale-after so the CLI and UI agree.
+// staleClaimAfter is the DEFAULT age past which a held claim — and, when its
+// holder has also gone silent that long, the holder itself — is flagged. Both
+// `comms status` and `comms ui` expose it as a --stale-after flag sharing this
+// default, so the CLI and dashboard agree at any threshold, not just the default.
 const staleClaimAfter = 90 * time.Minute
 
 // lastSeenOf returns the actor's passive heartbeat, falling back to the hello TS
@@ -288,6 +296,8 @@ func lastSeenOf(sess *state.Session) time.Time {
 // recently active first. Liveness is judged by LastSeen (any event) rather than
 // the one-shot hello, so a still-working agent that hello'd long ago stays on
 // the roster and a crashed agent drops off once it goes silent past the window.
+// Ties on LastSeen break by actor name so the order is deterministic across runs
+// (Sessions is a map, so its iteration order is randomized).
 func collectActiveSessions(s *state.State, cutoff time.Time) []*state.Session {
 	if s == nil {
 		return nil
@@ -298,8 +308,53 @@ func collectActiveSessions(s *state.State, cutoff time.Time) []*state.Session {
 			out = append(out, sess)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return lastSeenOf(out[i]).After(lastSeenOf(out[j])) })
+	sortSessionsByActivity(out)
 	return out
+}
+
+func sortSessionsByActivity(sessions []*state.Session) {
+	sort.SliceStable(sessions, func(i, j int) bool {
+		li, lj := lastSeenOf(sessions[i]), lastSeenOf(sessions[j])
+		if li.Equal(lj) {
+			return sessions[i].Actor < sessions[j].Actor
+		}
+		return li.After(lj)
+	})
+}
+
+// rosterSessions is the operator-facing roster: every actor active within the
+// window PLUS any actor that has gone silent past the window but STILL holds
+// claims (a crashed-but-holding agent). Without the second set, a crashed holder
+// — and the "likely dead" flag + one-click Release that exist precisely for it —
+// would vanish from the roster the moment its silence crossed the window, exactly
+// when its orphaned locks most need releasing. Active actors come first (with the
+// leader marked among them only), then the silent holders. Leader election and
+// named-session liveness keep using collectActiveSessions (pure recency), so a
+// dead holder never actually becomes leader. Marking leaders here (instead of at
+// each call site) keeps the display consistent with that and lets callers treat
+// the whole list uniformly.
+func rosterSessions(s *state.State, cutoff time.Time) []*state.Session {
+	active := collectActiveSessions(s, cutoff)
+	markLeaderSessions(active)
+	if s == nil {
+		return active
+	}
+	inRoster := make(map[string]bool, len(active))
+	for _, sess := range active {
+		inRoster[sess.Actor] = true
+	}
+	var holders []*state.Session
+	for _, sess := range s.Sessions {
+		if inRoster[sess.Actor] {
+			continue
+		}
+		if len(s.ActiveClaimsByActor(sess.Actor)) > 0 {
+			sess.Leader = false // a crashed holder is never shown as leader
+			holders = append(holders, sess)
+		}
+	}
+	sortSessionsByActivity(holders)
+	return append(active, holders...)
 }
 
 func activeLeaderActor(s *state.State, cutoff time.Time) string {
@@ -479,6 +534,15 @@ func limitSlice[T any](in []T, max int) ([]T, int) {
 		return in, 0
 	}
 	return in[:max], len(in) - max
+}
+
+// limitSliceTail keeps the LAST max elements (for a chronologically-sorted slice,
+// the newest), reporting how many earlier ones were dropped.
+func limitSliceTail[T any](in []T, max int) ([]T, int) {
+	if len(in) <= max {
+		return in, 0
+	}
+	return in[len(in)-max:], len(in) - max
 }
 
 func listGlobalLessons() []string {
