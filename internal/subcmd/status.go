@@ -277,11 +277,12 @@ func emitStatusJSON(rt *Runtime, cutoff time.Time, staleAfter time.Duration) err
 // live in one place.
 const activeWindow = 4 * time.Hour
 
-// staleClaimAfter is the DEFAULT age past which a held claim — and, when its
-// holder has also gone silent that long, the holder itself — is flagged. Both
-// `comms status` and `comms ui` expose it as a --stale-after flag sharing this
-// default, so the CLI and dashboard agree at any threshold, not just the default.
-const staleClaimAfter = 90 * time.Minute
+// staleClaimAfter is the age at which a held claim is considered stale: it is
+// flagged STALE, its silent holder is flagged "likely dead", AND — once stale —
+// the claim may be stolen without confirmation (a stale claim's holder is
+// presumed gone). `comms status` and `comms ui` expose it as a --stale-after
+// flag sharing this default; steal eligibility uses the constant directly.
+const staleClaimAfter = 1 * time.Hour
 
 // lastSeenOf returns the actor's passive heartbeat, falling back to the hello TS
 // for any Session built without going through Fold (e.g. demo fixtures).

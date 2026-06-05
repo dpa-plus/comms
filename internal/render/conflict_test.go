@@ -10,6 +10,50 @@ import (
 	"github.com/dpa-plus/comms/internal/state"
 )
 
+func mkWholeScope(raw string) overlap.Scope {
+	return overlap.Scope{Raw: raw, Path: raw, Anchor: overlap.Anchor{Kind: overlap.AnchorWhole}}
+}
+
+// A stale blocking claim (idle past StaleAfter) is offered as a direct,
+// no-confirmation steal; a fresh one routes to user confirmation.
+func TestWriteConflictStaleClaimOffersDirectSteal(t *testing.T) {
+	var buf bytes.Buffer
+	WriteConflict(&buf, Conflict{
+		AttemptedScope:  "src/auth.ts",
+		AttemptedActor:  "claude-night",
+		AttemptedIntent: "my work",
+		StaleAfter:      time.Hour,
+		Holders: []*state.Claim{
+			{ID: "01ABCDEF", TS: time.Now().Add(-2 * time.Hour), Actor: "codex-dead", Scope: mkWholeScope("src/auth.ts"), Intent: "old"},
+		},
+	})
+	out := buf.String()
+	if !strings.Contains(out, "STALE") || !strings.Contains(out, "no --reason needed") {
+		t.Fatalf("a stale conflict must offer a direct steal; got:\n%s", out)
+	}
+	if !strings.Contains(out, "--steal 01ABCD") {
+		t.Fatalf("must suggest stealing the stale claim id; got:\n%s", out)
+	}
+}
+
+func TestWriteConflictFreshClaimRequiresConfirmation(t *testing.T) {
+	var buf bytes.Buffer
+	WriteConflict(&buf, Conflict{
+		AttemptedScope: "src/auth.ts",
+		StaleAfter:     time.Hour,
+		Holders: []*state.Claim{
+			{ID: "01ABCDEF", TS: time.Now().Add(-10 * time.Minute), Actor: "codex-live", Scope: mkWholeScope("src/auth.ts")},
+		},
+	})
+	out := buf.String()
+	if strings.Contains(out, "no --reason needed") {
+		t.Fatalf("a fresh (non-stale) claim must NOT offer a direct steal; got:\n%s", out)
+	}
+	if !strings.Contains(out, "Ask whether") {
+		t.Fatalf("a fresh claim should route to user confirmation; got:\n%s", out)
+	}
+}
+
 // TestWriteConflictSanitizesControlBytes verifies that attacker-controlled
 // fields read back from the append-only log (actor names, scopes, intents)
 // cannot inject raw terminal-escape sequences into conflict output.

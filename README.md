@@ -98,6 +98,7 @@ Here's the key idea: **the agents never talk to each other directly.** There's n
 - **Agent A writes to the board.** `comms claim "aggregate.ts"` appends a *claim* event to the log.
 - **Agent B reads the board.** `comms status` replays the log and sees A's claim — so B knows to work elsewhere.
 - **Conflicts are caught by reading, not messaging.** If B tries to claim a file that overlaps A's claim, comms sees the overlap in the log and tells B to back off.
+- **Stale claims can be taken over.** A claim goes **stale after 1 hour idle** — its holder is presumed gone. The `BLOCKED` message says so, and B can steal a stale claim directly (`comms claim … --steal <id>`, no `--reason`). A still-active claim (held < 1h) requires the user's confirmation and a `--reason` to steal.
 
 The log is the single source of truth. It's **append-only**, so history is never rewritten — you can always see exactly who did what and when. This "shared ledger" model is what makes coordination reliable without any of the agents needing to know the others exist. They only need to know about **the log**.
 
@@ -169,7 +170,7 @@ comms hello [<name>] [--label "Claude Dev"]   # session entry + friendly UI labe
 comms session start "<name>" [--label "..."]  # create + join a named comms session
 comms session join "<name>" [--label "..."]   # join an existing named comms session
 comms session end "<name>" [--reason "..."]   # archive one named session + release its claims
-comms claim "<scope>" ["<scope>" ...] --intent "<text>" [--steal <id> --reason "..."]  # one or many files
+comms claim "<scope>" ["<scope>" ...] --intent "<text>" [--steal <id> [--reason "..."]]  # steal a stale (>1h) claim freely; --reason needed for an active one
 comms release [<id>|--latest|--all-mine] [--result "<text>"]
 comms session retire <actor> [--reason "..."] # remove actor from active roster; releases its claims
 comms session lead [<actor>] [--reason "..."] # make exactly one active actor the leader

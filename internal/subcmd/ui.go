@@ -31,7 +31,7 @@ func NewUICmd() *cobra.Command {
 	all := false
 	forceOpen := false
 	noOpen := false
-	staleAfter := 90 * time.Minute
+	staleAfter := staleClaimAfter // shared default with `comms status` (one staleness threshold)
 	cmd := &cobra.Command{
 		Use:   "ui",
 		Short: "Serve a local dashboard",

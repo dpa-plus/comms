@@ -30,6 +30,11 @@ type Conflict struct {
 
 	// Holders is the list of conflicting active claims (ordered oldest-first).
 	Holders []*state.Claim
+
+	// StaleAfter is the age at which a held claim is considered stale and may be
+	// stolen without confirmation. When > 0 and the blocking claim is older than
+	// this, WriteConflict tells the caller it can steal it directly.
+	StaleAfter time.Duration
 }
 
 // Conflict writes the structured conflict report to w.
@@ -63,8 +68,23 @@ func WriteConflict(w io.Writer, c Conflict) {
 		}
 	}
 
+	// A stale blocking claim (holder presumed gone) can be stolen directly — no
+	// user confirmation needed. This is the common "took over a dead agent's
+	// file" path, so lead with it when it applies.
+	if c.StaleAfter > 0 && since >= c.StaleAfter {
+		fmt.Fprintf(w, "\n@%s's claim is STALE (idle %s, stale after %s) — its holder is presumed gone.\n", primaryActor, formatDuration(since), formatDuration(c.StaleAfter))
+		fmt.Fprintf(w, "You may steal a stale claim directly (no --reason needed):\n")
+		fmt.Fprintf(w, "  comms claim %q --intent %q --steal %s\n",
+			EscapeScope(c.AttemptedScope), EscapeScope(intentOr(c.AttemptedIntent, "<your-intent>")), EscapeScope(shortID(primary.ID)))
+		return
+	}
+
+	staleNote := ""
+	if c.StaleAfter > 0 {
+		staleNote = fmt.Sprintf(" (or once it is stale, after %s idle)", formatDuration(c.StaleAfter))
+	}
 	fmt.Fprintf(w, "\nSurface this to the user. Ask whether @%s's session is still active.\n", primaryActor)
-	fmt.Fprintf(w, "\nIf user confirms the prior session ended:\n")
+	fmt.Fprintf(w, "\nIf user confirms the prior session ended%s:\n", staleNote)
 	fmt.Fprintf(w, "  comms claim %q --intent %q --steal %s --reason \"user verified prior session ended\"\n",
 		EscapeScope(c.AttemptedScope), EscapeScope(intentOr(c.AttemptedIntent, "<your-intent>")), EscapeScope(shortID(primary.ID)))
 	fmt.Fprintf(w, "\nIf session is still active:\n")

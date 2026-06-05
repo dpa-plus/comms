@@ -108,6 +108,7 @@ func runCheck(args []string, stdinJSON bool) error {
 		AttemptedActor:  rt.Actor,
 		AttemptedIntent: "", // check has no --intent
 		Holders:         conflicts,
+		StaleAfter:      staleClaimAfter,
 	})
 	os.Exit(1)
 	return nil

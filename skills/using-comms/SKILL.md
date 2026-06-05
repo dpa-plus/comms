@@ -241,16 +241,26 @@ COMMS_ACTOR=claude-dev comms lesson verify-data-before-ui --edit
 
 ## Conflict Handling
 
-If `comms claim` exits 1, stop and surface the conflict to the user.
-Do not run `--steal` unless the user confirms the prior session is dead.
+If `comms claim` exits 1, it is blocked by another actor's active claim. The
+`BLOCKED` output tells you whether that claim is **STALE** and what to do.
 
-If the user confirms takeover:
+**A claim goes stale after 1 hour of being idle** — its holder is presumed gone
+(crashed, out of quota, or moved on). You may steal a stale claim **directly**,
+with no user confirmation and no `--reason` (the staleness is the justification):
+
+```bash
+COMMS_ACTOR=claude-dev comms claim "src/foo.ts" --intent "<your intent>" --steal <claim-id>
+```
+
+If the blocking claim is **not yet stale** (held < 1h), the holder may still be
+working — do **not** steal it. Surface the conflict to the user; only steal with
+their confirmation, which still requires a `--reason`:
 
 ```bash
 COMMS_ACTOR=claude-dev comms claim "src/foo.ts" --intent "<your intent>" --steal <claim-id> --reason "user verified prior session ended"
 ```
 
-If the session is still active, choose another scope or leave a note:
+Otherwise choose a different scope, or leave a note:
 
 ```bash
 COMMS_ACTOR=claude-dev comms note "@claude-3a1f can I take src/foo.ts when you're done?"

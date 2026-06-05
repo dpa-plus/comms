@@ -75,15 +75,25 @@ func runClaim(scopeRaw, intent, stealID, stealReason string) error {
 		Fatalf(1, "claim: anchor required for risky file %q (policy: .comms/policy.txt). Add #L<n>-<m> or #<symbol>.", scope.Path)
 	}
 
-	// Steal validation: --reason required, --steal must resolve to an active claim.
+	// Steal validation: --steal must resolve to an active claim. A STALE claim
+	// (idle >= staleClaimAfter, i.e. its holder is presumed gone) can be stolen
+	// freely; --reason is then optional and auto-filled. Stealing a still-active
+	// claim out from under a live teammate still requires an explicit --reason.
 	var displaceID string
 	if stealID != "" {
-		if stealReason == "" {
-			Fatalf(2, "claim: --steal requires --reason")
-		}
 		target := rt.State.ClaimByID(stealID)
 		if target == nil {
 			Fatalf(2, "claim: --steal %q does not match any active claim", stealID)
+		}
+		idle := time.Since(target.TS)
+		stale := idle >= staleClaimAfter
+		if stealReason == "" {
+			if stale {
+				stealReason = fmt.Sprintf("prior claim stale: @%s idle %s (stale after %s)", target.Actor, shortAge(idle), shortAge(staleClaimAfter))
+			} else {
+				Fatalf(1, "claim: @%s's claim is still active (held %s; stale after %s) — stealing it requires --reason. A stale claim (idle >= %s) can be stolen without one.",
+					target.Actor, shortAge(idle), shortAge(staleClaimAfter), shortAge(staleClaimAfter))
+			}
 		}
 		displaceID = target.ID
 	}
@@ -99,6 +109,7 @@ func runClaim(scopeRaw, intent, stealID, stealReason string) error {
 			AttemptedActor:  rt.Actor,
 			AttemptedIntent: intent,
 			Holders:         conflicts,
+			StaleAfter:      staleClaimAfter,
 		})
 		os.Exit(1)
 	}
@@ -179,6 +190,7 @@ func runClaimBatch(scopeRaws []string, intent string) error {
 			AttemptedActor:  rt.Actor,
 			AttemptedIntent: intent,
 			Holders:         dedupeClaimsByID(blocked),
+			StaleAfter:      staleClaimAfter,
 		})
 		os.Exit(1)
 	}
