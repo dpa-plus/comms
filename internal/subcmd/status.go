@@ -53,19 +53,24 @@ func runStatus(asJSON bool, since string) error {
 }
 
 func emitStatusHuman(rt *Runtime, cutoff time.Time, since string) {
-	allSessions := collectActiveSessions(rt.State, time.Now().Add(-4*time.Hour))
+	now := time.Now()
+	allSessions := collectActiveSessions(rt.State, now.Add(-activeWindow))
 	allClaims := sortedClaims(rt.State)
 	allDocs := listDocs(rt.Paths.Docs)
 	allLessons := listGlobalLessons()
 	sessions, omittedSessions := limitSlice(allSessions, 10)
-	claims, omittedClaims := limitSlice(allClaims, 15)
+	// Claims are sorted oldest-first, so the cap keeps the oldest (most-likely
+	// stale) claims visible. The cap sits above observed real-world peaks
+	// (~38 simultaneous claims) so the conflict-avoidance list an agent reads
+	// before editing never silently hides an active claim.
+	claims, omittedClaims := limitSlice(allClaims, 50)
 	findings := recentFindings(rt.State, cutoff, 5)
 	notes := recentNotes(rt.State, cutoff, 3)
 	docs, omittedDocs := limitSlice(allDocs, 10)
 	lessons, omittedLessons := limitSlice(allLessons, 8)
 	omitted := omittedSessions + omittedClaims + omittedDocs + omittedLessons
 
-	fmt.Printf("ACTIVE SESSIONS (hello'd in last 4h)\n")
+	fmt.Printf("ACTIVE SESSIONS (active in last 4h)\n")
 	if len(sessions) == 0 {
 		fmt.Println("  (none)")
 	} else {
@@ -84,8 +89,21 @@ func emitStatusHuman(rt *Runtime, cutoff time.Time, since string) {
 			if s.SessionName != "" {
 				sessionLabel = fmt.Sprintf("  session=%q", s.SessionName)
 			}
-			fmt.Printf("  @%-14s%s hello'd %s   %d claim%s  %d finding%s%s%s\n",
-				s.Actor, label, s.TS.Local().Format("15:04"), cClaims, pluralS(cClaims), cFindings, pluralS(cFindings), role, sessionLabel)
+			// An actor holding locks while silent past the stale threshold is the
+			// crash signal worth surfacing — staleness alone (idle holder, no locks)
+			// is benign. The fix is the already-built `release --all-mine` (or the
+			// dashboard's release-all).
+			silent := now.Sub(lastSeenOf(s))
+			seen := "active now"
+			if silent >= time.Minute {
+				seen = fmt.Sprintf("seen %s ago", shortAge(silent))
+			}
+			deadFlag := ""
+			if cClaims > 0 && silent >= staleClaimAfter {
+				deadFlag = fmt.Sprintf("   ** LIKELY DEAD: holds %d, silent %s **", cClaims, shortAge(silent))
+			}
+			fmt.Printf("  @%-14s%s %s   %d claim%s  %d finding%s%s%s%s\n",
+				s.Actor, label, seen, cClaims, pluralS(cClaims), cFindings, pluralS(cFindings), role, sessionLabel, deadFlag)
 		}
 	}
 
@@ -99,8 +117,16 @@ func emitStatusHuman(rt *Runtime, cutoff time.Time, since string) {
 			if c.SessionName != "" {
 				sessionLabel = fmt.Sprintf("   session=%q", c.SessionName)
 			}
-			fmt.Printf("  @%-14s %s   %q   (since %s)%s\n",
-				c.Actor, c.Scope.String(), c.Intent, c.TS.Local().Format("15:04"), sessionLabel)
+			// Age + STALE tag so a lock opened 14h ago doesn't read the same as one
+			// opened 2m ago — the web dashboard already shows this; the CLI (what
+			// agents actually pipe) was blind to it.
+			age := now.Sub(c.TS)
+			staleTag := ""
+			if age >= staleClaimAfter {
+				staleTag = "  STALE"
+			}
+			fmt.Printf("  @%-14s %s   %q   (since %s · %s)%s%s\n",
+				c.Actor, c.Scope.String(), c.Intent, c.TS.Local().Format("15:04"), shortAge(age), staleTag, sessionLabel)
 		}
 	}
 
@@ -156,23 +182,28 @@ type statusJSONShape struct {
 }
 
 type statusSession struct {
-	Actor       string    `json:"actor"`
-	Label       string    `json:"label,omitempty"`
-	TS          time.Time `json:"ts"`
+	Actor string    `json:"actor"`
+	Label string    `json:"label,omitempty"`
+	TS    time.Time `json:"ts"`
+	// LastSeen is the actor's passive heartbeat (most-recent event of any type).
+	LastSeen    time.Time `json:"last_seen"`
 	Leader      bool      `json:"leader"`
 	SessionID   string    `json:"session_id,omitempty"`
 	SessionName string    `json:"session_name,omitempty"`
 }
 
 type statusClaim struct {
-	ID          string    `json:"id"`
-	Actor       string    `json:"actor"`
-	Scope       string    `json:"scope"`
-	Intent      string    `json:"intent"`
-	TS          time.Time `json:"ts"`
-	StoleID     string    `json:"stole_id,omitempty"`
-	SessionID   string    `json:"session_id,omitempty"`
-	SessionName string    `json:"session_name,omitempty"`
+	ID     string    `json:"id"`
+	Actor  string    `json:"actor"`
+	Scope  string    `json:"scope"`
+	Intent string    `json:"intent"`
+	TS     time.Time `json:"ts"`
+	// Age is a human-readable hold duration; Stale is true past the stale window.
+	Age         string `json:"age"`
+	Stale       bool   `json:"stale"`
+	StoleID     string `json:"stole_id,omitempty"`
+	SessionID   string `json:"session_id,omitempty"`
+	SessionName string `json:"session_name,omitempty"`
 }
 
 type statusFinding struct {
@@ -197,16 +228,19 @@ type statusNote struct {
 }
 
 func emitStatusJSON(rt *Runtime, cutoff time.Time) error {
+	now := time.Now()
 	out := statusJSONShape{}
-	sessions := collectActiveSessions(rt.State, time.Now().Add(-4*time.Hour))
+	sessions := collectActiveSessions(rt.State, now.Add(-activeWindow))
 	markLeaderSessions(sessions)
 	for _, s := range sessions {
-		out.Sessions = append(out.Sessions, statusSession{Actor: s.Actor, Label: s.Label, TS: s.TS, Leader: s.Leader, SessionID: s.SessionID, SessionName: s.SessionName})
+		out.Sessions = append(out.Sessions, statusSession{Actor: s.Actor, Label: s.Label, TS: s.TS, LastSeen: lastSeenOf(s), Leader: s.Leader, SessionID: s.SessionID, SessionName: s.SessionName})
 	}
 	for _, c := range sortedClaims(rt.State) {
+		age := now.Sub(c.TS)
 		out.Claims = append(out.Claims, statusClaim{
 			ID: c.ID, Actor: c.Actor, Scope: c.Scope.String(),
-			Intent: c.Intent, TS: c.TS, StoleID: c.StolenFromID, SessionID: c.SessionID, SessionName: c.SessionName,
+			Intent: c.Intent, TS: c.TS, Age: shortAge(age), Stale: age >= staleClaimAfter,
+			StoleID: c.StolenFromID, SessionID: c.SessionID, SessionName: c.SessionName,
 		})
 	}
 	for _, f := range recentFindings(rt.State, cutoff, 50) {
@@ -230,17 +264,41 @@ func emitStatusJSON(rt *Runtime, cutoff time.Time) error {
 
 // ---- helpers used by both human and JSON renderers ----
 
+// activeWindow is the single coordination-recency window: an actor (or named
+// session) counts as "active" if it has been seen within this span. Lifted from
+// a 4h literal that was duplicated across ~15 sites so the liveness semantics
+// live in one place.
+const activeWindow = 4 * time.Hour
+
+// staleClaimAfter is the age past which a held claim — and, when its holder has
+// also gone silent that long, the holder itself — is flagged in the CLI. It
+// mirrors the dashboard's default --stale-after so the CLI and UI agree.
+const staleClaimAfter = 90 * time.Minute
+
+// lastSeenOf returns the actor's passive heartbeat, falling back to the hello TS
+// for any Session built without going through Fold (e.g. demo fixtures).
+func lastSeenOf(sess *state.Session) time.Time {
+	if sess.LastSeen.IsZero() {
+		return sess.TS
+	}
+	return sess.LastSeen
+}
+
+// collectActiveSessions returns the roster of actors seen since cutoff, most
+// recently active first. Liveness is judged by LastSeen (any event) rather than
+// the one-shot hello, so a still-working agent that hello'd long ago stays on
+// the roster and a crashed agent drops off once it goes silent past the window.
 func collectActiveSessions(s *state.State, cutoff time.Time) []*state.Session {
 	if s == nil {
 		return nil
 	}
 	var out []*state.Session
 	for _, sess := range s.Sessions {
-		if sess.TS.After(cutoff) {
+		if lastSeenOf(sess).After(cutoff) {
 			out = append(out, sess)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].TS.After(out[j].TS) })
+	sort.Slice(out, func(i, j int) bool { return lastSeenOf(out[i]).After(lastSeenOf(out[j])) })
 	return out
 }
 
@@ -282,7 +340,7 @@ func markLeaderSessions(sessions []*state.Session) {
 }
 
 func requireLeader(rt *Runtime) {
-	leader := activeLeaderActor(rt.State, time.Now().Add(-4*time.Hour))
+	leader := activeLeaderActor(rt.State, time.Now().Add(-activeWindow))
 	if leader == "" {
 		Fatalf(1, "priority messages require an active leader; run `comms hello` first")
 	}

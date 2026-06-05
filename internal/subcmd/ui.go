@@ -616,7 +616,7 @@ func (s uiServer) serveStartCommsSession(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "comms session name is required", http.StatusBadRequest)
 		return
 	}
-	if id, _ := activeCommsSessionByName(rt.State, name, time.Now().Add(-4*time.Hour)); id != "" {
+	if id, _ := activeCommsSessionByName(rt.State, name, time.Now().Add(-activeWindow)); id != "" {
 		http.Error(w, "a comms session named "+name+" is already active", http.StatusConflict)
 		return
 	}
@@ -724,7 +724,7 @@ func endCommsSessionOnRuntime(rt *Runtime, reqName, reqSessionID, reqReason stri
 		sessionName = ""
 	}
 	if sessionID == "" && sessionName != "" {
-		sessionID, sessionName = activeCommsSessionByName(rt.State, sessionName, time.Now().Add(-4*time.Hour))
+		sessionID, sessionName = activeCommsSessionByName(rt.State, sessionName, time.Now().Add(-activeWindow))
 		if sessionID == "" {
 			return http.StatusConflict, fmt.Errorf("no active comms session named %s", strings.TrimSpace(reqName))
 		}
@@ -735,7 +735,7 @@ func endCommsSessionOnRuntime(rt *Runtime, reqName, reqSessionID, reqReason stri
 			sessionName = sess.SessionName
 		}
 	}
-	sessionCutoff := time.Now().Add(-4 * time.Hour)
+	sessionCutoff := time.Now().Add(-activeWindow)
 	var refs []interface{}
 	var endedActors []interface{}
 	if sessionID == "" {
@@ -866,14 +866,35 @@ type uiAction struct {
 }
 
 type uiSession struct {
-	Actor       string    `json:"actor"`
-	Label       string    `json:"label,omitempty"`
-	BaseName    string    `json:"base_name"`
-	Hostname    string    `json:"hostname"`
-	TS          time.Time `json:"ts"`
+	Actor    string    `json:"actor"`
+	Label    string    `json:"label,omitempty"`
+	BaseName string    `json:"base_name"`
+	Hostname string    `json:"hostname"`
+	TS       time.Time `json:"ts"`
+	// Liveness (derived): LastSeen is the actor's passive heartbeat (most-recent
+	// event of any type); SilentFor is the human age since then; LikelyDead is
+	// true when the actor holds >=1 claim AND has been silent past the stale
+	// window — the crash signal that's worth an operator's attention.
+	LastSeen    time.Time `json:"last_seen"`
+	SilentFor   string    `json:"silent_for"`
+	ClaimCount  int       `json:"claim_count"`
+	LikelyDead  bool      `json:"likely_dead"`
 	Leader      bool      `json:"leader"`
 	SessionID   string    `json:"session_id,omitempty"`
 	SessionName string    `json:"session_name,omitempty"`
+}
+
+// uiSessionFrom builds a roster entry with derived liveness. A held lock plus
+// silence past the stale window is the discriminating crash signal; staleness
+// alone (an idle actor holding nothing) is benign and is NOT flagged.
+func uiSessionFrom(s *state.Session, now time.Time, claimCount int, staleAfter time.Duration) uiSession {
+	silent := now.Sub(lastSeenOf(s))
+	return uiSession{
+		Actor: s.Actor, Label: s.Label, BaseName: s.BaseName, Hostname: s.Hostname,
+		TS: s.TS, Leader: s.Leader, SessionID: s.SessionID, SessionName: s.SessionName,
+		LastSeen: lastSeenOf(s), SilentFor: shortAge(silent), ClaimCount: claimCount,
+		LikelyDead: claimCount > 0 && silent >= staleAfter,
+	}
 }
 
 type uiCommsSession struct {
@@ -1002,16 +1023,14 @@ func buildUISnapshot(rt *Runtime, staleAfter time.Duration) uiSnapshot {
 	} else {
 		out.Project.MutationMessage = err.Error()
 	}
-	sessions := collectActiveSessions(rt.State, now.Add(-4*time.Hour))
+	sessions := collectActiveSessions(rt.State, now.Add(-activeWindow))
 	markLeaderSessions(sessions)
 	for _, s := range sessions {
-		out.Sessions = append(out.Sessions, uiSession{
-			Actor: s.Actor, Label: s.Label, BaseName: s.BaseName, Hostname: s.Hostname, TS: s.TS, Leader: s.Leader,
-			SessionID: s.SessionID, SessionName: s.SessionName,
-		})
+		cClaims, _ := claimAndFindingCounts(rt.State, s.Actor)
+		out.Sessions = append(out.Sessions, uiSessionFrom(s, now, cClaims, staleAfter))
 	}
 	out.Active, out.CommsSessions = buildCommsSessionViews(rt.Events)
-	out.Active = filterActiveCommsSessionViews(out.Active, rt.State, now.Add(-4*time.Hour))
+	out.Active = filterActiveCommsSessionViews(out.Active, rt.State, now.Add(-activeWindow))
 	if len(out.Active) > 0 {
 		out.Current = &out.Active[0]
 	}
@@ -1219,7 +1238,7 @@ func buildGlobalUISnapshot(staleAfter time.Duration) (uiSnapshot, error) {
 			candidates[key] = candidate
 		}
 	}
-	cutoff := now.Add(-4 * time.Hour)
+	cutoff := now.Add(-activeWindow)
 	findingCutoff := now.Add(-24 * time.Hour)
 	for _, key := range candidateKeys {
 		candidate := candidates[key]
@@ -1246,10 +1265,8 @@ func buildGlobalUISnapshot(staleAfter time.Duration) (uiSnapshot, error) {
 			CommsSessions: append([]uiCommsSession(nil), archived...),
 		}
 		for _, s := range sessions {
-			ps.Sessions = append(ps.Sessions, uiSession{
-				Actor: s.Actor, Label: s.Label, BaseName: s.BaseName, Hostname: s.Hostname,
-				TS: s.TS, Leader: s.Leader, SessionID: s.SessionID, SessionName: s.SessionName,
-			})
+			cClaims, _ := claimAndFindingCounts(st, s.Actor)
+			ps.Sessions = append(ps.Sessions, uiSessionFrom(s, now, cClaims, staleAfter))
 		}
 		for _, c := range sortedClaims(st) {
 			ps.Claims = append(ps.Claims, uiClaim{
@@ -2378,6 +2395,10 @@ th {
 .pill.stale { color: var(--red); background: var(--red-soft); }
 .pill.priority { color: #7c2d12; background: #ffedd5; }
 .pill.leader { color: var(--teal); background: #def7f2; margin-left: 6px; }
+.pill.dead { color: var(--red); background: var(--red-soft); margin-left: 6px; font-weight: 650; }
+/* A likely-crashed holder gets a quiet red left-edge so the operator's eye lands
+   on the row whose Release button frees stuck files. */
+.session-row.dead-row { box-shadow: inset 3px 0 0 var(--red); }
 :root[data-theme="dark"] .pill.claim { color: #7ddbd3; background: #123d3a; }
 :root[data-theme="dark"] .pill.hello { color: #7ddbd3; background: #123d3a; }
 :root[data-theme="dark"] .pill.release { color: #ffd39b; background: #4b310f; }
@@ -2853,7 +2874,13 @@ function applySnapshot(data) {
     const rel = (rosterReleaseAll.enabled && n > 0) ? '<button class="small primary" type="button" data-release-actor="' + esc(s.actor) + '" data-release-repo="' + esc(relRepo) + '" data-release-count="' + n + '" title="Release all ' + n + ' claim(s) held by @' + esc(s.actor) + ' at once — frees the files; keeps them on the team">Release ' + n + '</button>' : '';
     const rm = rosterRetire.enabled ? '<button class="small danger" type="button" data-retire-actor="' + esc(s.actor) + '" data-retire-repo="' + esc(rosterRepo) + '" title="Remove @' + esc(s.actor) + ' from the team — releases their claims; history is kept">Remove</button>' : '';
     const acts = (rel || rm) ? '<div class="roster-act">' + rel + rm + '</div>' : '';
-    return '<div class="row session-row"><div><div class="actor">' + title + (s.leader ? ' <span class="pill leader">leader</span>' : '') + '</div><div class="meta">' + esc(s.base_name || 'session') + ' · ' + esc(s.hostname || 'unknown host') + ' · hello ' + fmtTime(s.ts) + '</div>' + (s.session_name ? '<div class="meta">in session: ' + esc(s.session_name) + '</div>' : '') + '</div>' + acts + '</div>';
+    // Liveness: every event an agent emits is a passive heartbeat (silent_for is
+    // the age since its last one). A held lock + silence past the stale window is
+    // the crash signal worth flagging, so the operator knows WHO to Release.
+    const silent = s.silent_for || '';
+    const activity = (!silent || silent === 'now') ? 'active' : ('silent ' + esc(silent));
+    const dead = s.likely_dead ? ' <span class="pill dead" title="Holds ' + n + ' claim(s) and silent ' + esc(silent) + ' — looks crashed. Release frees its files for the rest of the team.">likely dead</span>' : '';
+    return '<div class="row session-row' + (s.likely_dead ? ' dead-row' : '') + '"><div><div class="actor">' + title + (s.leader ? ' <span class="pill leader">leader</span>' : '') + dead + '</div><div class="meta">' + esc(s.base_name || 'session') + ' · ' + esc(s.hostname || 'unknown host') + ' · ' + activity + '</div>' + (s.session_name ? '<div class="meta">in session: ' + esc(s.session_name) + '</div>' : '') + '</div>' + acts + '</div>';
   },
     'No active sessions in the last 4h.');
   el('sessions').querySelectorAll('[data-release-actor]').forEach(b => {

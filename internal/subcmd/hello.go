@@ -53,7 +53,7 @@ func runHello(args []string, label string) error {
 	tty := readTTY()
 	baseName := baseNameOfActor(rt.Actor)
 	now := time.Now().UTC()
-	activeLeader := activeLeaderActor(rt.State, now.Add(-4*time.Hour))
+	activeLeader := activeLeaderActor(rt.State, now.Add(-activeWindow))
 	isLeader := activeLeader == "" || activeLeader == rt.Actor
 
 	ev := event.Event{
