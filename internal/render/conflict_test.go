@@ -36,6 +36,23 @@ func TestWriteConflictStaleClaimOffersDirectSteal(t *testing.T) {
 	}
 }
 
+// Just-under-the-threshold must NOT advertise a no-reason steal: the decision
+// uses the exact age, not the minute-rounded display value (which would round
+// 59m30s up to 1h and tell the caller to run a command claim.go then rejects).
+func TestWriteConflictNearBoundaryDoesNotOfferReasonlessSteal(t *testing.T) {
+	var buf bytes.Buffer
+	WriteConflict(&buf, Conflict{
+		AttemptedScope: "src/auth.ts",
+		StaleAfter:     time.Hour,
+		Holders: []*state.Claim{
+			{ID: "01ABCDEF", TS: time.Now().Add(-59*time.Minute - 30*time.Second), Actor: "codex", Scope: mkWholeScope("src/auth.ts")},
+		},
+	})
+	if out := buf.String(); strings.Contains(out, "no --reason needed") {
+		t.Fatalf("a claim idle 59m30s (< 1h) must NOT be advertised as a reasonless steal; got:\n%s", out)
+	}
+}
+
 func TestWriteConflictFreshClaimRequiresConfirmation(t *testing.T) {
 	var buf bytes.Buffer
 	WriteConflict(&buf, Conflict{

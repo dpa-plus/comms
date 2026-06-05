@@ -129,7 +129,10 @@ func parseRefs(raw []string) ([]kindValue, error) {
 			return nil, fmt.Errorf("ref %q: kind or value empty", r)
 		}
 		for _, c := range kind + value {
-			if c < 0x20 {
+			// Reject C0 (<0x20), DEL (0x7f), and C1 (0x80-0x9f) — the same control
+			// range every other free-text field is held to (rejectControlText), so
+			// ref values can't smuggle escape bytes into the log.
+			if c < 0x20 || c == 0x7f || (c >= 0x80 && c <= 0x9f) {
 				return nil, fmt.Errorf("ref %q: contains control character", r)
 			}
 		}

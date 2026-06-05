@@ -50,8 +50,8 @@ next-command to run.`,
 		},
 	}
 	cmd.Flags().StringVar(&intent, "intent", "", "one-line description of the change you're making (required)")
-	cmd.Flags().StringVar(&stealID, "steal", "", "claim ID to displace (use with --reason for arbitrated takeover)")
-	cmd.Flags().StringVar(&stealReason, "reason", "", "justification for --steal (printed in the audit trail)")
+	cmd.Flags().StringVar(&stealID, "steal", "", "claim ID to displace; must overlap the claimed scope. --reason is required only when it is still active — a stale claim (idle >=1h) is stolen without one")
+	cmd.Flags().StringVar(&stealReason, "reason", "", "justification for stealing a still-active claim (auto-filled for a stale one); printed in the audit trail")
 	return cmd
 }
 
@@ -80,18 +80,28 @@ func runClaim(scopeRaw, intent, stealID, stealReason string) error {
 	// freely; --reason is then optional and auto-filled. Stealing a still-active
 	// claim out from under a live teammate still requires an explicit --reason.
 	var displaceID string
+	var autoStale bool
 	if stealID != "" {
 		target := rt.State.ClaimByID(stealID)
 		if target == nil {
 			Fatalf(2, "claim: --steal %q does not match any active claim", stealID)
 		}
+		// You may only steal the claim that actually overlaps the scope you are
+		// claiming. Without this guard a wrong/auto-stale id would slip through
+		// (the displaced claim isn't in ConflictsFor, so no conflict fires) and
+		// Fold would delete an unrelated holder's claim on a file you never touched.
+		if !overlap.Scopes(target.Scope, scope) {
+			Fatalf(2, "claim: --steal %s targets %s, which does not overlap the scope you are claiming (%s) — steal the claim blocking THIS scope",
+				short(target.ID), target.Scope.String(), scope.String())
+		}
 		idle := time.Since(target.TS)
 		stale := idle >= staleClaimAfter
 		if stealReason == "" {
 			if stale {
-				stealReason = fmt.Sprintf("prior claim stale: @%s idle %s (stale after %s)", target.Actor, shortAge(idle), shortAge(staleClaimAfter))
+				stealReason = fmt.Sprintf("prior claim stale: @%s idle %s (stale after %s)", target.Actor, idle.Round(time.Minute), shortAge(staleClaimAfter))
+				autoStale = true
 			} else {
-				Fatalf(1, "claim: @%s's claim is still active (held %s; stale after %s) — stealing it requires --reason. A stale claim (idle >= %s) can be stolen without one.",
+				Fatalf(2, "claim: @%s's claim is still active (held %s; stale after %s) — stealing it requires --reason. A stale claim (idle >= %s) can be stolen without one.",
 					target.Actor, shortAge(idle), shortAge(staleClaimAfter), shortAge(staleClaimAfter))
 			}
 		}
@@ -121,9 +131,13 @@ func runClaim(scopeRaw, intent, stealID, stealReason string) error {
 	if displaceID != "" {
 		data["steals"] = displaceID
 		data["steal_reason"] = stealReason
-		// Best-effort arbitrator marker: the human's identity. We use COMMS_ARBITRATOR
-		// if set, otherwise fall back to $USER for audit purposes.
-		if a := os.Getenv("COMMS_ARBITRATOR"); a != "" {
+		if autoStale {
+			// Fully automatic takeover of a stale claim — no human authorized it,
+			// so record it as such instead of stamping a misleading arbitrator.
+			data["steal_kind"] = "auto-stale"
+		} else if a := os.Getenv("COMMS_ARBITRATOR"); a != "" {
+			// Human-arbitrated steal: record who authorized it (COMMS_ARBITRATOR,
+			// else $USER) for the audit trail.
 			data["arbitrator"] = a
 		} else if u := os.Getenv("USER"); u != "" {
 			data["arbitrator"] = u
@@ -185,11 +199,16 @@ func runClaimBatch(scopeRaws []string, intent string) error {
 		blocked = append(blocked, rt.State.ConflictsFor(sc, rt.Actor)...)
 	}
 	if len(blocked) > 0 {
+		// ConflictsFor is sorted only within each scope; concatenating across
+		// scopes loses the global order. Re-sort oldest-first so WriteConflict's
+		// "primary = Holders[0]" is the actually-oldest (most-likely-stale) holder.
+		holders := dedupeClaimsByID(blocked)
+		sort.SliceStable(holders, func(i, j int) bool { return holders[i].TS.Before(holders[j].TS) })
 		render.WriteConflict(os.Stderr, render.Conflict{
 			AttemptedScope:  joinScopeStrings(scopes),
 			AttemptedActor:  rt.Actor,
 			AttemptedIntent: intent,
-			Holders:         dedupeClaimsByID(blocked),
+			Holders:         holders,
 			StaleAfter:      staleClaimAfter,
 		})
 		os.Exit(1)
@@ -277,16 +296,20 @@ func printClaimContext(rt *Runtime, scopes []overlap.Scope) {
 	}
 	fmt.Println("  prior context on this path:")
 	for _, f := range matches {
+		// Truncate by RUNES (not bytes) so a multibyte summary — these contain
+		// German/UTF-8 — is never cut mid-rune into mojibake.
 		summary := f.Summary
-		if len(summary) > 96 {
-			summary = summary[:95] + "…"
+		if r := []rune(summary); len(r) > 96 {
+			summary = string(r[:95]) + "…"
 		}
 		age := shortAge(time.Since(f.TS))
 		when := age + " ago"
 		if age == "now" {
 			when = "just now"
 		}
-		fmt.Printf("    • [%s] %s  (@%s, %s)\n", f.Category, summary, f.Actor, when)
+		// Sanitize log-sourced fields before they hit the terminal — the same
+		// defense the conflict renderer uses against ESC/C0/C1/DEL injection.
+		fmt.Printf("    • [%s] %s  (@%s, %s)\n", render.EscapeScope(f.Category), render.EscapeScope(summary), render.EscapeActor(f.Actor), when)
 	}
 }
 

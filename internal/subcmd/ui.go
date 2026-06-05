@@ -2925,8 +2925,10 @@ function applySnapshot(data) {
   renderClaims(data, view);
   el('findings').innerHTML = renderRows(view.findings, f => {
     const refs = (f.refs || []).map(r => {
-      const label = r.kind === 'path' ? r.value : (esc(r.kind) + ':' + esc(r.value));
-      return '<span class="ref-pill" title="' + esc(r.kind) + '">' + (r.kind === 'path' ? esc(r.value) : label) + '</span>';
+      // Always escape — refs are agent-controllable text from the log. Compute the
+      // escaped label once so the only string reaching innerHTML is safe.
+      const label = r.kind === 'path' ? esc(r.value) : (esc(r.kind) + ':' + esc(r.value));
+      return '<span class="ref-pill" title="' + esc(r.kind) + '">' + label + '</span>';
     }).join('');
     const refBox = refs ? '<div class="ref-pills">' + refs + '</div>' : '';
     return '<div class="row' + (f.priority ? ' priority-row' : '') + '">' + (f.priority ? '<span class="pill priority">priority</span> ' : '') + '<span class="pill finding">' + esc(f.category) + '</span><div class="intent">' + esc(f.summary) + '</div>' + refBox + '<div class="meta">@' + esc(f.actor) + ' · ' + fmtTime(f.ts) + '</div></div>';

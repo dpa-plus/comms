@@ -46,7 +46,8 @@ func WriteConflict(w io.Writer, c Conflict) {
 		return
 	}
 	primary := c.Holders[0]
-	since := time.Since(primary.TS).Round(time.Minute)
+	raw := time.Since(primary.TS)   // exact age — drives the stale decision
+	since := raw.Round(time.Minute) // rounded — display only
 
 	// Every field below can originate from the append-only log (holder
 	// actors/scopes/intents are only validated for non-emptiness at decode
@@ -71,11 +72,16 @@ func WriteConflict(w io.Writer, c Conflict) {
 	// A stale blocking claim (holder presumed gone) can be stolen directly — no
 	// user confirmation needed. This is the common "took over a dead agent's
 	// file" path, so lead with it when it applies.
-	if c.StaleAfter > 0 && since >= c.StaleAfter {
+	// Use the EXACT age (not the rounded display value) so this advice never tells
+	// the caller to steal a claim that `comms claim` will then reject for being
+	// just under the threshold. Steal the blocking holder's OWN single scope (the
+	// attempted scope may be a comma-joined batch, which is not a valid --steal
+	// claim target), and quote the full claim ID (a short prefix can be ambiguous).
+	if c.StaleAfter > 0 && raw >= c.StaleAfter {
 		fmt.Fprintf(w, "\n@%s's claim is STALE (idle %s, stale after %s) — its holder is presumed gone.\n", primaryActor, formatDuration(since), formatDuration(c.StaleAfter))
 		fmt.Fprintf(w, "You may steal a stale claim directly (no --reason needed):\n")
 		fmt.Fprintf(w, "  comms claim %q --intent %q --steal %s\n",
-			EscapeScope(c.AttemptedScope), EscapeScope(intentOr(c.AttemptedIntent, "<your-intent>")), EscapeScope(shortID(primary.ID)))
+			EscapeScope(primary.Scope.String()), EscapeScope(intentOr(c.AttemptedIntent, "<your-intent>")), EscapeScope(primary.ID))
 		return
 	}
 
@@ -86,7 +92,7 @@ func WriteConflict(w io.Writer, c Conflict) {
 	fmt.Fprintf(w, "\nSurface this to the user. Ask whether @%s's session is still active.\n", primaryActor)
 	fmt.Fprintf(w, "\nIf user confirms the prior session ended%s:\n", staleNote)
 	fmt.Fprintf(w, "  comms claim %q --intent %q --steal %s --reason \"user verified prior session ended\"\n",
-		EscapeScope(c.AttemptedScope), EscapeScope(intentOr(c.AttemptedIntent, "<your-intent>")), EscapeScope(shortID(primary.ID)))
+		EscapeScope(primary.Scope.String()), EscapeScope(intentOr(c.AttemptedIntent, "<your-intent>")), EscapeScope(primary.ID))
 	fmt.Fprintf(w, "\nIf session is still active:\n")
 	fmt.Fprintf(w, "  Choose a different scope, or `comms note \"@%s can I take this when you're done?\"`\n", primaryActor)
 }
@@ -96,13 +102,6 @@ func intentOr(s, fallback string) string {
 		return fallback
 	}
 	return s
-}
-
-func shortID(id string) string {
-	if len(id) > 6 {
-		return id[:6]
-	}
-	return id
 }
 
 func formatDuration(d time.Duration) string {
