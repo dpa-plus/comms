@@ -132,16 +132,11 @@ and removes it from the live roster without deleting history:
 COMMS_ACTOR=claude-dev comms session retire claude-7e4c --reason "renamed to claude-dev"
 ```
 
-If the user asks you to become or assign the leader, transfer leadership:
-
-```bash
-COMMS_ACTOR=claude-dev comms session lead --reason "user asked Claude Dev to lead"
-COMMS_ACTOR=human-eli comms session lead claude-dev --reason "user asked Claude Dev to lead"
-```
-
-The leader's only extra privilege is posting priority notes/findings. Do not
-say "I can't delete old actors"; say that `session retire` removes them from
-active view while preserving the append-only audit log.
+Leadership is auto-assigned to the first active actor and only gates `--priority`
+notes/findings; ignore it unless the user explicitly asks you to set a leader
+(`comms session lead`). When asked to remove an actor, do not say "I can't delete
+old actors" — `session retire` removes them from the active view while preserving
+the append-only audit log.
 
 ## Claim Before Edits
 
@@ -168,9 +163,20 @@ COMMS_ACTOR=claude-dev comms claim "src/auth.ts" "src/routes/login.ts" "src/__te
 
 ## Release
 
+Release a claim as soon as you have committed that file's work. A claim is a
+lock: every minute you hold it past your last edit is a minute a peer may be
+blocked (real sessions have peaked at ~38 files claimed at once). Do not carry
+claims across a pause, a context switch, or the end of a session.
+
 ```bash
 COMMS_ACTOR=claude-dev comms release --latest --result "PR #321 merged"
-COMMS_ACTOR=claude-dev comms release --all-mine --result "switching tasks"
+```
+
+**On a task switch — or when you stop for the day — sweep all your claims** so
+nothing is left locked behind an idle or dead session:
+
+```bash
+COMMS_ACTOR=claude-dev comms release --all-mine --result "switching to billing fixes"
 ```
 
 ## Findings
@@ -188,13 +194,24 @@ Category cheat sheet:
 - `bug` means an open problem.
 - `fix` means a resolved problem.
 - `ship` means released or deployed.
-- `decision` means an architectural choice.
+- `decision` means an architectural choice, source of truth, or ownership boundary.
 - `gotcha` means a persistent trap future agents should remember.
 
-Use `comms note` for short FYIs that are not persistent decisions:
+Capture durable knowledge the moment you learn it — findings persist and are what
+the next session actually reads:
+
+- Log a `gotcha` the instant something surprises you or wastes your time (a
+  sandbox limit, a non-obvious config, a flaky-test trap).
+- Log a `decision` whenever you pick an architecture, a source of truth, or an
+  ownership boundary, e.g.
+  `comms find decision "Codex owns src/**, Claude owns frontend/**"`.
+
+Use `comms note` ONLY for transient, addressed FYIs. If you catch yourself
+writing a note that explains how the system works or who owns what, it is a
+`decision` or a `gotcha` — log it as a finding so it does not age out of view:
 
 ```bash
-COMMS_ACTOR=claude-dev comms note "FYI Prisma schema migration coming next session"
+COMMS_ACTOR=claude-dev comms note "@codex-dev heads-up: Prisma migration lands next session"
 ```
 
 ## Docs
