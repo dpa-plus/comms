@@ -334,6 +334,14 @@ func sortSessionsByActivity(sessions []*state.Session) {
 // dead holder never actually becomes leader. Marking leaders here (instead of at
 // each call site) keeps the display consistent with that and lets callers treat
 // the whole list uniformly.
+//
+// The silent-holder set has two parts: holders that still have a Session entry,
+// and ORPHANED holders that hold claims but have no Session at all. An actor is
+// orphaned when its session was deleted (a retire, or its named session ended)
+// yet its still-running process kept claiming — those post-retire claims have no
+// hello to anchor a session. Both are surfaced; otherwise an orphan's locks show
+// up in the claims list with no roster row, so the operator sees claims that
+// "won't go away" and no button to clear them.
 func rosterSessions(s *state.State, cutoff time.Time) []*state.Session {
 	active := collectActiveSessions(s, cutoff)
 	markLeaderSessions(active)
@@ -352,10 +360,59 @@ func rosterSessions(s *state.State, cutoff time.Time) []*state.Session {
 		if len(s.ActiveClaimsByActor(sess.Actor)) > 0 {
 			sess.Leader = false // a crashed holder is never shown as leader
 			holders = append(holders, sess)
+			inRoster[sess.Actor] = true
 		}
 	}
+	holders = append(holders, orphanClaimHolders(s, inRoster)...)
 	sortSessionsByActivity(holders)
 	return append(active, holders...)
+}
+
+// orphanClaimHolders synthesizes roster entries for actors that hold active
+// claims but have no Session entry (exclude already-rostered actors). The
+// synthetic session's heartbeat is derived from the actor's own claim
+// timestamps — earliest as TS, latest as LastSeen — so the row can still be
+// flagged "likely dead" once it is silent past the stale window and offer a
+// one-click Release/Remove. A claim carries the comms session it was made in; we
+// keep that tag only when all of the actor's orphan claims agree on it.
+func orphanClaimHolders(s *state.State, exclude map[string]bool) []*state.Session {
+	if s == nil {
+		return nil
+	}
+	type span struct {
+		first, last            time.Time
+		sessionID, sessionName string
+		mixed                  bool
+	}
+	spans := map[string]*span{}
+	for _, c := range s.Claims {
+		if c == nil || exclude[c.Actor] || s.Sessions[c.Actor] != nil {
+			continue
+		}
+		if sp := spans[c.Actor]; sp != nil {
+			if c.TS.Before(sp.first) {
+				sp.first = c.TS
+			}
+			if c.TS.After(sp.last) {
+				sp.last = c.TS
+			}
+			if c.SessionID != sp.sessionID {
+				sp.mixed = true
+			}
+			continue
+		}
+		spans[c.Actor] = &span{first: c.TS, last: c.TS, sessionID: c.SessionID, sessionName: c.SessionName}
+	}
+	out := make([]*state.Session, 0, len(spans))
+	for actor, sp := range spans {
+		sess := &state.Session{Actor: actor, TS: sp.first, LastSeen: sp.last}
+		if !sp.mixed {
+			sess.SessionID = sp.sessionID
+			sess.SessionName = sp.sessionName
+		}
+		out = append(out, sess)
+	}
+	return out
 }
 
 func activeLeaderActor(s *state.State, cutoff time.Time) string {
