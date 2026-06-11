@@ -2,6 +2,7 @@ package subcmd
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -272,13 +273,32 @@ func (s uiServer) openMutatingUI(w http.ResponseWriter, opts OpenOpts) (*Runtime
 	return rt, true
 }
 
+// uiBuildToken is the placeholder in uiHTML that servePage replaces with the
+// running server's build fingerprint, so the page knows which build it booted.
+const uiBuildToken = "__COMMS_BUILD_ID__"
+
+// uiBuildID fingerprints the served front-end. It is a hash of uiHTML (the entire
+// HTML/CSS/JS shell), so it changes exactly when the front-end changes and stays
+// identical across restarts of the same binary — no needless reloads on a crash
+// bounce, a guaranteed reload on a real UI deploy. Computed once at init; uiHTML
+// is a const, so the template (with the placeholder) is what gets hashed, which is
+// also what the client's injected token resolves to, keeping the two in lockstep.
+var uiBuildID = func() string {
+	sum := sha256.Sum256([]byte(uiHTML))
+	return fmt.Sprintf("%x", sum[:6])
+}()
+
 func (s uiServer) servePage(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write([]byte(uiHTML))
+	// no-store: the shell must never be cached, or a redeployed server would keep
+	// handing back a stale page from the browser/proxy cache and defeat the
+	// build-version reload handshake below.
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write([]byte(strings.Replace(uiHTML, uiBuildToken, uiBuildID, 1)))
 }
 
 func (s uiServer) serveFavicon(w http.ResponseWriter, r *http.Request) {
@@ -824,6 +844,13 @@ type uiSnapshot struct {
 	// projects" merged view and backward compatibility.
 	ProjectSessions []uiProjectSession `json:"project_sessions,omitempty"`
 	Updated         time.Time          `json:"updated"`
+	// Build fingerprints the front-end (uiHTML) this server serves. Every snapshot
+	// carries it; the page records the build it booted with and reloads itself when
+	// a later snapshot reports a different one. That is what makes an open dashboard
+	// pick up a redeployed binary instead of running stale HTML/JS forever — the SSE
+	// stream pushes data, not the page shell, so without this a restart leaves every
+	// tab on the old version until a manual hard-refresh.
+	Build string `json:"build,omitempty"`
 }
 
 // uiProjectSession is one project's self-contained slice of the unified
@@ -2717,6 +2744,23 @@ body.unified main {
   </section>
 </main>
 <script>
+// Build the page booted with. servePage replaces the token with the running
+// server's fingerprint; every snapshot reports the server's current one. When
+// they diverge the server was redeployed under this open tab, so reload to pull
+// the new shell — the SSE stream only refreshes data, never the page itself.
+const BOOT_BUILD = '__COMMS_BUILD_ID__';
+function maybeReloadForBuild(data) {
+  const b = data && data.build;
+  if (!b || !BOOT_BUILD || BOOT_BUILD === b) return false;
+  // Token left unreplaced (served by a build with no injection) -> never loop.
+  if (BOOT_BUILD.charCodeAt(0) === 95 /* '_' */) return false;
+  // Already reloaded targeting this exact build and still mismatched -> injection
+  // is broken; stop instead of reload-looping.
+  try { if (sessionStorage.getItem('comms_reload_build') === b) return false; } catch (e) {}
+  try { sessionStorage.setItem('comms_reload_build', b); } catch (e) {}
+  location.reload();
+  return true;
+}
 const el = id => document.getElementById(id);
 const fmtTime = ts => new Date(ts).toLocaleString([], { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -2856,6 +2900,10 @@ async function load() {
   applySnapshot(await res.json());
 }
 function applySnapshot(data) {
+  // If the server was redeployed under this tab, reload to the new shell before
+  // rendering stale-shell-against-new-data. Covers both the initial fetch and
+  // every SSE push since they all funnel through here.
+  if (maybeReloadForBuild(data)) return;
   hideError();
   latestData = data;
   const unified = isUnified(data);

@@ -333,6 +333,46 @@ func TestBuildGlobalUISnapshotDedupesDuplicateRepoRoots(t *testing.T) {
 	}
 }
 
+// The dashboard reloads itself when the server it is talking to was redeployed.
+// That requires three things to line up: the served page must carry the running
+// build (token replaced), every snapshot must report the same build, and the two
+// must be EQUAL on a stable server (else a healthy tab would reload-loop). Without
+// this handshake an open tab keeps running stale HTML after a binary upgrade,
+// because the SSE stream pushes data, not the page shell.
+func TestUIServePageAndSnapshotShareBuildFingerprint(t *testing.T) {
+	if uiBuildID == "" {
+		t.Fatal("uiBuildID must be a non-empty front-end fingerprint")
+	}
+
+	// servePage must inject the build and leave no raw token behind.
+	rec := httptest.NewRecorder()
+	uiServer{demo: true}.servePage(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	page := rec.Body.String()
+	if strings.Contains(page, uiBuildToken) {
+		t.Fatal("servePage left the build token unreplaced")
+	}
+	if !strings.Contains(page, "const BOOT_BUILD = '"+uiBuildID+"'") {
+		t.Fatalf("served page must boot with the running build %q", uiBuildID)
+	}
+	if cc := rec.Header().Get("Cache-Control"); cc != "no-store" {
+		t.Fatalf("shell must be no-store to survive redeploys, got %q", cc)
+	}
+
+	// Every snapshot (demo mode here; same chokepoint for all modes) reports the
+	// same build the page booted with -> a healthy tab never reloads.
+	body, err := uiServer{demo: true}.snapshotJSON()
+	if err != nil {
+		t.Fatalf("snapshotJSON: %v", err)
+	}
+	var snap uiSnapshot
+	if err := json.Unmarshal(body, &snap); err != nil {
+		t.Fatalf("decode snapshot: %v", err)
+	}
+	if snap.Build != uiBuildID {
+		t.Fatalf("snapshot build = %q, want %q (page and stream must agree)", snap.Build, uiBuildID)
+	}
+}
+
 func TestUIAllModeCanReleaseClaimByRepoHash(t *testing.T) {
 	repo := setupUITestRepo(t)
 	t.Setenv("HOME", t.TempDir())

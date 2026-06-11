@@ -110,22 +110,29 @@ func (h *hub) hasSnapshot() bool {
 // the body as JSON, so dropping the previous pretty-printing is transparent to
 // them and also trims the payload on the wire.
 func (s uiServer) snapshotJSON() ([]byte, error) {
-	if s.demo {
-		return json.Marshal(buildDemoUISnapshot(s.staleAfter))
-	}
-	if s.all {
-		snap, err := buildGlobalUISnapshot(s.staleAfter)
-		if err != nil {
-			return nil, err
-		}
-		return json.Marshal(snap)
-	}
-	rt, err := Open(OpenOpts{Mutating: false})
+	snap, err := s.buildSnapshot()
 	if err != nil {
 		return nil, err
 	}
+	// Stamp the front-end build on every snapshot (one chokepoint for all modes) so
+	// the page can tell when it is running against a redeployed server and reload.
+	snap.Build = uiBuildID
+	return json.Marshal(snap)
+}
+
+func (s uiServer) buildSnapshot() (uiSnapshot, error) {
+	if s.demo {
+		return buildDemoUISnapshot(s.staleAfter), nil
+	}
+	if s.all {
+		return buildGlobalUISnapshot(s.staleAfter)
+	}
+	rt, err := Open(OpenOpts{Mutating: false})
+	if err != nil {
+		return uiSnapshot{}, err
+	}
 	defer rt.Close()
-	return json.Marshal(buildUISnapshot(rt, s.staleAfter))
+	return buildUISnapshot(rt, s.staleAfter), nil
 }
 
 // publishSnapshot rebuilds the snapshot once and broadcasts it to every SSE
