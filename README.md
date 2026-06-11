@@ -116,10 +116,31 @@ comms ui                 # http://127.0.0.1:7878 — every project, one tab
 
 It updates by **push, not polling.** A file watcher inside `comms ui` is notified by the operating system the instant any project's `log.jsonl` changes; it rebuilds the snapshot once and streams it to every open browser tab over [Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events). So when any agent anywhere appends an event, the right project lights up in the sidebar **immediately**, and your laptop isn't burning cycles re-reading logs on a timer.
 
+Every snapshot carries the server's **front-end build fingerprint**, and the page remembers the one it loaded with. So when you replace the binary and restart `comms ui`, every open tab notices the new build on the next push and **reloads itself** to the new dashboard — no more stale UI lingering after an upgrade.
+
 It **opens your browser automatically** when run interactively (`--no-open` to suppress). On macOS you can also double-click a **Comms Dashboard** launcher instead of using the terminal. The header shows the active **session name** (the name agents use, e.g. `acme-build`) next to the repo.
 
 - `comms ui --repo /path/to/repo` — scope to a single repo (no sidebar).
 - `comms ui --demo` — explore with sample data (read-only; writes nothing real).
+
+### Run the dashboard as a login service (macOS)
+
+So the dashboard is always up — survives reboots, and is restarted automatically if it ever exits — install it as a per-user `launchd` agent:
+
+```bash
+# Point the template at your binary if it is not Homebrew (`which comms`):
+#   sed -i '' "s#/opt/homebrew/bin/comms#$(which comms)#" contrib/launchd/plus.dpa.comms-ui.plist
+install -m644 contrib/launchd/plus.dpa.comms-ui.plist ~/Library/LaunchAgents/
+launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/plus.dpa.comms-ui.plist
+```
+
+After installing a new binary, restart the service to pick it up (open tabs then auto-reload, see above):
+
+```bash
+launchctl kickstart -k "gui/$(id -u)/plus.dpa.comms-ui"
+```
+
+To remove it: `launchctl bootout "gui/$(id -u)/plus.dpa.comms-ui"` then delete the plist.
 
 ---
 
@@ -202,11 +223,13 @@ Because `comms` is just a binary that runs fresh on every command, upgrading is 
 
 - **The session lives in the log file, not in the binary.** Claims, findings, and notes are on disk. Replacing the binary doesn't touch them.
 - **CLI commands pick up the new version instantly** — the *next* `comms …` an agent runs uses the new binary. No restart, no re-join.
-- **Only the dashboard needs a nudge.** `comms ui` is the one long-running process; it keeps serving the old version until you stop it and run `comms ui` again. Restarting it loses nothing — it just re-reads the same log.
+- **Only the dashboard's *process* needs a nudge.** `comms ui` is the one long-running process; it holds the old binary until you restart it. But once you do, the browser doesn't: every open tab sees the new build fingerprint on the next push and **reloads itself** (see [The live dashboard](#the-live-dashboard)). Restarting loses nothing — it just re-reads the same log.
 
 ```bash
 go install github.com/dpa-plus/comms/cmd/comms@latest   # agents use it on their next command
-# restart `comms ui` when convenient to get the latest dashboard
+# then restart the one long-running dashboard process; open tabs auto-reload:
+launchctl kickstart -k "gui/$(id -u)/plus.dpa.comms-ui"  # if installed as a login service
+# (otherwise: stop your `comms ui` and run it again)
 ```
 
 ---

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Run the unified `comms ui` dashboard as a macOS login service.
+
+  RunAtLoad + KeepAlive => it starts at login and is restarted if it ever exits,
+  so the dashboard on http://127.0.0.1:7878 is always up and always execs the
+  binary at the path below (pick up a new build with `launchctl kickstart -k`).
+
+  Adjust ProgramArguments[0] to your install if it is not Homebrew
+  (`which comms`). Install + load instructions are in the README
+  ("Run the dashboard as a login service").
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>plus.dpa.comms-ui</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/comms</string>
+        <string>ui</string>
+        <string>--no-open</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>StandardOutPath</key>
+    <string>/tmp/comms-ui.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/comms-ui.log</string>
+</dict>
+</plist>
