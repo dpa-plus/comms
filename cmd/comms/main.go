@@ -11,18 +11,30 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Version is overridden via -ldflags at build time; left as "dev" in source.
-var Version = "dev"
+// Build metadata. These are overridden via -ldflags at build time (see the
+// Makefile and .goreleaser.yaml, which set -X main.Version / main.Commit /
+// main.Date). For `go install` builds — which ignore -ldflags — BuildInfo.Resolve
+// recovers the module version and VCS revision from the embedded build info, so a
+// released binary never reports a bare "dev".
+var (
+	Version = "dev"
+	Commit  = "none"
+	Date    = "unknown"
+)
 
 func main() {
+	build := subcmd.BuildInfo{Version: Version, Commit: Commit, Date: Date}.Resolve()
 	root := &cobra.Command{
 		Use:           "comms",
 		Short:         "Lightweight multi-agent coordination CLI",
 		Long:          `comms coordinates parallel coding sessions via per-session exclusive claims, a JSONL event log, and a small docs wiki under .comms/`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		Version:       Version,
+		Version:       build.String(),
 	}
+	// Print the full build line for `--version` (the default template would prefix
+	// "comms version", duplicating what build.String() already carries).
+	root.SetVersionTemplate("{{.Version}}\n")
 	subcmd.AddGlobalFlags(root)
 	root.AddCommand(
 		subcmd.NewHelloCmd(),
@@ -37,6 +49,7 @@ func main() {
 		subcmd.NewLessonCmd(),
 		subcmd.NewSessionCmd(),
 		subcmd.NewUICmd(),
+		subcmd.NewVersionCmd(build),
 	)
 	// Hidden helpers used by tests and the SessionStart hook.
 	root.AddCommand(subcmd.NewRepoHashCmd())
