@@ -109,8 +109,10 @@ The dashboard (`comms ui`) is simply a **live read-only view** of that same log.
 ## The live dashboard
 
 ```bash
-comms ui                 # http://127.0.0.1:7878 — every project, one tab
+COMMS_ACTOR=human-you comms ui   # http://127.0.0.1:7878 — every project, one tab
 ```
+
+> **Set `COMMS_ACTOR` to run it as an operator.** The dashboard's write actions — **Release** a claim, **Remove** (retire) a crashed agent, **End** a session — are attributed to you, so they only appear when `COMMS_ACTOR` is set to a real operator name (e.g. `human-you`; the bare names `eli/claude/codex/agent/user` are reserved). Run `comms ui` with it unset and the dashboard is **read-only** and those buttons stay hidden — set it and they appear.
 
 `comms ui` is **unified by default**: it shows *every* comms project on this machine in one window. A **Projects sidebar** on the left lists each project (and its sessions); click one and the whole dashboard — team roster, active claims (stale ones flagged), recent findings and notes, and the per-session event log — scopes to it. Run it **once** and watch all your agents across every repo, switching between them in the same tab. No starting a UI per project, and agents never have to "open" anything — they just write to their logs, which this one dashboard already sees.
 
@@ -125,11 +127,11 @@ It **opens your browser automatically** when run interactively (`--no-open` to s
 
 ### Run the dashboard as a login service (macOS)
 
-So the dashboard is always up — survives reboots, and is restarted automatically if it ever exits — install it as a per-user `launchd` agent:
+So the dashboard is always up — survives reboots, and is restarted automatically if it ever exits — install it as a per-user `launchd` agent. The template sets `COMMS_ACTOR` (so the operator buttons work — see the note above); change it from `operator` to your own name first:
 
 ```bash
-# Point the template at your binary if it is not Homebrew (`which comms`):
-#   sed -i '' "s#/opt/homebrew/bin/comms#$(which comms)#" contrib/launchd/plus.dpa.comms-ui.plist
+# Set your operator name (and point at your binary if it is not Homebrew, `which comms`):
+#   sed -i '' "s#<string>operator</string>#<string>human-you</string>#" contrib/launchd/plus.dpa.comms-ui.plist
 install -m644 contrib/launchd/plus.dpa.comms-ui.plist ~/Library/LaunchAgents/
 launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/plus.dpa.comms-ui.plist
 ```

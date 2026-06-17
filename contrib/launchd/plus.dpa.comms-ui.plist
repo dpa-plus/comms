@@ -10,6 +10,12 @@
   Adjust ProgramArguments[0] to your install if it is not Homebrew
   (`which comms`). Install + load instructions are in the README
   ("Run the dashboard as a login service").
+
+  COMMS_ACTOR identifies YOU, the operator, so the dashboard's write actions
+  (Release, Remove/retire, End session) are enabled — without it the UI is
+  read-only and those buttons stay hidden. Change it to your own operator name
+  (e.g. human-jane); only the bare reserved names eli/claude/codex/agent/user
+  are rejected.
 -->
 <plist version="1.0">
 <dict>
@@ -21,6 +27,11 @@
         <string>ui</string>
         <string>--no-open</string>
     </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>COMMS_ACTOR</key>
+        <string>operator</string>
+    </dict>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
