@@ -6,6 +6,9 @@
 
 **Coordinate parallel coding agents through one shared, append-only log.**
 
+[![CI](https://github.com/dpa-plus/comms/actions/workflows/ci.yml/badge.svg)](https://github.com/dpa-plus/comms/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/dpa-plus/comms?include_prereleases&logo=github&color=0f766e)](https://github.com/dpa-plus/comms/releases)
+[![Go Reference](https://pkg.go.dev/badge/github.com/dpa-plus/comms.svg)](https://pkg.go.dev/github.com/dpa-plus/comms)
 [![License](https://img.shields.io/badge/license-Apache--2.0-0f766e)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.25+-0f766e?logo=go&logoColor=white)](go.mod)
 [![Single binary](https://img.shields.io/badge/runtime-single%20static%20binary-0f766e)](#how-it-actually-runs-on-your-machine)
