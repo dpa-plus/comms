@@ -1,0 +1,45 @@
+name: Bug report
+description: Something in comms isn't working as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report! Please don't paste private repository paths or
+        real client content from your `comms` logs — redact them first.
+  - type: input
+    id: version
+    attributes:
+      label: comms version
+      description: Output of `comms version`
+      placeholder: comms v0.1.0 (commit abc1234, built ..., go1.26 darwin/arm64)
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [macOS, Linux]
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The exact commands, ideally on a fresh `git init` repo.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Relevant output
+      description: Optional — e.g. `comms status --json` or a log snippet (redacted).
+      render: shell

@@ -11,6 +11,9 @@
 # Local build of the comms binary (Makefile `build` target -> ./comms)
 /comms
 
+# GoReleaser output (`goreleaser release/--snapshot` -> ./dist)
+/dist/
+
 # Test binary, built with `go test -c`
 *.test
 

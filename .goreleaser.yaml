@@ -1,0 +1,69 @@
+# GoReleaser config — cross-compiles the single static binary, builds checksummed
+# archives, and publishes a GitHub Release on every v* tag.
+# Validate locally with: goreleaser check && goreleaser release --snapshot --clean
+version: 2
+
+project_name: comms
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: comms
+    main: ./cmd/comms
+    binary: comms
+    env:
+      - CGO_ENABLED=0
+    # Unix-only: internal/lock uses flock, so no windows target.
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    # The linker keys package main as `main` (not the full import path).
+    ldflags:
+      - -s -w
+      - -X main.Version={{ .Version }}
+      - -X main.Commit={{ .ShortCommit }}
+      - -X main.Date={{ .CommitDate }}
+
+archives:
+  - id: comms
+    formats: [tar.gz]
+    name_template: "comms_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+      - CHANGELOG.md
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+changelog:
+  use: github
+  sort: asc
+  groups:
+    - title: Features & fixes
+      regexp: '^comms:'
+      order: 0
+    - title: Security
+      regexp: '^security:'
+      order: 1
+    - title: Other
+      order: 99
+  filters:
+    exclude:
+      - '^chore:'
+      - '^docs:'
+      - '^test:'
+      - Merge pull request
+
+release:
+  draft: false
+  prerelease: auto # v0.x and -rc tags publish as pre-releases
+  footer: |
+    ---
+    Built by [GoReleaser](https://goreleaser.com). `comms` is Linux/macOS only for now.
