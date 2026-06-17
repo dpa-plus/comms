@@ -2,7 +2,7 @@
 
 ## 1. Install the binary
 
-Requires Go 1.22+.
+Requires Go 1.25+.
 
 ```bash
 go install github.com/dpa-plus/comms/cmd/comms@latest
@@ -77,16 +77,10 @@ is no polling. The log path is shown in the dashboard header and is normally:
 ~/Library/Application Support/comms/<repo-hash>/log.jsonl
 ```
 
-For one read-only dashboard across every project that has a comms log:
-
-```bash
-comms ui --all
-```
-
-This scans `~/Library/Application Support/comms/*/repo-path.txt` and
-`log.jsonl`, prefixes sessions with the project name, and never writes events.
-Use the repo-specific UI or CLI when you need to start/end sessions or release
-claims.
+`comms ui` is **unified by default**: a single dashboard across every project
+that has a comms log. It scans `~/Library/Application Support/comms/*/repo-path.txt`
+and `log.jsonl` and lists each project in a sidebar. Scope to one repo with
+`comms ui --repo /path/to/repo`.
 
 ### macOS Desktop/Document permission recovery
 
@@ -101,7 +95,7 @@ protected folder, for example:
 
 ```bash
 mkdir -p ~/code
-mv ~/Desktop/"Projects"/Projects/0003-my-project ~/code/my-project
+mv ~/Desktop/Projects/my-project ~/code/my-project
 ```
 
 Then reopen the agent in `/Users/you/code/my-project`.
@@ -121,9 +115,10 @@ COMMS_ACTOR=claude-dev comms session join "my-project" --label "Claude Dev"
 `.git`. If the app has no read access to that absolute path at all, grant Full
 Disk Access to the app and restart it, or move the repo to `~/code`.
 
-Claims older than 90 minutes are highlighted as stale. That default fits
-short-lived agent work: enough time for a real debugging pass, but short
-enough to flag abandoned sessions quickly. To use a different threshold:
+Claims idle longer than 1 hour are highlighted as stale (and become stealable
+without confirmation). That default fits short-lived agent work: enough time for
+a real debugging pass, but short enough to flag abandoned sessions quickly. To
+use a different display threshold:
 
 ```bash
 comms ui --stale-after 45m

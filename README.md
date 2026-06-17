@@ -204,7 +204,7 @@ comms note [--priority] "<=200-char FYI>"
 comms find [--priority] <bug|fix|ship|decision|gotcha> "<summary>" [--ref kind:value ...]
 comms doc --list | comms doc <slug> | comms doc <slug> --edit
 comms lesson --list | comms lesson <slug> | comms lesson <slug> --edit
-comms ui [--repo <path>] [--demo] [--no-open] [--stale-after 90m] [--addr 127.0.0.1:7878]  # unified by default
+comms ui [--repo <path>] [--demo] [--no-open] [--stale-after 1h] [--addr 127.0.0.1:7878]  # unified by default
 
 Global flags:
   --repo /absolute/repo/path                  # bypass cwd/git discovery
