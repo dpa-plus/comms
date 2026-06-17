@@ -280,7 +280,7 @@ func (s uiServer) watchLog(ctx context.Context) {
 		fmt.Fprintf(os.Stderr, "comms ui: file watcher unavailable, live push disabled: %v\n", err)
 		return
 	}
-	defer w.Close()
+	defer func() { _ = w.Close() }()
 
 	plan := s.buildWatchPlan()
 	for _, d := range plan.roots {

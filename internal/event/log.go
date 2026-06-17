@@ -28,7 +28,7 @@ func Append(path string, e Event) error {
 	if err != nil {
 		return fmt.Errorf("event log: open: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	for len(line) > 0 {
 		n, err := f.Write(line)
 		if err != nil {
@@ -66,7 +66,7 @@ func AppendBatch(path string, evs []Event) error {
 	if err != nil {
 		return fmt.Errorf("event log: open: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	start, err := f.Seek(0, io.SeekEnd)
 	if err != nil {
 		return fmt.Errorf("event log: seek: %w", err)
@@ -97,7 +97,7 @@ func Read(path string) ([]Event, error) {
 		}
 		return nil, fmt.Errorf("event log: open: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	br := bufio.NewReaderSize(f, 64*1024)
 	var (

@@ -37,7 +37,7 @@ func runHello(args []string, label string) error {
 	// If an explicit name is given, that becomes the actor for this call.
 	// We still validate it against the same rules COMMS_ACTOR would face.
 	if len(args) == 1 {
-		os.Setenv(actor.EnvVar, args[0])
+		_ = os.Setenv(actor.EnvVar, args[0])
 	}
 	label = strings.TrimSpace(label)
 	if err := validateLabel(label); err != nil {

@@ -106,7 +106,7 @@ func runLessonPrint(slug string) error {
 		}
 		Fatalf(2, "lesson: open %s: %v", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if _, err := io.Copy(os.Stdout, f); err != nil {
 		Fatalf(2, "lesson: print %s: %v", path, err)
 	}
@@ -141,7 +141,7 @@ func runLessonEdit(slug string) error {
 		Fatalf(2, "lesson: sidecar lock %s: %v", sidecarPath, err)
 	}
 	stampSidecar(sidecarPath, a)
-	defer sidecar.Close()
+	defer func() { _ = sidecar.Close() }()
 
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout

@@ -1,0 +1,48 @@
+# golangci-lint v2 config. Run: golangci-lint run  (or: make lint)
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  # The standard set (errcheck, govet, ineffassign, staticcheck, unused) plus a
+  # couple of cheap, high-signal extras.
+  default: standard
+  enable:
+    - misspell
+    - bodyclose
+  settings:
+    errcheck:
+      # Writes to stdout/stderr can't meaningfully fail and Go idiom ignores
+      # them; littering `_, _ =` everywhere is noisier than this allowlist.
+      exclude-functions:
+        - fmt.Print
+        - fmt.Printf
+        - fmt.Println
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        # Runtime.Close only releases the per-repo flock; its error is not
+        # actionable (the kernel frees the lock on exit) and the code already
+        # treats it as ignorable (`_ = rt.Close()` in runtime.go). Deferred
+        # `rt.Close()` is the cleanup idiom across every command.
+        - (*github.com/dpa-plus/comms/internal/subcmd.Runtime).Close
+    staticcheck:
+      # ST1005: comms' CLI error strings are intentional, sentence-style, and
+      # asserted verbatim in tests — keep the punctuation.
+      checks:
+        - all
+        - -ST1005
+  exclusions:
+    rules:
+      # internal/subcmd/ui.go embeds a large JS/CSS/HTML dashboard as a raw
+      # string; misspell flags words inside that markup, not real Go typos.
+      - path: internal/subcmd/ui.go
+        linters: [misspell]
+      # Tests deliberately ignore some setup errors.
+      - path: _test\.go
+        linters: [errcheck]
+
+formatters:
+  enable:
+    - gofmt

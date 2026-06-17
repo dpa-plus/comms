@@ -41,7 +41,7 @@ func Load(path string) (*Policy, error) {
 		}
 		return nil, fmt.Errorf("policy: open %s: %w", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var (
 		out     Policy

@@ -123,7 +123,7 @@ func runDocPrint(slug string) error {
 		}
 		Fatalf(2, "doc: open %s: %v", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if _, err := io.Copy(os.Stdout, f); err != nil {
 		Fatalf(2, "doc: print %s: %v", path, err)
 	}
@@ -163,7 +163,7 @@ func runDocEdit(slug string) error {
 	// Stamp the sidecar with our actor + timestamp so the next would-be
 	// editor sees who holds it.
 	stampSidecar(sidecarPath, rt.Actor)
-	defer sidecar.Close()
+	defer func() { _ = sidecar.Close() }()
 
 	// Release the main flock BEFORE invoking the editor — opening $EDITOR is
 	// arbitrary-duration user interaction; we don't want to hold the per-repo

@@ -37,7 +37,7 @@ type Conflict struct {
 	StaleAfter time.Duration
 }
 
-// Conflict writes the structured conflict report to w.
+// WriteConflict writes the structured conflict report to w.
 func WriteConflict(w io.Writer, c Conflict) {
 	if len(c.Holders) == 0 {
 		// Shouldn't happen — caller only invokes this when there's an

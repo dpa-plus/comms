@@ -58,14 +58,13 @@ type OpenOpts struct {
 
 // Runtime is the resolved working context for a single command.
 type Runtime struct {
-	Actor    string
-	Repo     repo.Identity
-	Paths    paths.Paths
-	Policy   *policy.Policy
-	Events   []event.Event
-	State    *state.State
-	lockH    *lock.Handle
-	noEvents bool
+	Actor  string
+	Repo   repo.Identity
+	Paths  paths.Paths
+	Policy *policy.Policy
+	Events []event.Event
+	State  *state.State
+	lockH  *lock.Handle
 }
 
 // Open resolves identity, bootstraps directories, optionally acquires the

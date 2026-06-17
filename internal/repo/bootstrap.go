@@ -49,7 +49,7 @@ func writeIfAbsent(path string, content []byte, mode os.FileMode) error {
 		}
 		return fmt.Errorf("bootstrap: create %s: %w", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if _, err := f.Write(content); err != nil {
 		return fmt.Errorf("bootstrap: write %s: %w", path, err)
 	}
