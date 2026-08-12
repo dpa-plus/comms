@@ -172,25 +172,25 @@ func checkStagedPaths(rt *Runtime, paths []string) error {
 
 	conflicts := make([]stagedConflict, 0)
 	for _, path := range paths {
-		normalized, err := overlap.NormalizePath(filepath.ToSlash(path))
-		if err != nil {
-			return fmt.Errorf("normalize staged path %q: %w", path, err)
-		}
-		// Git gives us one concrete filename, not a comms glob pattern. Interpret
-		// metacharacters only on the claim side so a literal '*' in the filename
-		// cannot create a false conflict with a different exact claim.
+		// `git diff --name-only -z` gives us a repository-relative concrete
+		// filename, not a user-authored comms scope. Keep every non-NUL filename
+		// byte intact; claim-scope validation deliberately rejects controls and
+		// therefore does not apply at this transient Git boundary.
+		concretePath := filepath.ToSlash(path)
+		// Interpret metacharacters only on the claim side so a literal '*' in the
+		// filename cannot create a false conflict with a different exact claim.
 		holders := make([]*state.Claim, 0)
 		for _, claim := range rt.State.Claims {
 			if claim.Actor == checkActor {
 				continue
 			}
-			if overlap.PatternMatchesPath(claim.Scope.Path, normalized) {
+			if overlap.PatternMatchesPath(claim.Scope.Path, concretePath) {
 				holders = append(holders, claim)
 			}
 		}
 		sort.Slice(holders, func(i, j int) bool { return holders[i].TS.Before(holders[j].TS) })
 		if len(holders) > 0 {
-			conflicts = append(conflicts, stagedConflict{path: normalized, holders: holders})
+			conflicts = append(conflicts, stagedConflict{path: concretePath, holders: holders})
 		}
 	}
 	if len(conflicts) == 0 {
@@ -211,12 +211,36 @@ func checkStagedPaths(rt *Runtime, paths []string) error {
 		}
 	}
 	fmt.Fprintln(os.Stderr, "\nUnstage peer-owned paths before committing (working-tree changes are kept):")
+	recoveryPrefix := "(cd " + shellQuote(rt.Repo.Root) + " && "
+	if render.EscapeScope(rt.Repo.Root) != rt.Repo.Root {
+		// Command substitution strips trailing newlines. Append a printable
+		// sentinel during reconstruction, then remove only that sentinel before
+		// changing directories so every repository-root byte survives.
+		encodedRoot := octalEscapeBytes(rt.Repo.Root) + `\0130`
+		recoveryPrefix = "(repo=$(printf '%b' " + shellQuote(encodedRoot) + `); repo=${repo%X}; cd "$repo" && `
+	}
 	for _, conflict := range conflicts {
-		literalPathspec := ":(literal)" + render.EscapeScope(conflict.path)
+		// The diagnostic above is sanitized for terminal safety, but recovery must
+		// retain the exact Git filename bytes.
+		literalPathspec := ":(literal)" + conflict.path
+		if render.EscapeScope(conflict.path) != conflict.path {
+			// Keep control and invalid UTF-8 bytes off the terminal while preserving
+			// them exactly for Git. POSIX printf reconstructs one NUL-terminated
+			// literal pathspec from its octal byte escapes on a single output line.
+			command := "git restore --staged"
+			if !hasHead {
+				command = "git rm --cached"
+			}
+			fmt.Fprintf(os.Stderr, "  %sprintf '%%b' %s | %s --pathspec-from-file=- --pathspec-file-nul)\n",
+				recoveryPrefix, shellQuote(octalEscapeBytes(literalPathspec)+`\0000`), command)
+			continue
+		}
 		if hasHead {
-			fmt.Fprintf(os.Stderr, "  git restore --staged -- %s\n", shellQuote(literalPathspec))
+			fmt.Fprintf(os.Stderr, "  %sgit restore --staged -- %s)\n",
+				recoveryPrefix, shellQuote(literalPathspec))
 		} else {
-			fmt.Fprintf(os.Stderr, "  git rm --cached -- %s\n", shellQuote(literalPathspec))
+			fmt.Fprintf(os.Stderr, "  %sgit rm --cached -- %s)\n",
+				recoveryPrefix, shellQuote(literalPathspec))
 		}
 	}
 	os.Exit(1)
@@ -228,6 +252,14 @@ func checkStagedPaths(rt *Runtime, paths []string) error {
 // by ending the quoted string, emitting a quoted quote, and reopening it.
 func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+}
+
+func octalEscapeBytes(value string) string {
+	var b strings.Builder
+	for i := 0; i < len(value); i++ {
+		fmt.Fprintf(&b, `\0%03o`, value[i])
+	}
+	return b.String()
 }
 
 func gitHasHEAD(repoRoot string) (bool, error) {

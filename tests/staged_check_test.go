@@ -17,6 +17,17 @@ func runGit(t *testing.T, repo string, args ...string) {
 	}
 }
 
+func stagedRecoveryCommand(t *testing.T, output []byte) string {
+	t.Helper()
+	for _, line := range strings.Split(string(output), "\n") {
+		if strings.HasPrefix(line, "  git ") || strings.HasPrefix(line, "  (") {
+			return strings.TrimPrefix(line, "  ")
+		}
+	}
+	t.Fatalf("staged check output has no recovery command:\n%s", output)
+	return ""
+}
+
 func TestCheckStagedBlocksPeerClaimedPaths(t *testing.T) {
 	bin := buildCommsBinary(t)
 	repo := setupTestRepo(t)
@@ -199,6 +210,112 @@ func TestCheckStagedRecoveryUsesLiteralGitPathspec(t *testing.T) {
 	}
 }
 
+func TestCheckStagedRecoveryWorksOutsideRepository(t *testing.T) {
+	bin := buildCommsBinary(t)
+	repo := setupTestRepo(t)
+	home := t.TempDir()
+	outside := t.TempDir()
+	path := "src/peer.txt"
+	absolute := filepath.Join(repo, path)
+	if err := os.MkdirAll(filepath.Dir(absolute), 0o755); err != nil {
+		t.Fatalf("mkdir src: %v", err)
+	}
+	if err := os.WriteFile(absolute, []byte("peer work\n"), 0o644); err != nil {
+		t.Fatalf("write peer file: %v", err)
+	}
+	runGit(t, repo, "add", "--", path)
+
+	claim := exec.Command(bin, "--repo", repo, "claim", path, "--intent", "peer implementation")
+	claim.Dir = outside
+	claim.Env = childEnv(home, "peer-agent")
+	if out, err := claim.CombinedOutput(); err != nil {
+		t.Fatalf("peer claim from outside repository: %v: %s", err, out)
+	}
+
+	check := exec.Command(bin, "--repo", repo, "check", "--staged")
+	check.Dir = outside
+	check.Env = childEnv(home, "current-agent")
+	out, err := check.CombinedOutput()
+	if err == nil {
+		t.Fatalf("staged check should block the peer path; output:\n%s", out)
+	}
+
+	recovery := exec.Command("/bin/sh", "-c", stagedRecoveryCommand(t, out))
+	recovery.Dir = outside
+	if recoveryOut, recoveryErr := recovery.CombinedOutput(); recoveryErr != nil {
+		t.Fatalf("printed recovery command must work outside the repository: %v: %s\ncheck output:\n%s", recoveryErr, recoveryOut, out)
+	}
+	if _, statErr := os.Stat(absolute); statErr != nil {
+		t.Fatalf("recovery must preserve the working-tree file: %v", statErr)
+	}
+	staged := exec.Command("git", "diff", "--cached", "--name-only", "--", path)
+	staged.Dir = repo
+	if stagedOut, stagedErr := staged.CombinedOutput(); stagedErr != nil {
+		t.Fatalf("inspect staged path: %v: %s", stagedErr, stagedOut)
+	} else if len(stagedOut) != 0 {
+		t.Fatalf("recovery must remove %q from the index; got %q", path, stagedOut)
+	}
+}
+
+func TestCheckStagedRecoverySanitizesRepositoryRootWithNewline(t *testing.T) {
+	bin := buildCommsBinary(t)
+	parent := t.TempDir()
+	repo := filepath.Join(parent, "repo\nname")
+	if err := os.Mkdir(repo, 0o755); err != nil {
+		t.Fatalf("mkdir newline repository: %v", err)
+	}
+	for _, args := range [][]string{
+		{"init"},
+		{"config", "user.email", "test@example.com"},
+		{"config", "user.name", "Test"},
+		{"commit", "--allow-empty", "-m", "init"},
+	} {
+		runGit(t, repo, args...)
+	}
+	home := t.TempDir()
+	outside := t.TempDir()
+	path := "peer.txt"
+	absolute := filepath.Join(repo, path)
+	if err := os.WriteFile(absolute, []byte("peer work\n"), 0o644); err != nil {
+		t.Fatalf("write peer file: %v", err)
+	}
+	runGit(t, repo, "add", "--", path)
+
+	claim := exec.Command(bin, "--repo", repo, "claim", path, "--intent", "peer implementation")
+	claim.Dir = outside
+	claim.Env = childEnv(home, "peer-agent")
+	if out, err := claim.CombinedOutput(); err != nil {
+		t.Fatalf("peer claim from outside newline repository: %v: %s", err, out)
+	}
+
+	check := exec.Command(bin, "--repo", repo, "check", "--staged")
+	check.Dir = outside
+	check.Env = childEnv(home, "current-agent")
+	out, err := check.CombinedOutput()
+	if err == nil {
+		t.Fatalf("staged check should block the peer path; output:\n%s", out)
+	}
+	if strings.Contains(string(out), repo) {
+		t.Fatalf("recovery output must not contain raw controls from repository root; got:\n%s", out)
+	}
+
+	recovery := exec.Command("/bin/sh", "-c", stagedRecoveryCommand(t, out))
+	recovery.Dir = outside
+	if recoveryOut, recoveryErr := recovery.CombinedOutput(); recoveryErr != nil {
+		t.Fatalf("printed recovery must preserve exact repository root bytes: %v: %s\ncheck output:\n%s", recoveryErr, recoveryOut, out)
+	}
+	if _, statErr := os.Stat(absolute); statErr != nil {
+		t.Fatalf("recovery must preserve the working-tree file: %v", statErr)
+	}
+	staged := exec.Command("git", "diff", "--cached", "--name-only", "--", path)
+	staged.Dir = repo
+	if stagedOut, stagedErr := staged.CombinedOutput(); stagedErr != nil {
+		t.Fatalf("inspect staged path: %v: %s", stagedErr, stagedOut)
+	} else if len(stagedOut) != 0 {
+		t.Fatalf("recovery must remove %q from the index; got %q", path, stagedOut)
+	}
+}
+
 func TestCheckStagedAllowsOwnGenericActorWhenExplicitlyEnabled(t *testing.T) {
 	bin := buildCommsBinary(t)
 	repo := setupTestRepo(t)
@@ -293,5 +410,73 @@ func TestCheckStagedTreatsStarInFilenameAsLiteral(t *testing.T) {
 	check.Env = childEnv(home, "current-agent")
 	if out, err := check.CombinedOutput(); err != nil {
 		t.Fatalf("literal-star filename must not overlap distinct literal claim: %v: %s", err, out)
+	}
+}
+
+func TestCheckStagedAllowsUnclaimedFilenameWithNewline(t *testing.T) {
+	bin := buildCommsBinary(t)
+	repo := setupTestRepo(t)
+	home := t.TempDir()
+	path := "line\nbreak.txt"
+	absolute := filepath.Join(repo, path)
+	if err := os.WriteFile(absolute, []byte("current work\n"), 0o644); err != nil {
+		t.Fatalf("write newline filename: %v", err)
+	}
+	runGit(t, repo, "add", "--", path)
+
+	check := exec.Command(bin, "check", "--staged")
+	check.Dir = repo
+	check.Env = childEnv(home, "current-agent")
+	if out, err := check.CombinedOutput(); err != nil {
+		t.Fatalf("unclaimed newline filename must pass staged check: %v: %s", err, out)
+	}
+}
+
+func TestCheckStagedRecoversClaimedFilenameWithNewline(t *testing.T) {
+	bin := buildCommsBinary(t)
+	repo := setupTestRepo(t)
+	home := t.TempDir()
+	path := "line\nbreak.txt"
+	absolute := filepath.Join(repo, path)
+	if err := os.WriteFile(absolute, []byte("peer work\n"), 0o644); err != nil {
+		t.Fatalf("write newline filename: %v", err)
+	}
+	runGit(t, repo, "add", "--", path)
+
+	claim := exec.Command(bin, "claim", "*.txt", "--intent", "peer text files")
+	claim.Dir = repo
+	claim.Env = childEnv(home, "peer-agent")
+	if out, err := claim.CombinedOutput(); err != nil {
+		t.Fatalf("peer glob claim: %v: %s", err, out)
+	}
+
+	check := exec.Command(bin, "check", "--staged")
+	check.Dir = repo
+	check.Env = childEnv(home, "current-agent")
+	out, err := check.CombinedOutput()
+	if err == nil {
+		t.Fatalf("peer glob claim must block newline filename; output:\n%s", out)
+	}
+	if !strings.Contains(string(out), "line?break.txt") {
+		t.Fatalf("diagnostic must visibly sanitize the newline filename; got:\n%s", out)
+	}
+
+	shell := "/bin/sh"
+	if zsh, lookupErr := exec.LookPath("zsh"); lookupErr == nil {
+		shell = zsh
+	}
+	recovery := exec.Command(shell, "-c", stagedRecoveryCommand(t, out))
+	if recoveryOut, recoveryErr := recovery.CombinedOutput(); recoveryErr != nil {
+		t.Fatalf("printed recovery must preserve exact newline filename bytes in %s: %v: %s\ncheck output:\n%s", shell, recoveryErr, recoveryOut, out)
+	}
+	if _, statErr := os.Stat(absolute); statErr != nil {
+		t.Fatalf("recovery must preserve the working-tree file: %v", statErr)
+	}
+	staged := exec.Command("git", "diff", "--cached", "--name-only", "-z", "--", path)
+	staged.Dir = repo
+	if stagedOut, stagedErr := staged.CombinedOutput(); stagedErr != nil {
+		t.Fatalf("inspect staged newline path: %v: %s", stagedErr, stagedOut)
+	} else if len(stagedOut) != 0 {
+		t.Fatalf("recovery must remove newline filename from index; got %q", stagedOut)
 	}
 }
