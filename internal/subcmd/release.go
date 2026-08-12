@@ -13,7 +13,7 @@ import (
 
 // NewReleaseCmd builds `comms release`.
 //
-// One of {id arg, --latest, --all-mine} must be supplied. Releasing someone
+// One of {id args, --latest, --all-mine} must be supplied. Releasing someone
 // else's claim requires --reason (= arbitrated release, recorded in audit).
 func NewReleaseCmd() *cobra.Command {
 	var (
@@ -23,9 +23,8 @@ func NewReleaseCmd() *cobra.Command {
 		result  string
 	)
 	cmd := &cobra.Command{
-		Use:   "release [<id>|--latest|--all-mine] [--result <text>]",
+		Use:   "release [<id> ...|--latest|--all-mine] [--result <text>]",
 		Short: "Close one or more of your claims",
-		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRelease(args, latest, allMine, reason, result)
 		},
@@ -42,7 +41,7 @@ func runRelease(args []string, latest, allMine bool, reason, result string) erro
 		Fatalf(2, "release: must supply <id>, --latest, or --all-mine")
 	}
 	modes := 0
-	if len(args) == 1 {
+	if len(args) > 0 {
 		modes++
 	}
 	if latest {
@@ -52,7 +51,7 @@ func runRelease(args []string, latest, allMine bool, reason, result string) erro
 		modes++
 	}
 	if modes > 1 {
-		return fmt.Errorf("release: <id>, --latest, and --all-mine are mutually exclusive")
+		return fmt.Errorf("release: <id> ..., --latest, and --all-mine are mutually exclusive")
 	}
 
 	rt, err := Open(OpenOpts{Mutating: true})
@@ -63,12 +62,19 @@ func runRelease(args []string, latest, allMine bool, reason, result string) erro
 
 	var targets []*state.Claim
 	switch {
-	case len(args) == 1:
-		c := rt.State.ClaimByID(args[0])
-		if c == nil {
-			Fatalf(2, "release: no active claim matches %q", args[0])
+	case len(args) > 0:
+		seen := make(map[string]string, len(args))
+		for _, arg := range args {
+			c := rt.State.ClaimByID(arg)
+			if c == nil {
+				Fatalf(2, "release: no active claim matches %q", arg)
+			}
+			if previous, exists := seen[c.ID]; exists {
+				Fatalf(2, "release: %q selects claim %s more than once (already selected by %q)", arg, short(c.ID), previous)
+			}
+			seen[c.ID] = arg
+			targets = append(targets, c)
 		}
-		targets = []*state.Claim{c}
 	case latest:
 		c := rt.State.LatestClaimByActor(rt.Actor)
 		if c == nil {

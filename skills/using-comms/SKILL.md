@@ -172,6 +172,14 @@ claims across a pause, a context switch, or the end of a session.
 COMMS_ACTOR=claude-dev comms release --latest --result "PR #321 merged"
 ```
 
+Release several selected claims in one atomic command. Comms resolves every ID
+before writing anything, so an unknown or duplicate selection leaves all claims
+active:
+
+```bash
+COMMS_ACTOR=claude-dev comms release 01JX2Q3Y7W 01JX2Q4A8K --result "committed together"
+```
+
 **On a task switch — or when you stop for the day — sweep all your claims** so
 nothing is left locked behind an idle or dead session:
 

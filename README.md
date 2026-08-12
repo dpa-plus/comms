@@ -197,7 +197,7 @@ comms session start "<name>" [--label "..."]  # create + join a named comms sess
 comms session join "<name>" [--label "..."]   # join an existing named comms session
 comms session end "<name>" [--reason "..."]   # archive one named session + release its claims
 comms claim "<scope>" ["<scope>" ...] --intent "<text>" [--steal <id> [--reason "..."]]  # steal a stale (>1h) claim freely; --reason needed for an active one
-comms release [<id>|--latest|--all-mine] [--result "<text>"]
+comms release [<id> ...|--latest|--all-mine] [--result "<text>"]  # selected IDs release atomically
 comms session retire <actor> [--reason "..."] # remove actor from active roster; releases its claims
 comms session lead [<actor>] [--reason "..."] # make exactly one active actor the leader
 comms check <path>                            # PreToolUse hook (also: --stdin-json)

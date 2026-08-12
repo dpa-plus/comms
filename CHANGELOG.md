@@ -11,6 +11,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `comms check --staged` pre-commit guard, which reports every staged path
   claimed by another actor and prints shell-safe commands to unstage those paths
   without discarding working-tree changes.
+- `comms release <id> <id> ...` for atomically releasing several selected
+  claims after every supplied ID has been resolved and validated.
 
 ## [0.1.0] - 2026-06-17
 
