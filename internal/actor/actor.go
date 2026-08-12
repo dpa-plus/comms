@@ -70,6 +70,13 @@ func IsGeneric(name string) bool {
 	return isGeneric(name)
 }
 
+// GenericAllowed reports whether the explicit emergency override permits a
+// generic actor. Read-only conflict checks use the same rule as mutating
+// commands so an intentionally authorized actor recognizes its own claims.
+func GenericAllowed() bool {
+	return genericAllowed()
+}
+
 // genericNames is the case-insensitive equality blocklist. Per the plan's
 // Round 4 patch: equality, not substring — so `claude-3a1f`, `codex-9b2c`,
 // `agent-0`, `human-eli` all pass.

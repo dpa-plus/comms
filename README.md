@@ -201,6 +201,7 @@ comms release [<id>|--latest|--all-mine] [--result "<text>"]
 comms session retire <actor> [--reason "..."] # remove actor from active roster; releases its claims
 comms session lead [<actor>] [--reason "..."] # make exactly one active actor the leader
 comms check <path>                            # PreToolUse hook (also: --stdin-json)
+comms check --staged                         # pre-commit guard: block peer-claimed staged paths
 comms status [--json]
 comms log [--actor X] [--since 1h] [--scope path] [--type list] [--category cat]
 comms note [--priority] "<=200-char FYI>"
@@ -244,7 +245,7 @@ launchctl kickstart -k "gui/$(id -u)/plus.dpa.comms-ui"  # if installed as a log
 - **uuid-free, dependency-light.** The core is the Go standard library plus a CLI framework, a ULID generator, and a file watcher.
 - **Append-only + `flock`.** Writes are serialized by a per-repo file lock; the log is never rewritten, so history and audit are free.
 - **Recoverable by design.** Blank lines are skipped, a torn final line is ignored, duplicate event IDs are dropped — a half-written line never breaks a read.
-- **Opt-in, not enforced.** comms suggests and records; it doesn't block your editor. A `PreToolUse` hook (`comms check`) can warn before an agent touches a claimed path.
+- **Opt-in, not enforced.** comms suggests and records; it doesn't block your editor. A `PreToolUse` hook (`comms check`) can warn before an agent touches a claimed path, and `comms check --staged` can stop a commit when its Git index contains another actor's claimed files.
 
 More in [`docs/DESIGN.md`](docs/DESIGN.md) and [`docs/PROTOCOL.md`](docs/PROTOCOL.md).
 

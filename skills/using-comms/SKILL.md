@@ -179,6 +179,21 @@ nothing is left locked behind an idle or dead session:
 COMMS_ACTOR=claude-dev comms release --all-mine --result "switching to billing fixes"
 ```
 
+## Guard the Git Index Before Commit
+
+Claims do not prevent Git from staging another actor's files. After staging only
+the intended paths, check the index before every commit:
+
+```bash
+COMMS_ACTOR=claude-dev comms check --staged
+```
+
+Exit 0 means the staged paths are unclaimed or claimed by this actor. Exit 1
+lists every peer-owned staged path and prints literal-path recovery commands:
+`git restore --staged` normally, or `git rm --cached` before the first commit.
+Run them to remove files from the commit without discarding their working-tree
+changes, then inspect the staged diff again.
+
 ## Findings
 
 ```bash

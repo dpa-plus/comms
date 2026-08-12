@@ -1,16 +1,20 @@
 package subcmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/dpa-plus/comms/internal/actor"
 	"github.com/dpa-plus/comms/internal/overlap"
 	"github.com/dpa-plus/comms/internal/render"
+	"github.com/dpa-plus/comms/internal/state"
 	"github.com/spf13/cobra"
 )
 
@@ -24,12 +28,19 @@ import (
 // In --stdin-json mode the path is extracted from the JSON Claude Code sends
 // on the hook stdin. Otherwise the path is the positional argument.
 func NewCheckCmd() *cobra.Command {
-	var stdinJSON bool
+	var (
+		stdinJSON bool
+		staged    bool
+	)
 	cmd := &cobra.Command{
-		Use:   "check <path>",
-		Short: "Check whether a file is claimed by another actor",
+		Use:   "check <path> | check --staged",
+		Short: "Check paths for claims held by another actor",
 		Long: `Check whether a path is currently claimed by an actor OTHER than the
 caller.
+
+Use --staged immediately before committing to check every path in the Git index.
+If a staged path is claimed by another actor, comms reports every conflict and
+prints exact commands to unstage those paths without discarding their changes.
 
 Exit codes:
   0 — path clear, or held by same actor
@@ -40,14 +51,31 @@ Use --stdin-json to read Claude Code's PreToolUse JSON payload from stdin
 instead of taking a positional path argument.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCheck(args, stdinJSON)
+			return runCheck(args, stdinJSON, staged)
 		},
 	}
 	cmd.Flags().BoolVar(&stdinJSON, "stdin-json", false, "read tool_input.file_path from JSON stdin (PreToolUse hook mode)")
+	cmd.Flags().BoolVar(&staged, "staged", false, "check every path staged in Git before committing")
 	return cmd
 }
 
-func runCheck(args []string, stdinJSON bool) error {
+func runCheck(args []string, stdinJSON, staged bool) error {
+	if staged && (stdinJSON || len(args) > 0) {
+		Fatalf(2, "check: --staged cannot be combined with a path or --stdin-json")
+	}
+	if staged {
+		rt, err := Open(OpenOpts{Mutating: false, SkipLock: true})
+		if err != nil {
+			Fatalf(2, "check: %v", err)
+		}
+		defer rt.Close()
+		paths, err := stagedGitPaths(rt.Repo.Root)
+		if err != nil {
+			Fatalf(2, "check: %v", err)
+		}
+		return checkStagedPaths(rt, paths)
+	}
+
 	var path string
 	if stdinJSON {
 		p, err := extractPathFromStdinJSON(os.Stdin)
@@ -89,14 +117,12 @@ func runCheck(args []string, stdinJSON bool) error {
 	}
 
 	// Fail-safe actor handling: ConflictsFor excludes claims held by the
-	// caller. A generic ("eli"/"claude"/…) or empty COMMS_ACTOR cannot
-	// legitimately hold a claim (mutating commands reject generic names), so we
-	// must NOT exclude by it — otherwise two agents both running with
-	// COMMS_ACTOR=eli would treat each other's claims as their own and check
-	// would wave through a conflicting edit. Use a sentinel that matches no
-	// real actor so every overlapping claim is reported.
+	// caller. A generic ("eli"/"claude"/…) or empty COMMS_ACTOR normally cannot
+	// legitimately hold a claim, so do not exclude it unless the caller explicitly
+	// enabled COMMS_ALLOW_GENERIC_ACTOR. Use a sentinel that matches no real actor
+	// when identity is absent or unauthorized.
 	checkActor := rt.Actor
-	if checkActor == "" || actor.IsGeneric(checkActor) {
+	if checkActor == "" || (actor.IsGeneric(checkActor) && !actor.GenericAllowed()) {
 		checkActor = "\x00not-a-real-actor"
 	}
 	conflicts := rt.State.ConflictsFor(scope, checkActor)
@@ -112,6 +138,102 @@ func runCheck(args []string, stdinJSON bool) error {
 	})
 	os.Exit(1)
 	return nil
+}
+
+type stagedConflict struct {
+	path    string
+	holders []*state.Claim
+}
+
+func stagedGitPaths(repoRoot string) ([]string, error) {
+	// --no-renames exposes both sides of a rename. Both the deleted source and
+	// added destination matter because either path may be claimed by a peer.
+	cmd := exec.Command("git", "-C", repoRoot, "diff", "--cached", "--name-only", "--no-renames", "-z", "--")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("read staged Git paths: %w", err)
+	}
+	parts := bytes.Split(out, []byte{0})
+	paths := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if len(part) == 0 {
+			continue
+		}
+		paths = append(paths, string(part))
+	}
+	return paths, nil
+}
+
+func checkStagedPaths(rt *Runtime, paths []string) error {
+	checkActor := rt.Actor
+	if checkActor == "" || (actor.IsGeneric(checkActor) && !actor.GenericAllowed()) {
+		checkActor = "\x00not-a-real-actor"
+	}
+
+	conflicts := make([]stagedConflict, 0)
+	for _, path := range paths {
+		normalized, err := overlap.NormalizePath(filepath.ToSlash(path))
+		if err != nil {
+			return fmt.Errorf("normalize staged path %q: %w", path, err)
+		}
+		// Git gives us filenames, not comms' path#anchor grammar. Construct a
+		// whole-file scope directly so a literal '#' stays part of the filename.
+		scope := overlap.Scope{
+			Raw:    normalized,
+			Path:   normalized,
+			Anchor: overlap.Anchor{Kind: overlap.AnchorWhole},
+		}
+		holders := rt.State.ConflictsFor(scope, checkActor)
+		if len(holders) > 0 {
+			conflicts = append(conflicts, stagedConflict{path: scope.Path, holders: holders})
+		}
+	}
+	if len(conflicts) == 0 {
+		return nil
+	}
+	hasHead, err := gitHasHEAD(rt.Repo.Root)
+	if err != nil {
+		return err
+	}
+
+	sort.Slice(conflicts, func(i, j int) bool { return conflicts[i].path < conflicts[j].path })
+	fmt.Fprintln(os.Stderr, "BLOCKED: staged Git changes overlap claims held by other actors.")
+	for _, conflict := range conflicts {
+		fmt.Fprintf(os.Stderr, "  %s\n", render.EscapeScope(conflict.path))
+		for _, holder := range conflict.holders {
+			fmt.Fprintf(os.Stderr, "    Holder: @%s  Claim: %s  Intent: %q\n",
+				render.EscapeActor(holder.Actor), render.EscapeScope(holder.ID), render.EscapeScope(holder.Intent))
+		}
+	}
+	fmt.Fprintln(os.Stderr, "\nUnstage peer-owned paths before committing (working-tree changes are kept):")
+	for _, conflict := range conflicts {
+		literalPathspec := ":(literal)" + render.EscapeScope(conflict.path)
+		if hasHead {
+			fmt.Fprintf(os.Stderr, "  git restore --staged -- %s\n", shellQuote(literalPathspec))
+		} else {
+			fmt.Fprintf(os.Stderr, "  git rm --cached -- %s\n", shellQuote(literalPathspec))
+		}
+	}
+	os.Exit(1)
+	return nil
+}
+
+// shellQuote returns one literal shell argument. Single quotes stop command,
+// variable, glob, and whitespace expansion; an embedded quote is represented
+// by ending the quoted string, emitting a quoted quote, and reopening it.
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+}
+
+func gitHasHEAD(repoRoot string) (bool, error) {
+	cmd := exec.Command("git", "-C", repoRoot, "rev-parse", "--verify", "--quiet", "HEAD")
+	if err := cmd.Run(); err != nil {
+		if exit, ok := err.(*exec.ExitError); ok && exit.ExitCode() == 1 {
+			return false, nil
+		}
+		return false, fmt.Errorf("inspect Git HEAD: %w", err)
+	}
+	return true, nil
 }
 
 // makeRepoRelative converts an absolute or relative path into a
