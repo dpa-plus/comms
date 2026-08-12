@@ -266,3 +266,32 @@ func TestCheckStagedInitialRepositoryUsesRmCachedRecovery(t *testing.T) {
 		t.Fatalf("initial repository must not receive restore command that requires HEAD; got:\n%s", out)
 	}
 }
+
+func TestCheckStagedTreatsStarInFilenameAsLiteral(t *testing.T) {
+	bin := buildCommsBinary(t)
+	repo := setupTestRepo(t)
+	home := t.TempDir()
+	stagedPath := "src/literal*.txt"
+	absolute := filepath.Join(repo, stagedPath)
+	if err := os.MkdirAll(filepath.Dir(absolute), 0o755); err != nil {
+		t.Fatalf("mkdir src: %v", err)
+	}
+	if err := os.WriteFile(absolute, []byte("current work\n"), 0o644); err != nil {
+		t.Fatalf("write staged file: %v", err)
+	}
+	runGit(t, repo, "add", "--", stagedPath)
+
+	claim := exec.Command(bin, "claim", "src/literal.txt", "--intent", "peer implementation")
+	claim.Dir = repo
+	claim.Env = childEnv(home, "peer-agent")
+	if out, err := claim.CombinedOutput(); err != nil {
+		t.Fatalf("peer claim: %v: %s", err, out)
+	}
+
+	check := exec.Command(bin, "check", "--staged")
+	check.Dir = repo
+	check.Env = childEnv(home, "current-agent")
+	if out, err := check.CombinedOutput(); err != nil {
+		t.Fatalf("literal-star filename must not overlap distinct literal claim: %v: %s", err, out)
+	}
+}

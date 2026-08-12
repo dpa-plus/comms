@@ -176,16 +176,21 @@ func checkStagedPaths(rt *Runtime, paths []string) error {
 		if err != nil {
 			return fmt.Errorf("normalize staged path %q: %w", path, err)
 		}
-		// Git gives us filenames, not comms' path#anchor grammar. Construct a
-		// whole-file scope directly so a literal '#' stays part of the filename.
-		scope := overlap.Scope{
-			Raw:    normalized,
-			Path:   normalized,
-			Anchor: overlap.Anchor{Kind: overlap.AnchorWhole},
+		// Git gives us one concrete filename, not a comms glob pattern. Interpret
+		// metacharacters only on the claim side so a literal '*' in the filename
+		// cannot create a false conflict with a different exact claim.
+		holders := make([]*state.Claim, 0)
+		for _, claim := range rt.State.Claims {
+			if claim.Actor == checkActor {
+				continue
+			}
+			if overlap.PatternMatchesPath(claim.Scope.Path, normalized) {
+				holders = append(holders, claim)
+			}
 		}
-		holders := rt.State.ConflictsFor(scope, checkActor)
+		sort.Slice(holders, func(i, j int) bool { return holders[i].TS.Before(holders[j].TS) })
 		if len(holders) > 0 {
-			conflicts = append(conflicts, stagedConflict{path: scope.Path, holders: holders})
+			conflicts = append(conflicts, stagedConflict{path: normalized, holders: holders})
 		}
 	}
 	if len(conflicts) == 0 {

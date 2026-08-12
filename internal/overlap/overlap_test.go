@@ -75,6 +75,26 @@ func TestPathsOverlap_AdditionalEdgeCases(t *testing.T) {
 	}
 }
 
+func TestPatternMatchesPathTreatsConcretePathStarsLiterally(t *testing.T) {
+	tests := []struct {
+		pattern string
+		path    string
+		want    bool
+	}{
+		{pattern: "src/*.txt", path: "src/literal*.txt", want: true},
+		{pattern: "src/literal.txt", path: "src/literal*.txt", want: false},
+		{pattern: "src/other*.txt", path: "src/literal*.txt", want: false},
+		{pattern: "src/**", path: "src/nested/literal*.txt", want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.pattern+" matches "+tt.path, func(t *testing.T) {
+			if got := PatternMatchesPath(tt.pattern, tt.path); got != tt.want {
+				t.Fatalf("PatternMatchesPath(%q, %q) = %v, want %v", tt.pattern, tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestPathsOverlap_InteriorLiteralFragments covers BUG 1: the old
 // prefix/suffix-anchor heuristic ignored interior literal fragments, reporting
 // false-positive overlaps. The DP intersection test must honor required
