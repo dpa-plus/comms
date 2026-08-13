@@ -33,8 +33,16 @@ If exit code 1: read stderr, surface the conflict to the user, ask whether the p
 
 **When done with a claim:**
 ```bash
-COMMS_ACTOR=codex-20260527-a comms release --result "PR #123 merged"
+COMMS_ACTOR=codex-20260527-a comms release --latest --result "PR #123 merged"
 ```
+
+**Before every commit:**
+```bash
+COMMS_ACTOR=codex-20260527-a comms check --staged
+```
+If exit code 1: run the printed literal-path recovery commands. Comms uses
+`git restore --staged` normally and `git rm --cached` before the first commit;
+both keep the working-tree changes.
 
 **Record findings:**
 ```bash

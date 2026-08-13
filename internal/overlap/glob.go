@@ -28,6 +28,58 @@ func PathsOverlap(a, b string) bool {
 	return segmentsOverlap(aSeg, bSeg)
 }
 
+// PatternMatchesPath reports whether a claim path pattern matches one concrete
+// repository path. Only pattern interprets `*` and `**`; stars in path are
+// ordinary filename bytes. Use this for paths supplied by Git or the filesystem,
+// not for claim-to-claim intersection (which uses PathsOverlap).
+func PatternMatchesPath(pattern, path string) bool {
+	return patternMatchesSegments(strings.Split(pattern, "/"), strings.Split(path, "/"))
+}
+
+func patternMatchesSegments(pattern, path []string) bool {
+	if len(pattern) == 0 {
+		return len(path) == 0
+	}
+	if pattern[0] == "**" {
+		for consumed := 0; consumed <= len(path); consumed++ {
+			if patternMatchesSegments(pattern[1:], path[consumed:]) {
+				return true
+			}
+		}
+		return false
+	}
+	if len(path) == 0 || !segmentPatternMatches(pattern[0], path[0]) {
+		return false
+	}
+	return patternMatchesSegments(pattern[1:], path[1:])
+}
+
+func segmentPatternMatches(pattern, value string) bool {
+	dp := make([][]bool, len(pattern)+1)
+	for i := range dp {
+		dp[i] = make([]bool, len(value)+1)
+	}
+	dp[len(pattern)][len(value)] = true
+	for i := len(pattern) - 1; i >= 0; i-- {
+		if pattern[i] == '*' {
+			dp[i][len(value)] = dp[i+1][len(value)]
+		}
+	}
+	for i := len(pattern) - 1; i >= 0; i-- {
+		for j := len(value) - 1; j >= 0; j-- {
+			switch pattern[i] {
+			case '*':
+				dp[i][j] = dp[i+1][j] || dp[i][j+1]
+			default:
+				if pattern[i] == value[j] {
+					dp[i][j] = dp[i+1][j+1]
+				}
+			}
+		}
+	}
+	return dp[0][0]
+}
+
 // segmentsOverlap is the recursive worker. Operates on segment slices.
 func segmentsOverlap(a, b []string) bool {
 	// Base cases.

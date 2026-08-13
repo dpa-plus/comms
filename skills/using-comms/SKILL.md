@@ -172,12 +172,35 @@ claims across a pause, a context switch, or the end of a session.
 COMMS_ACTOR=claude-dev comms release --latest --result "PR #321 merged"
 ```
 
+Release several selected claims in one atomic command. Comms resolves every ID
+before writing anything, so an unknown or duplicate selection leaves all claims
+active:
+
+```bash
+COMMS_ACTOR=claude-dev comms release 01JX2Q3Y7W 01JX2Q4A8K --result "committed together"
+```
+
 **On a task switch — or when you stop for the day — sweep all your claims** so
 nothing is left locked behind an idle or dead session:
 
 ```bash
 COMMS_ACTOR=claude-dev comms release --all-mine --result "switching to billing fixes"
 ```
+
+## Guard the Git Index Before Commit
+
+Claims do not prevent Git from staging another actor's files. After staging only
+the intended paths, check the index before every commit:
+
+```bash
+COMMS_ACTOR=claude-dev comms check --staged
+```
+
+Exit 0 means the staged paths are unclaimed or claimed by this actor. Exit 1
+lists every peer-owned staged path and prints literal-path recovery commands:
+`git restore --staged` normally, or `git rm --cached` before the first commit.
+Run them to remove files from the commit without discarding their working-tree
+changes, then inspect the staged diff again.
 
 ## Findings
 

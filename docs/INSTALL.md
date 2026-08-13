@@ -27,11 +27,18 @@ do not install hooks and do not edit shell startup files. Instead, invoke the
 COMMS_ACTOR=claude-dev comms hello --label "Claude Dev"
 COMMS_ACTOR=claude-dev comms status
 COMMS_ACTOR=claude-dev comms claim "src/foo.ts" --intent "fix bug"
+COMMS_ACTOR=claude-dev comms check --staged
 COMMS_ACTOR=claude-dev comms release --latest --result "done"
 ```
 
 Pick one actor per assistant conversation and reuse it until that conversation
 ends.
+
+Run `comms check --staged` after staging explicit files and before `git commit`.
+It exits 1 when the Git index contains a path claimed by another actor and prints
+safe `git restore --staged` commands, or `git rm --cached` before the repository's
+first commit. Both keep the working-tree changes and only remove them from the
+next commit.
 
 If an agent accidentally registers a throwaway actor name, do not edit the
 JSONL log. Append an audit event that retires it from the active roster:
