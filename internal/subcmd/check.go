@@ -229,7 +229,7 @@ func checkStagedPaths(rt *Runtime, paths []string) error {
 			// literal pathspec from its octal byte escapes on a single output line.
 			command := "git restore --staged"
 			if !hasHead {
-				command = "git rm --cached"
+				command = "git rm --cached -f"
 			}
 			fmt.Fprintf(os.Stderr, "  %sprintf '%%b' %s | %s --pathspec-from-file=- --pathspec-file-nul)\n",
 				recoveryPrefix, shellQuote(octalEscapeBytes(literalPathspec)+`\0000`), command)
@@ -239,7 +239,7 @@ func checkStagedPaths(rt *Runtime, paths []string) error {
 			fmt.Fprintf(os.Stderr, "  %sgit restore --staged -- %s)\n",
 				recoveryPrefix, shellQuote(literalPathspec))
 		} else {
-			fmt.Fprintf(os.Stderr, "  %sgit rm --cached -- %s)\n",
+			fmt.Fprintf(os.Stderr, "  %sgit rm --cached -f -- %s)\n",
 				recoveryPrefix, shellQuote(literalPathspec))
 		}
 	}

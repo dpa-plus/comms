@@ -360,6 +360,10 @@ func TestCheckStagedInitialRepositoryUsesRmCachedRecovery(t *testing.T) {
 		t.Fatalf("write new file: %v", err)
 	}
 	runGit(t, repo, "add", "--", path)
+	workingContent := []byte("changed after staging\n")
+	if err := os.WriteFile(absolute, workingContent, 0o644); err != nil {
+		t.Fatalf("change new file after staging: %v", err)
+	}
 
 	claim := exec.Command(bin, "claim", path, "--intent", "peer first commit work")
 	claim.Dir = repo
@@ -375,12 +379,85 @@ func TestCheckStagedInitialRepositoryUsesRmCachedRecovery(t *testing.T) {
 	if err == nil {
 		t.Fatalf("staged check should block the peer path; output:\n%s", out)
 	}
-	want := "git rm --cached -- ':(literal)src/new[1].txt'"
+	want := "git rm --cached -f -- ':(literal)src/new[1].txt'"
 	if !strings.Contains(string(out), want) {
 		t.Fatalf("initial repository must receive HEAD-free recovery; want %q in:\n%s", want, out)
 	}
 	if strings.Contains(string(out), "git restore --staged") {
 		t.Fatalf("initial repository must not receive restore command that requires HEAD; got:\n%s", out)
+	}
+
+	recovery := exec.Command("/bin/sh", "-c", stagedRecoveryCommand(t, out))
+	if recoveryOut, recoveryErr := recovery.CombinedOutput(); recoveryErr != nil {
+		t.Fatalf("initial-repository recovery must unstage content changed after git add: %v: %s\ncheck output:\n%s", recoveryErr, recoveryOut, out)
+	}
+	if got, readErr := os.ReadFile(absolute); readErr != nil {
+		t.Fatalf("read working-tree file after recovery: %v", readErr)
+	} else if string(got) != string(workingContent) {
+		t.Fatalf("recovery changed working-tree content: got %q, want %q", got, workingContent)
+	}
+	staged := exec.Command("git", "diff", "--cached", "--name-only", "--", path)
+	staged.Dir = repo
+	if stagedOut, stagedErr := staged.CombinedOutput(); stagedErr != nil {
+		t.Fatalf("inspect staged path: %v: %s", stagedErr, stagedOut)
+	} else if len(stagedOut) != 0 {
+		t.Fatalf("recovery must remove %q from the initial index; got %q", path, stagedOut)
+	}
+}
+
+func TestCheckStagedInitialRepositoryRecoversChangedNewlineFilename(t *testing.T) {
+	bin := buildCommsBinary(t)
+	repo := t.TempDir()
+	home := t.TempDir()
+	runGit(t, repo, "init")
+	path := "line\nbreak.txt"
+	absolute := filepath.Join(repo, path)
+	if err := os.WriteFile(absolute, []byte("staged content\n"), 0o644); err != nil {
+		t.Fatalf("write newline filename: %v", err)
+	}
+	runGit(t, repo, "add", "--", path)
+	workingContent := []byte("changed after staging\n")
+	if err := os.WriteFile(absolute, workingContent, 0o644); err != nil {
+		t.Fatalf("change newline filename after staging: %v", err)
+	}
+
+	claim := exec.Command(bin, "claim", "*.txt", "--intent", "peer first commit text files")
+	claim.Dir = repo
+	claim.Env = childEnv(home, "peer-agent")
+	if out, err := claim.CombinedOutput(); err != nil {
+		t.Fatalf("peer glob claim: %v: %s", err, out)
+	}
+
+	check := exec.Command(bin, "check", "--staged")
+	check.Dir = repo
+	check.Env = childEnv(home, "current-agent")
+	out, err := check.CombinedOutput()
+	if err == nil {
+		t.Fatalf("peer glob claim must block newline filename; output:\n%s", out)
+	}
+	if !strings.Contains(string(out), "git rm --cached -f --pathspec-from-file=- --pathspec-file-nul") {
+		t.Fatalf("byte-safe initial recovery must force index-only removal; got:\n%s", out)
+	}
+
+	shell := "/bin/sh"
+	if zsh, lookupErr := exec.LookPath("zsh"); lookupErr == nil {
+		shell = zsh
+	}
+	recovery := exec.Command(shell, "-c", stagedRecoveryCommand(t, out))
+	if recoveryOut, recoveryErr := recovery.CombinedOutput(); recoveryErr != nil {
+		t.Fatalf("byte-safe initial recovery must unstage content changed after git add in %s: %v: %s\ncheck output:\n%s", shell, recoveryErr, recoveryOut, out)
+	}
+	if got, readErr := os.ReadFile(absolute); readErr != nil {
+		t.Fatalf("read working-tree file after recovery: %v", readErr)
+	} else if string(got) != string(workingContent) {
+		t.Fatalf("recovery changed working-tree content: got %q, want %q", got, workingContent)
+	}
+	staged := exec.Command("git", "diff", "--cached", "--name-only", "-z", "--", path)
+	staged.Dir = repo
+	if stagedOut, stagedErr := staged.CombinedOutput(); stagedErr != nil {
+		t.Fatalf("inspect staged newline path: %v: %s", stagedErr, stagedOut)
+	} else if len(stagedOut) != 0 {
+		t.Fatalf("recovery must remove newline filename from the initial index; got %q", stagedOut)
 	}
 }
 
