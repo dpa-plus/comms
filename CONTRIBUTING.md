@@ -6,7 +6,7 @@ that way are very welcome.
 
 ## Development setup
 
-You need **Go 1.25.10+** (see `go.mod`). Everything runs through the `Makefile`:
+You need **Go 1.25.11+** (see `go.mod`). Everything runs through the `Makefile`:
 
 ```bash
 make build      # build ./comms with version info baked in

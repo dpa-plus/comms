@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-13
+
 ### Added
 
 - `comms check --staged` pre-commit guard, which reports every staged path
@@ -13,6 +15,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   without discarding working-tree changes.
 - `comms release <id> <id> ...` for atomically releasing several selected
   claims after every supplied ID has been resolved and validated.
+
+### Changed
+
+- Staged-path recovery now remains executable from an external working
+  directory, preserves unusual Git filename bytes, treats claim globs
+  one-sidedly, and safely unstages changed files before an initial commit.
+- Minimum Go version raised to 1.25.11; Go modules and GitHub Actions updated.
 
 ## [0.1.0] - 2026-06-17
 
@@ -38,5 +47,6 @@ First public release.
 - A `using-comms` skill for Claude/Codex agents and a launchd login-service
   template (`contrib/launchd/`) for running the dashboard on macOS.
 
-[Unreleased]: https://github.com/dpa-plus/comms/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/dpa-plus/comms/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/dpa-plus/comms/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/dpa-plus/comms/releases/tag/v0.1.0
