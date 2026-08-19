@@ -2311,7 +2311,11 @@ main {
   padding: 12px 24px 28px;
   display: grid;
   grid-template-columns: minmax(260px, 300px) minmax(680px, 1fr) minmax(300px, 360px);
-  grid-template-rows: minmax(560px, 62vh) auto minmax(420px, auto);
+  /* The history row is BOUNDED. With auto it sized to its content, and the
+     content is every event in the log — a 52,000-pixel document whose scrollbar
+     thumb was a few pixels tall, with the panels you actually watch stranded at
+     the top of it. The panel already scrolls itself; it just needed a height. */
+  grid-template-rows: minmax(560px, 62vh) auto minmax(360px, 48vh);
   grid-template-areas:
     "roster claims signals"
     "graph graph graph"
@@ -2379,22 +2383,18 @@ main {
 .claims {
   grid-area: claims;
 }
+/* Three stacked panels, each with its own scrollbar, meant three places for a
+   sentence to be cut off mid-word and three things to scroll to read one column.
+   One panel, one scrollbar, headings that stay put as you go. */
 .signals {
   grid-area: signals;
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
+  display: block;
   min-height: 0;
-  height: 100%;
-  overflow: hidden;
+  overflow-y: auto;
 }
-.signals .panel {
-  box-shadow: var(--shadow);
-  min-height: 0;
-}
-.signals .panel:nth-child(1) { flex: 1.2 1 0; }
-.signals .panel:nth-child(2) { flex: 1 1 0; }
-.signals .panel:nth-child(3) { flex: 1 1 0; }
+.signals > h2 { position: sticky; top: 0; z-index: 2; background: var(--surface); }
+.signals > h2:first-child { border-top: 0; }
+.signals > div + h2 { border-top: 1px solid var(--line); }
 .row {
   padding: 14px 16px;
   border-bottom: 1px solid var(--soft);
@@ -2433,8 +2433,7 @@ main {
   overflow: auto;
 }
 .claims > .scroll,
-.events > .scroll,
-.signals .scroll {
+.events > .scroll {
   flex: 1 1 auto;
 }
 .claims table,
@@ -2653,27 +2652,51 @@ body.unified main {
 .rel-result { font-weight: 620; line-height: 1.34; overflow-wrap: anywhere; }
 .rel-result + .meta.scope { margin-top: 5px; color: var(--teal); }
 
-/* ── Active Claims as readable cards (replaces the cramped fixed table) ── */
-.claim-list { padding: 10px 12px 12px; }
-.claim-card {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 12px 14px;
-  margin-bottom: 8px;
+/* ── Active claims, grouped by whose work it is and why ──
+   One agent editing eight files for one reason is ONE piece of work, and on the
+   old cards that reason was the same long sentence printed eight times — the
+   panel's dominant mass carrying almost no information, while the paths you were
+   actually scanning for got squeezed into a scrollbar. Print the reason once and
+   list the paths under it. */
+.claim-list { padding: 8px 10px 10px; }
+.claim-group {
   background: var(--surface-2);
   border: 1px solid var(--line);
   border-radius: 10px;
+  padding: 10px 12px 9px;
+  margin-bottom: 8px;
 }
-.claim-card:last-child { margin-bottom: 0; }
-.claim-card.stale {
-  background: var(--red-soft);
-  border-color: var(--red);
-  box-shadow: inset 3px 0 0 var(--red);
+.claim-group:last-child { margin-bottom: 0; }
+.claim-group.stale { background: var(--red-soft); border-color: var(--red); }
+.cg-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.cg-head .actor { font-weight: 680; }
+.cg-count {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
-.claim-main { min-width: 0; flex: 1 1 auto; }
-.claim-top { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-.claim-top .actor { font-weight: 680; }
+.cg-intent { margin-top: 4px; line-height: 1.45; overflow-wrap: anywhere; }
+.cg-dir {
+  margin-top: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.cg-dir + .cg-file { margin-top: 4px; }
+.cg-file {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 3px;
+  padding: 4px 0 4px 11px;
+  border-left: 2px solid var(--line-strong);
+}
+.cg-file:first-of-type { margin-top: 9px; }
+.cg-file .scope { flex: 1 1 auto; min-width: 0; }
+.cg-file.stale { border-left-color: var(--red); }
 .claim-sess {
   color: var(--muted);
   font-size: 12px;
@@ -2683,16 +2706,12 @@ body.unified main {
   max-width: 100%;
 }
 .claim-age {
-  margin-left: auto;
   color: var(--muted);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 .claim-age.is-stale { color: var(--red); font-weight: 650; }
-.claim-card .scope { margin-top: 6px; }
-.claim-intent { margin-top: 6px; color: var(--text); line-height: 1.5; overflow-wrap: anywhere; }
-.claim-act { flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; padding-top: 1px; }
 
 @media (max-width: 1180px) {
   body { overflow: auto; }
@@ -2719,6 +2738,11 @@ body.unified main {
   }
   .events { grid-column: auto; }
   .claims { min-height: 0; }
+  /* Stacked, nothing bounds a panel but itself. Cap the two that hold an
+     unbounded list so the column stays a page you scroll rather than a mile of
+     one panel with the rest stranded past it. */
+  .signals { max-height: 72vh; }
+  .events > .scroll { max-height: 72vh; }
   .scroll { max-height: 520px; }
 }
 @media (max-width: 620px) {
@@ -2821,7 +2845,7 @@ body.unified main {
     <div id="sessions" class="scroll"></div>
     <h2>Current Comms Session</h2>
     <div id="currentSession"></div>
-    <h2>Comms Session Archive</h2>
+    <h2 id="archiveHeading">Comms Session Archive</h2>
     <div id="commsSessions" class="scroll"></div>
   </section>
   <section class="panel claims">
@@ -2831,26 +2855,20 @@ body.unified main {
     </div>
     <div id="claims" class="scroll"></div>
   </section>
-  <div class="signals">
-    <section class="panel">
-      <h2>Recent Findings</h2>
-      <div id="findings" class="scroll"></div>
-    </section>
-    <section class="panel">
-      <h2>Recent Notes</h2>
-      <div id="notes" class="scroll"></div>
-    </section>
-    <section class="panel">
-      <h2>Recently Completed</h2>
-      <div id="releases" class="scroll"></div>
-    </section>
-  </div>
+  <section class="panel signals">
+    <h2>Recent findings</h2>
+    <div id="findings"></div>
+    <h2>Recent notes</h2>
+    <div id="notes"></div>
+    <h2>Recently completed</h2>
+    <div id="releases"></div>
+  </section>
   <section class="panel graph">
     <div class="panel-title">
       <h2>Work graph</h2>
       <div class="panel-tools"><span class="meta-inline" id="graphHint"></span></div>
     </div>
-    <div class="hint">An arrow means the task it points at comes afterwards. Tasks joined to nothing are shown apart, because they are. A task only unblocks what follows once it has been VERIFIED, not when it is merely finished.</div>
+    <div class="hint" id="graphExplainer">An arrow means the task it points at comes afterwards. Tasks joined to nothing are shown apart, because they are. A task only unblocks what follows once it has been VERIFIED, not when it is merely finished.</div>
     <div id="board" class="board"></div>
   </section>
   <section class="panel events">
@@ -3001,20 +3019,23 @@ function includesFilter(values, filter) {
 }
 function renderStats(data) {
   const claims = data.claims || [];
-  const findings = data.findings || [];
-  const notes = data.notes || [];
-  const archive = data.comms_sessions || [];
-  const activeSessions = data.active_comms_sessions || [];
   const stat = (label, value, warn) => '<div class="stat ' + (warn ? 'warn' : '') + '"><span class="stat-label">' + label + '</span><span class="stat-value">' + esc(value) + '</span></div>';
-  el('stats').innerHTML = [
-    stat('named sessions', activeSessions.length, false),
-    stat('actors', (data.sessions || []).length, false),
-    stat('claims', claims.length, false),
-    stat('stale', claims.filter(c => c.stale).length, claims.some(c => c.stale)),
-    stat('findings', findings.length, false),
-    stat('notes', notes.length, false),
-    stat('archives', archive.length, false)
-  ].join('');
+  // A count earns a tile only if you cannot already see it on this page.
+  // Findings, notes and the archive are rendered in full a few hundred pixels
+  // away, so tiles for them were chrome; and a row of seven nouns where three
+  // read zero teaches you to stop reading the row. What is left is what the page
+  // does not otherwise say at a glance: who is live, what is locked, and the two
+  // things that want you to act.
+  const stale = claims.filter(c => c.stale).length;
+  const board = data.task_board;
+  const tiles = [
+    stat('agents', (data.sessions || []).length, false),
+    stat('files claimed', claims.length, false)
+  ];
+  if (stale) tiles.push(stat('stale', stale, true));
+  if (board && board.review) tiles.push(stat('to verify', board.review, true));
+  if (board && board.cycles) tiles.push(stat('dependency cycle', board.cycles, true));
+  el('stats').innerHTML = tiles.join('');
 }
 async function load() {
   const res = await fetch('/api/status', { cache: 'no-store' });
@@ -3059,7 +3080,14 @@ function applySnapshot(data) {
   const rosterReleaseAll = actionByID(data, 'release_actor_claims');
   const rosterRepo = isUnified(data) ? (selectedProjectHash || '') : '';
   el('sessions').innerHTML = renderRows(view.sessions, s => {
-    const title = s.label ? esc(s.label) + ' <span class="meta-inline">@' + esc(s.actor) + '</span>' : '@' + esc(s.actor);
+    // The handle goes on the meta line, not beside the label. In a 220px column
+    // a label plus a handle wrapped mid-hyphen ("@claude-" / "auftraege"), and
+    // base_name is just the handle with its suffix cut off — the same name a
+    // third time. Label on top, handle where the other identifiers already are.
+    const title = s.label ? esc(s.label) : '@' + esc(s.actor);
+    // With no label the handle is already the heading, so the meta line starts
+    // with the host instead of repeating a truncated form of the same name.
+    const who = s.label ? '@' + esc(s.actor) + ' \u00b7 ' : '';
     // Count and routing come from the server PER ROW (claim_count/repo_hash):
     // correct even in the merged "All projects" view, where the same actor name
     // can appear under multiple repos (a client-side per-actor sum would
@@ -3076,7 +3104,7 @@ function applySnapshot(data) {
     const silent = s.silent_for || '';
     const activity = (!silent || silent === 'now') ? 'active' : ('silent ' + esc(silent));
     const dead = s.likely_dead ? ' <span class="pill dead" title="Holds ' + n + ' claim(s) and silent ' + esc(silent) + ' — looks crashed. Release frees its files for the rest of the team.">likely dead</span>' : '';
-    return '<div class="row session-row' + (s.likely_dead ? ' dead-row' : '') + '"><div><div class="actor">' + title + (s.leader ? ' <span class="pill leader">leader</span>' : '') + dead + '</div><div class="meta">' + esc(s.base_name || 'session') + ' · ' + esc(s.hostname || 'unknown host') + ' · ' + activity + '</div>' + (s.session_name ? '<div class="meta">in session: ' + esc(s.session_name) + '</div>' : '') + '</div>' + acts + '</div>';
+    return '<div class="row session-row' + (s.likely_dead ? ' dead-row' : '') + '"><div><div class="actor">' + title + (s.leader ? ' <span class="pill leader">leader</span>' : '') + dead + '</div><div class="meta">' + who + esc(s.hostname || 'unknown host') + ' · ' + activity + '</div>' + (s.session_name ? '<div class="meta">in session: ' + esc(s.session_name) + '</div>' : '') + '</div>' + acts + '</div>';
   },
     'No active sessions in the last 4h.');
   el('sessions').querySelectorAll('[data-release-actor]').forEach(b => {
@@ -3088,6 +3116,10 @@ function applySnapshot(data) {
   el('currentSession').innerHTML = renderRows(view.active_comms_sessions, s =>
     '<div class="row"><div class="actor">' + esc(s.name || 'Unnamed session') + '</div><div class="meta">Started ' + fmtTime(s.started_at) + ' · ' + esc(s.event_count || 0) + ' event(s) · ' + esc(s.claim_count || 0) + ' claim(s) · ' + esc(s.finding_count || 0) + ' finding(s) · ' + esc(s.note_count || 0) + ' note(s)</div><div class="meta">' + esc((s.actors || []).map(a => '@' + a).join(', ')) + '</div></div>',
     'No named comms session is open. Use Start Comms Session, or ask an agent to run comms session start "<name>".');
+  // An empty archive is not news; it should not cost four lines of the column.
+  const archived = (view.comms_sessions || []).length;
+  el('archiveHeading').style.display = archived ? '' : 'none';
+  el('commsSessions').style.display = archived ? '' : 'none';
   el('commsSessions').innerHTML = renderRows(view.comms_sessions, s =>
     '<div class="row"><div class="actor">' + esc(s.name || 'Archived session') + '</div><div class="meta">' + fmtTime(s.started_at) + ' → ' + fmtTime(s.ended_at) + '</div><div class="meta">ended by @' + esc(s.ended_by) + ' · ' + esc(s.reason || 'comms session ended') + '</div><div class="meta">' + esc(s.event_count || 0) + ' event(s) · ' + esc(s.claim_count || 0) + ' claim(s) · ' + esc(s.finding_count || 0) + ' finding(s) · ' + esc(s.note_count || 0) + ' note(s)</div><div class="meta">' + esc((s.actors || []).map(a => '@' + a).join(', ')) + '</div></div>',
     'No archived comms sessions yet. Use End Comms Session when the project work window is done.');
@@ -3114,6 +3146,17 @@ function applySnapshot(data) {
     '<div class="meta">@' + esc(r.actor) + ' · ' + fmtTime(r.ts) + '</div></div>',
     'No completed work in the last 24h.');
 }
+// commonDir is the directory every one of these paths starts with, or '' when
+// there is not enough of one to be worth hoisting. Two segments is the floor:
+// hoisting just 'src/' buys a row nothing and costs a line.
+function commonDir(paths) {
+  if (paths.length < 2) return '';
+  const parts = paths.map(p => p.split('/'));
+  const first = parts[0];
+  let n = 0;
+  while (n < first.length - 1 && parts.every(x => x.length > n + 1 && x[n] === first[n])) n++;
+  return n >= 2 ? first.slice(0, n).join('/') + '/' : '';
+}
 function renderClaims(data, view) {
   view = view || data;
   const releaseAction = actionByID(data, 'release_claim');
@@ -3121,32 +3164,59 @@ function renderClaims(data, view) {
   const claimFilter = filterText('claimFilter');
   const claims = (view.claims || [])
     .filter(c => includesFilter([c.actor, c.session_name, c.scope, c.intent, c.age, c.id], claimFilter));
-  const scopeText = 'Showing all active claims. ';
   let claimBody;
   if (claims.length) {
-    // Readable claim CARDS (not a cramped fixed table): intent + scope get the
-    // full column width, so long text never collapses to one word per line.
-    claimBody = '<div class="claim-list">' + claims.map(c => {
-      const acts = [];
-      if (releaseAction.enabled) acts.push('<button class="small primary" type="button" data-release-claim="' + esc(c.id) + '" data-release-repo="' + esc(c.repo_hash || '') + '" data-release-session="' + esc(c.session_id || '') + '" data-release-actor="' + esc(c.actor) + '" data-release-scope="' + esc(c.scope) + '">Release</button>');
-      if (c.stale && retireAction.enabled) acts.push('<button class="small danger" type="button" data-retire-actor="' + esc(c.actor) + '" data-retire-repo="' + esc(c.repo_hash || '') + '">Retire</button>');
-      const actBox = acts.length ? '<div class="claim-act">' + acts.join('') + '</div>' : '';
-      return '<div class="claim-card' + (c.stale ? ' stale' : '') + '">' +
-        '<div class="claim-main">' +
-          '<div class="claim-top"><span class="actor">@' + esc(c.actor) + '</span>' +
-            (c.session_name ? '<span class="claim-sess">' + esc(c.session_name) + '</span>' : '') +
-            '<span class="claim-age' + (c.stale ? ' is-stale' : '') + '">' + esc(c.age) + (c.stale ? ' · stale' : '') + '</span></div>' +
-          '<div class="scope">' + esc(c.scope) + '</div>' +
-          (c.intent ? '<div class="claim-intent">' + esc(c.intent) + '</div>' : '') +
-        '</div>' + actBox +
-      '</div>';
+    // Group by whose work it is and why. The intent is one sentence about one
+    // piece of work; repeating it per file is noise that crowds out the paths.
+    const groups = [];
+    const byKey = {};
+    claims.forEach(c => {
+      const key = c.actor + '\u0000' + (c.session_name || '') + '\u0000' + (c.intent || '');
+      if (!byKey[key]) {
+        byKey[key] = { actor: c.actor, session: c.session_name || '', intent: c.intent || '',
+          repo: c.repo_hash || '', stale: false, items: [] };
+        groups.push(byKey[key]);
+      }
+      byKey[key].items.push(c);
+      if (c.stale) byKey[key].stale = true;
+    });
+    claimBody = '<div class="claim-list">' + groups.map(g => {
+      const retire = (g.stale && retireAction.enabled)
+        ? '<button class="small danger" type="button" data-retire-actor="' + esc(g.actor) +
+          '" data-retire-repo="' + esc(g.repo) + '">Retire</button>'
+        : '';
+      const head = '<div class="cg-head"><span class="actor">@' + esc(g.actor) + '</span>' +
+        (g.session ? '<span class="claim-sess">' + esc(g.session) + '</span>' : '') +
+        '<span class="cg-count">' + g.items.length + (g.items.length === 1 ? ' file' : ' files') + '</span>' +
+        retire + '</div>';
+      const intent = g.intent ? '<div class="cg-intent">' + esc(g.intent) + '</div>' : '';
+      // The same directory in front of every path is the same repetition one
+      // level down: it costs a wrap on every row and mid-word breaks in the
+      // filename, which is the part you are reading. Say it once.
+      const dir = commonDir(g.items.map(c => c.scope));
+      const dirLine = dir ? '<div class="cg-dir">' + esc(dir) + '</div>' : '';
+      const files = g.items.map(c =>
+        '<div class="cg-file' + (c.stale ? ' stale' : '') + '">' +
+          '<span class="scope">' + esc(dir && c.scope.indexOf(dir) === 0 ? c.scope.slice(dir.length) : c.scope) + '</span>' +
+          '<span class="claim-age' + (c.stale ? ' is-stale' : '') + '">' + esc(c.age) +
+            (c.stale ? ' stale' : '') + '</span>' +
+          (releaseAction.enabled
+            ? '<button class="small primary" type="button" data-release-claim="' + esc(c.id) +
+              '" data-release-repo="' + esc(c.repo_hash || '') +
+              '" data-release-session="' + esc(c.session_id || '') +
+              '" data-release-actor="' + esc(c.actor) +
+              '" data-release-scope="' + esc(c.scope) + '">Release</button>'
+            : '') +
+        '</div>').join('');
+      return '<div class="claim-group' + (g.stale ? ' stale' : '') + '">' + head + intent + dirLine + files + '</div>';
     }).join('') + '</div>';
   } else if (claimFilter) {
     claimBody = '<div class="empty">No claims matching "' + esc(claimFilter) + '" <span class="es-clear" data-clear="claimFilter" role="button" tabindex="0">Clear</span></div>';
   } else {
     claimBody = '<div class="empty-state"><div class="es-icon">&#10003;</div><div class="es-title">No active claims</div><div class="es-sub">All work in this view is released.</div></div>';
   }
-  el('claims').innerHTML = '<div class="hint">' + esc(scopeText) + ' Claims older than ' + esc(data.project.stale_after) + ' are stale. ' + esc(mutationHelp(data)) + '</div>' + claimBody;
+  el('claims').innerHTML = '<div class="hint">Claims older than ' + esc(data.project.stale_after) +
+    ' are stale. ' + esc(mutationHelp(data)) + '</div>' + claimBody;
   el('claims').querySelectorAll('[data-release-claim]').forEach(button => {
     button.addEventListener('click', () => releaseClaim(button.getAttribute('data-release-claim'), button.getAttribute('data-release-actor'), button.getAttribute('data-release-scope'), button.getAttribute('data-release-repo'), button.getAttribute('data-release-session')).catch(showError));
   });
@@ -3163,13 +3233,17 @@ function renderTaskBoard(view) {
   const b = view && view.task_board;
   const host = el('board');
   const hint = el('graphHint');
+  const explainer = el('graphExplainer');
   if (!b || (!b.tasks.length && !b.too_large)) {
+    // Nothing to explain yet, and no reason for a full-width row to say so.
+    if (explainer) explainer.style.display = 'none';
     hint.textContent = '';
     host.innerHTML = empty(isUnified(latestData) && !selectedProjectHash
       ? 'Pick a project on the left to see its work graph.'
       : 'No tasks yet. An agent declares one with comms task add, or a whole plan with comms plan.');
     return;
   }
+  if (explainer) explainer.style.display = '';
   const bits = [];
   if (b.review) bits.push(b.review + ' waiting to be verified');
   if (b.ready) bits.push(b.ready + ' ready');

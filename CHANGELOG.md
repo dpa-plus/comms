@@ -46,6 +46,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Active claims are grouped by whose work it is and why. One agent editing eight
+  files for one reason used to print that reason eight times and squeeze the
+  paths — the part you are scanning for — into a scrollbar; now the intent and
+  the directory every path shares are printed once, and each file is one line.
+- The dashboard's summary tiles only count what the page does not already show
+  in full. Findings, notes and the session archive are rendered a few hundred
+  pixels away, so tiles for them were chrome; `stale`, `to verify` and
+  `dependency cycle` appear only when they are not zero.
+- Recent findings, notes and completed work share one scrolling column instead of
+  three stacked boxes with three scrollbars, so a sentence is no longer cut in
+  half by the panel boundary above it.
+- The roster prints an agent's handle once, on the metadata line, instead of
+  beside the label where a narrow column broke it mid-hyphen.
 - Readers now skip log entries whose event type they do not recognize, warning
   once per read with the count, instead of refusing to read the file. Writers
   still refuse to emit an unknown type.
@@ -59,6 +72,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   from one place, so the two can no longer drift apart.
 - `comms log` prints a plain row for an event type it cannot render, rather than
   silently omitting it.
+
+### Fixed
+
+- The history panel sized its grid row to its content, so a log of 11,000 events
+  made the page 52,000 pixels tall with a scrollbar thumb a few pixels high and
+  the panels you actually watch stranded at the top of it. The row is bounded and
+  the panel scrolls itself, as the rest of the layout already did.
 
 ## [0.2.1] - 2026-08-19
 
@@ -74,6 +94,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   GO-2026-5972.
 
 ### Fixed
+
 
 - Inactive or unended named sessions no longer disappear from the dashboard
   after their actors and claims age out of the active window.
