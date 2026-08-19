@@ -9,7 +9,9 @@ package event
 import (
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/oklog/ulid/v2"
@@ -34,6 +36,34 @@ func (t Type) Valid() bool {
 	}
 	return false
 }
+
+// KnownTypes lists the types this build understands, comma separated.
+//
+// It exists so the `comms log --type` flag help and its validation error read
+// from the same place as Valid. Before this there were two hand-maintained
+// whitelists in two packages, and adding a type meant remembering both.
+func KnownTypes() string {
+	names := make([]string, 0, 5)
+	for _, t := range []Type{TypeHello, TypeClaim, TypeRelease, TypeNote, TypeFinding} {
+		names = append(names, string(t))
+	}
+	return strings.Join(names, ",")
+}
+
+// ErrUnknownType marks a decode failure whose only cause is a type this build
+// does not recognise. The line is well formed; the binary is simply older than
+// whatever wrote it.
+//
+// Readers skip such a line and keep going (see Read); WRITERS still refuse to
+// emit one (see Encode). That asymmetry is the whole point: a binary must never
+// author a type it cannot fold, but it must survive meeting one. Without it,
+// adding a sixth event type would brick every older binary on the machine — a
+// single unrecognised line made Read abort, so `status`, `log`, `claim`, `note`
+// and the `check` pre-edit hook all failed on that repository at once.
+//
+// Ship the tolerant reader, let it reach every machine, and only then add the
+// type.
+var ErrUnknownType = errors.New("event: unknown type")
 
 // Event is a single log entry.
 //
@@ -93,7 +123,7 @@ func Decode(line []byte) (Event, error) {
 		return Event{}, fmt.Errorf("event: missing actor")
 	}
 	if !e.Type.Valid() {
-		return Event{}, fmt.Errorf("event: invalid type %q", e.Type)
+		return Event{}, fmt.Errorf("%w %q", ErrUnknownType, e.Type)
 	}
 	if e.TS.IsZero() {
 		return Event{}, fmt.Errorf("event: missing ts")

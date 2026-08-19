@@ -70,6 +70,52 @@ not-json
 	}
 }
 
+// TestReadSkipsUnknownType is the whole point of the tolerant reader: a line
+// written by a NEWER comms must not make the log unreadable for an older one.
+// Before this, a single such line aborted Read, which meant status, log, claim,
+// note and the check pre-edit hook all failed on that repository at once.
+func TestReadSkipsUnknownType(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now().UTC()
+	body := `{"ts":"` + now.Format(time.RFC3339Nano) + `","id":"` + NewID(now) + `","actor":"a","type":"hello"}
+{"ts":"` + now.Format(time.RFC3339Nano) + `","id":"` + NewID(now) + `","actor":"b","type":"task","data":{"task":"auth-api"}}
+{"ts":"` + now.Format(time.RFC3339Nano) + `","id":"` + NewID(now) + `","actor":"c","type":"note","data":{"body":"still here"}}
+`
+	path := writeFile(t, dir, "log.jsonl", body)
+	events, err := Read(path)
+	if err != nil {
+		t.Fatalf("an unknown type must not fail the read: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("expected the 2 known events, got %d", len(events))
+	}
+	if events[0].Actor != "a" || events[1].Actor != "c" {
+		t.Errorf("expected the events either side of the unknown line, got %q and %q", events[0].Actor, events[1].Actor)
+	}
+}
+
+// TestReadStillAbortsOnCorruptionAfterUnknownType guards the line the skip must
+// not cross: tolerating a newer type is not tolerating a broken file.
+func TestReadStillAbortsOnCorruptionAfterUnknownType(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now().UTC()
+	body := `{"ts":"` + now.Format(time.RFC3339Nano) + `","id":"` + NewID(now) + `","actor":"a","type":"task"}
+not-json
+`
+	path := writeFile(t, dir, "log.jsonl", body)
+	if _, err := Read(path); err == nil {
+		t.Fatalf("expected ErrCorrupt")
+	} else {
+		var ec *ErrCorrupt
+		if !errors.As(err, &ec) {
+			t.Fatalf("expected *ErrCorrupt, got %T: %v", err, err)
+		}
+		if ec.Line != 2 {
+			t.Errorf("expected line 2, got %d", ec.Line)
+		}
+	}
+}
+
 func TestReadDuplicateIDs(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now().UTC()

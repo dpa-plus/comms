@@ -2,6 +2,7 @@ package event
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -61,10 +62,34 @@ func TestEncodeRejectsInvalid(t *testing.T) {
 	}
 }
 
-func TestDecodeRejectsInvalidType(t *testing.T) {
+// TestDecodeReportsUnknownTypeDistinctly pins the seam the tolerant reader rests
+// on: Decode still refuses an unrecognised type, but it must be distinguishable
+// from real corruption, because Read skips the one and aborts on the other.
+func TestDecodeReportsUnknownTypeDistinctly(t *testing.T) {
 	bad, _ := json.Marshal(Event{ID: "x", Actor: "a", Type: "garbage", TS: time.Now()})
-	if _, err := Decode(bad); err == nil {
-		t.Fatalf("expected error for invalid type")
+	_, err := Decode(bad)
+	if err == nil {
+		t.Fatalf("expected error for unknown type")
+	}
+	if !errors.Is(err, ErrUnknownType) {
+		t.Fatalf("expected ErrUnknownType, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "garbage") {
+		t.Errorf("error should name the offending type, got %q", err)
+	}
+	// Structural corruption must NOT be mistaken for a merely-newer type.
+	if _, err := Decode([]byte("not-json")); errors.Is(err, ErrUnknownType) {
+		t.Errorf("malformed JSON must not report as an unknown type: %v", err)
+	}
+}
+
+// TestEncodeStillRefusesUnknownType — the asymmetry that makes forward
+// compatibility safe. A binary may READ a type it does not know; it must never
+// WRITE one, or it would author events it cannot itself fold.
+func TestEncodeStillRefusesUnknownType(t *testing.T) {
+	e := Event{ID: "x", Actor: "a", Type: "task", TS: time.Now()}
+	if _, err := e.Encode(); err == nil {
+		t.Fatalf("Encode must reject a type this build does not know")
 	}
 }
 

@@ -18,7 +18,7 @@ Common fields:
 | `ts`    | string | RFC3339 UTC, always normalized to UTC regardless of caller TZ.     |
 | `id`    | string | ULID (26 chars, time-prefixed, monotonic).                         |
 | `actor` | string | Validated COMMS_ACTOR. Per-session — never per-user.               |
-| `type`  | string | One of: `hello`, `claim`, `release`, `note`, `finding`.            |
+| `type`  | string | One of: `hello`, `claim`, `release`, `note`, `finding`. Readers skip types they do not know; writers never emit one. |
 | `scope` | array  | Optional. Only set on `claim` (and informational on `release`).    |
 | `data`  | object | Type-specific bag; all keys optional unless noted below.           |
 
@@ -294,6 +294,7 @@ only when the user explicitly asks or approves a leader's proposed lesson.
 | Missing file                           | Treat as empty log; no error.                                             |
 | Blank lines (zero bytes or whitespace) | Silently skipped.                                                         |
 | Trailing unterminated final line       | Stderr warning, skipped; subsequent reads succeed.                        |
+| Unrecognized event `type`              | Skipped; one stderr warning per read naming the count. A newer `comms` wrote it. |
 | Malformed JSON before EOF              | Exit 2 (`ErrCorrupt`). Pre-EOF corruption is treated as unrecoverable.    |
 | Invalid UTF-8                          | Exit 2.                                                                   |
 | Line > 1 MiB                           | Exit 2 (defensive ceiling).                                               |
