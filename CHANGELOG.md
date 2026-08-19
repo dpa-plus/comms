@@ -46,6 +46,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The top of the dashboard is one 46px rail. It was 163px: a header carrying two
+  filesystem paths, and under it a summary band that was 78% empty background —
+  312px of tiles stretched across 1425. The paths moved into the title of the
+  project name that already identifies the checkout, and the counts moved into
+  the headings of the two panels that render the things being counted.
+- Stale claims, work waiting to be verified, and dependency cycles are now filled
+  red chips on that rail — the only filled shapes on it. All three exist at all
+  times and only toggle hidden, and the alert wash is an inset shadow rather than
+  a border, so an alarm appearing never moves the page by a pixel. In the
+  all-projects view they sum across projects, because a task graph belongs to one
+  repository and the merged snapshot carries no board of its own.
 - Active claims are grouped by whose work it is and why. One agent editing eight
   files for one reason used to print that reason eight times and squeeze the
   paths — the part you are scanning for — into a scrollbar; now the intent and

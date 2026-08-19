@@ -2120,6 +2120,7 @@ const uiHTML = `<!doctype html>
   --amber: #b45309;
   --red: #c0392b;
   --red-soft: #fdf0ee;
+  --on-red: #ffffff;
   --blue: #2563eb;
   --accent: #0d7d72;
   --shadow: 0 1px 2px rgba(20,30,45,0.05), 0 10px 28px rgba(20,30,45,0.05);
@@ -2143,6 +2144,7 @@ const uiHTML = `<!doctype html>
   --amber: #f3b15e;
   --red: #f87171;
   --red-soft: #361c1f;
+  --on-red: #2a0f0f;
   --blue: #82aaff;
   --accent: #52d7c9;
   --shadow: 0 1px 2px rgba(0,0,0,0.4), 0 14px 34px rgba(0,0,0,0.34);
@@ -2161,50 +2163,109 @@ body {
   letter-spacing: 0;
   overflow: auto;
 }
+/* ── The top rail ──
+   This was 163px of chrome before a single row of content: an 89px header
+   carrying two filesystem paths, and under it a 74px band that was 78% empty
+   background — 312px of tiles stretched across 1425. Both are now one 46px
+   line. The paths answer "is this the right checkout" once and then never
+   again, so they moved into the title of the name that already answers it. The
+   counts moved into the headings of the two panels that render the things
+   being counted. What is left up here is what needs the operator. */
 header {
-  min-height: 78px;
+  height: 46px;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  padding: 14px 24px;
+  padding: 0 24px;
   background: var(--surface);
   border-bottom: 1px solid var(--line);
   position: sticky;
   top: 0;
   z-index: 5;
 }
-h1 { margin: 0; font-size: 19px; font-weight: 740; }
+h1 {
+  margin: 0;
+  min-width: 90px;
+  font-size: 15px;
+  font-weight: 740;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .hdr-session {
-  display: inline-block;
-  margin-left: 10px;
-  padding: 2px 11px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 220px;
+  margin-left: 9px;
+  padding: 1px 9px;
   border-radius: 999px;
   background: var(--teal-soft);
   color: var(--teal);
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 700;
-  vertical-align: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.sub { color: var(--muted); font-size: 12px; margin-top: 5px; }
-.log-path {
-  color: var(--muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
-  margin-top: 4px;
-  overflow-wrap: anywhere;
-}
-.header-main { min-width: 0; }
 .demo-mark {
+  flex: 0 0 auto;
+  margin-left: 9px;
+  padding: 1px 8px;
+  border-radius: 6px;
+  background: var(--amber-wash);
   color: var(--amber);
-  font-weight: 700;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
-.top-actions {
-  display: flex;
-  gap: 8px;
+/* Alarms are the only reason a permanent strip up here earns its pixels, so
+   they are the only FILLED shapes on it — everything else is text on the
+   surface. All three nodes exist at all times and only toggle hidden, so one
+   appearing cannot move a sibling or change the rail's height by a pixel;
+   the alert wash is an inset shadow for the same reason, never a border. */
+#alarms { display: flex; align-items: center; gap: 6px; margin-left: 14px; flex: 0 0 auto; }
+/* Any display rule outranks the hidden attribute's UA display:none, and the
+   alarms set one. Without this the rail permanently reads "0 STALE 0 TO VERIFY
+   0 DEPENDENCY CYCLE" in red -- the exact opposite of what an alarm is for. */
+[hidden] { display: none !important; }
+.al {
+  display: inline-flex;
   align-items: center;
-  flex-wrap: wrap;
-  justify-content: flex-end;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 6px;
+  background: var(--red);
+  color: var(--on-red);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.al b { font-size: 13px; font-weight: 780; letter-spacing: 0; font-variant-numeric: tabular-nums; }
+header.alert { background: var(--red-soft); box-shadow: inset 0 -3px 0 var(--red); }
+#spacer { flex: 1 1 auto; min-width: 16px; }
+#live {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  margin-right: 12px;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.top-actions { display: flex; gap: 8px; align-items: center; flex: 0 0 auto; }
+/* A count belongs beside the list it counts, not in a summary row far from it. */
+.cnt {
+  margin-left: 7px;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 720;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
 }
 button {
   border: 1px solid var(--line-strong);
@@ -2260,43 +2321,6 @@ button:disabled:hover { border-color: var(--line-strong); background: var(--surf
   color: var(--red);
   background: var(--red-soft);
 }
-.stats {
-  max-width: var(--content-max);
-  margin: 0 auto;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 18px 24px 6px;
-  background: transparent;
-}
-.stat {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  min-width: 148px;
-  height: 50px;
-  padding: 0 15px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  transition: border-color .14s ease, background .14s ease;
-}
-.stat:hover { border-color: var(--line-strong); }
-.stat-label {
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 650;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-.stat-value {
-  color: var(--text);
-  font-size: 19px;
-  font-weight: 720;
-  font-variant-numeric: tabular-nums;
-}
-.stat.warn .stat-value { color: var(--red); }
 .status-dot {
   width: 9px;
   height: 9px;
@@ -2642,7 +2666,6 @@ body.unified main {
 .events tbody tr:nth-child(even) td { background: var(--surface-2); }
 .row.priority-row { box-shadow: inset 3px 0 0 var(--amber); }
 .filter-input:not(:placeholder-shown) { border-color: var(--blue); background: var(--soft); }
-.stat.warn { background: var(--red-soft); border-color: var(--red); }
 .empty-state { text-align: center; padding: 30px 18px; color: var(--muted); }
 .empty-state .es-icon { font-size: 20px; color: var(--teal); font-weight: 700; }
 .empty-state .es-title { color: var(--text); font-weight: 680; margin-top: 6px; }
@@ -2720,9 +2743,7 @@ body.unified main {
     grid-template-areas: "sidebar" "roster" "claims" "signals" "graph" "events";
   }
   body.unified .sidebar { max-height: 320px; }
-  header { height: auto; min-height: 76px; align-items: flex-start; padding-top: 12px; padding-bottom: 12px; }
-  .stats { padding: 14px 16px 2px; }
-  .stat { flex: 1 1 160px; }
+  header { height: auto; min-height: 46px; flex-wrap: wrap; row-gap: 6px; padding: 7px 16px; }
   main {
     height: auto;
     grid-template-columns: 1fr;
@@ -2747,18 +2768,9 @@ body.unified main {
 }
 @media (max-width: 620px) {
   body { overflow: auto; }
-  header {
-    height: auto;
-    min-height: 64px;
-    padding: 12px;
-    gap: 10px;
-    align-items: flex-start;
-    display: block;
-  }
-  h1 { font-size: 17px; }
-  .top-actions { justify-content: flex-start; margin-top: 10px; }
-  .stats { padding: 12px 10px 2px; gap: 8px; }
-  .stat { flex: 1 1 calc(50% - 8px); min-width: 0; height: 44px; padding: 7px 10px; }
+  header { height: auto; min-height: 46px; padding: 7px 12px; }
+  h1 { font-size: 14px; }
+  #spacer { min-width: 0; flex-basis: 100%; }
   main { padding: 10px; gap: 14px; }
   .panel-title {
     display: block;
@@ -2822,18 +2834,21 @@ body.unified main {
 </head>
 <body>
 <header>
-  <div class="header-main">
-    <h1 id="project">comms dashboard</h1>
-    <div class="sub" id="projectMeta">Loading project state...</div>
-    <div class="log-path" id="logPath"></div>
+  <h1 id="project">comms dashboard</h1>
+  <span id="sessPill" class="hdr-session" hidden></span>
+  <span id="demoMark" class="demo-mark" hidden>demo</span>
+  <div id="alarms" role="status" aria-live="polite">
+    <span id="alStale" class="al" hidden><b></b>stale</span>
+    <span id="alVerify" class="al" hidden><b></b>to verify</span>
+    <span id="alCycle" class="al" hidden><b></b>dependency cycle</span>
   </div>
+  <div id="spacer"></div>
+  <span id="live"><span class="status-dot"></span><span id="updated">live</span></span>
   <div class="top-actions">
-    <span class="sub"><span class="status-dot"></span><span id="updated">live</span></span>
     <button id="endComms" class="danger" type="button">End Comms Session</button>
     <button id="theme" class="icon-btn" type="button" aria-label="Toggle dark mode"></button>
   </div>
 </header>
-<section id="stats" class="stats" aria-label="Comms summary"></section>
 <div id="error" class="error-banner"></div>
 <main>
   <section class="panel sidebar">
@@ -2841,7 +2856,7 @@ body.unified main {
     <div id="projectList" class="scroll"></div>
   </section>
   <section class="panel roster">
-    <h2>Team Roster</h2>
+    <h2>Team Roster<span class="cnt" id="rosterCount"></span></h2>
     <div id="sessions" class="scroll"></div>
     <h2>Current Comms Session</h2>
     <div id="currentSession"></div>
@@ -2850,7 +2865,7 @@ body.unified main {
   </section>
   <section class="panel claims">
     <div class="panel-title">
-      <h2>Active Claims</h2>
+      <h2>Active Claims<span class="cnt" id="claimCount"></span></h2>
       <input id="claimFilter" class="filter-input" type="search" placeholder="Filter claims">
     </div>
     <div id="claims" class="scroll"></div>
@@ -3017,25 +3032,62 @@ function includesFilter(values, filter) {
   if (!filter) return true;
   return values.join(' ').toLowerCase().includes(filter);
 }
-function renderStats(data) {
-  const claims = data.claims || [];
-  const stat = (label, value, warn) => '<div class="stat ' + (warn ? 'warn' : '') + '"><span class="stat-label">' + label + '</span><span class="stat-value">' + esc(value) + '</span></div>';
-  // A count earns a tile only if you cannot already see it on this page.
-  // Findings, notes and the archive are rendered in full a few hundred pixels
-  // away, so tiles for them were chrome; and a row of seven nouns where three
-  // read zero teaches you to stop reading the row. What is left is what the page
-  // does not otherwise say at a glance: who is live, what is locked, and the two
-  // things that want you to act.
-  const stale = claims.filter(c => c.stale).length;
-  const board = data.task_board;
-  const tiles = [
-    stat('agents', (data.sessions || []).length, false),
-    stat('files claimed', claims.length, false)
-  ];
-  if (stale) tiles.push(stat('stale', stale, true));
-  if (board && board.review) tiles.push(stat('to verify', board.review, true));
-  if (board && board.cycles) tiles.push(stat('dependency cycle', board.cycles, true));
-  el('stats').innerHTML = tiles.join('');
+// The rail. Nothing here builds markup: every value goes in through textContent
+// or an attribute, so a project name, a session name or a repo path out of the
+// log can never become HTML.
+function renderTop(data, view, repoLabel, sel) {
+  const root = sel ? sel.root : data.project.root;
+  const hash = sel ? sel.repo_hash : data.project.hash;
+  const logPath = sel ? sel.log_path : data.project.log_path;
+  el('project').textContent = repoLabel;
+  // The repo path and the log path used to be two of the header's three lines.
+  // They answer one question -- is this the right checkout -- which the name
+  // above them already answers, and then they are never read again. A question
+  // asked once belongs on the thing it identifies, not in permanent print.
+  el('project').title = root + '\n' + 'hash ' + hash + '\n' + 'log ' + logPath;
+
+  // The pill is the comms session an agent would name, so it stays visible; a
+  // second concurrent window collapses to a count rather than a second pill.
+  // Nothing is filtered out by its text: "Current session" is a real window
+  // built from the legacy event tail, and it can be exactly the one that End
+  // Comms Session is armed against.
+  const names = (view.active_comms_sessions || []).map(x => x.name).filter(Boolean);
+  const sessOK = sel || !isUnified(data);
+  el('sessPill').hidden = !(sessOK && names.length);
+  el('sessPill').textContent = names.length
+    ? names[0] + (names.length > 1 ? '  +' + (names.length - 1) : '')
+    : '';
+  el('sessPill').title = names.join(', ');
+  el('demoMark').hidden = !data.project.demo;
+  el('updated').textContent = fmtTime(data.updated);
+  el('live').title = 'updated ' + fmtTime(data.updated);
+
+  const stale = (view.claims || []).filter(c => c.stale).length;
+  // task_board is per repository and is deliberately absent from the merged
+  // all-projects snapshot -- dependencies do not cross repositories. Reading
+  // view.task_board alone would report zero for every project at once, in the
+  // one view whose whole job is to notice that something needs you.
+  let review = 0, cycles = 0;
+  if (view.task_board) {
+    review = view.task_board.review || 0;
+    cycles = view.task_board.cycles || 0;
+  } else {
+    (data.project_sessions || []).forEach(x => {
+      if (!x.task_board) return;
+      review += x.task_board.review || 0;
+      cycles += x.task_board.cycles || 0;
+    });
+  }
+  setAlarm('alStale', stale, 'claim(s) held past the stale window. The agent may be gone; Release frees the file.');
+  setAlarm('alVerify', review, 'task(s) are finished and waiting for a DIFFERENT agent to verify them. Nothing downstream moves until they do.');
+  setAlarm('alCycle', cycles, 'task(s) depend on each other in a loop, so none of them can ever become ready.');
+  document.querySelector('header').classList.toggle('alert', (stale + review + cycles) > 0);
+}
+function setAlarm(id, n, why) {
+  const node = el(id);
+  node.hidden = !n;
+  node.querySelector('b').textContent = n;
+  node.title = n + ' ' + why;
 }
 async function load() {
   const res = await fetch('/api/status', { cache: 'no-store' });
@@ -3063,15 +3115,9 @@ function applySnapshot(data) {
   // Show the active comms-session name(s) in the header — that's the name
   // agents use ("acme-build"), so it must not be hidden behind the repo
   // name. Only when a single project is in focus (not the merged all view).
-  const focused = sel || !isUnified(data);
-  const activeSessNames = focused ? (view.active_comms_sessions || []).map(s => s.name).filter(Boolean) : [];
   const repoLabel = sel ? sel.repo_name : data.project.name;
-  el('project').innerHTML = esc(repoLabel) + activeSessNames.map(n => ' <span class="hdr-session">' + esc(n) + '</span>').join('');
-  el('projectMeta').innerHTML = (activeSessNames.length ? 'session in repo · ' : '') + esc(sel ? sel.repo_hash : data.project.hash) + ' · ' + esc(sel ? sel.root : data.project.root) + (data.project.demo ? ' · <span class="demo-mark">demo mode</span>' : '');
-  el('logPath').textContent = 'Log: ' + (sel ? sel.log_path : data.project.log_path);
-  el('updated').textContent = 'updated ' + fmtTime(data.updated);
+  renderTop(data, view, repoLabel, sel);
   renderProjectList(data);
-  renderStats(view);
   const endAction = actionByID(data, 'end_comms_session');
   const endTarget = endSessionTarget(data);
   el('endComms').disabled = !(endAction.enabled && endTarget);
@@ -3079,6 +3125,7 @@ function applySnapshot(data) {
   const rosterRetire = actionByID(data, 'retire_session_actor');
   const rosterReleaseAll = actionByID(data, 'release_actor_claims');
   const rosterRepo = isUnified(data) ? (selectedProjectHash || '') : '';
+  el('rosterCount').textContent = (view.sessions || []).length || '';
   el('sessions').innerHTML = renderRows(view.sessions, s => {
     // The handle goes on the meta line, not beside the label. In a 220px column
     // a label plus a handle wrapped mid-hyphen ("@claude-" / "auftraege"), and
@@ -3164,6 +3211,10 @@ function renderClaims(data, view) {
   const claimFilter = filterText('claimFilter');
   const claims = (view.claims || [])
     .filter(c => includesFilter([c.actor, c.session_name, c.scope, c.intent, c.age, c.id], claimFilter));
+  // Total, not the filtered subset -- except while a filter is on, when both
+  // numbers are the interesting ones and the old tile could show neither.
+  const allClaims = (view.claims || []).length;
+  el('claimCount').textContent = claimFilter ? claims.length + ' / ' + allClaims : (allClaims || '');
   let claimBody;
   if (claims.length) {
     // Group by whose work it is and why. The intent is one sentence about one
