@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-08-19
+
+### Changed
+
+- The dashboard now presents one continuous, newest-first History across all
+  valid repositories. Project and session identities remain labels and filters
+  instead of separate event-log views.
+- History renders progressively in 500-row chunks while filtering against the
+  complete event set, keeping large local stores responsive.
+
+### Fixed
+
+- Inactive or unended named sessions no longer disappear from the dashboard
+  after their actors and claims age out of the active window.
+- Switching projects can no longer retain a stale archived-session selection or
+  banner from another repository.
+
 ## [0.2.0] - 2026-08-13
 
 ### Added
@@ -47,6 +64,7 @@ First public release.
 - A `using-comms` skill for Claude/Codex agents and a launchd login-service
   template (`contrib/launchd/`) for running the dashboard on macOS.
 
-[Unreleased]: https://github.com/dpa-plus/comms/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/dpa-plus/comms/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/dpa-plus/comms/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/dpa-plus/comms/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/dpa-plus/comms/releases/tag/v0.1.0

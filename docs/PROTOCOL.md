@@ -228,7 +228,7 @@ disk; it prefixes project/session labels in the response.
 
 | Endpoint                   | Method | Purpose                                                           |
 | -------------------------- | ------ | ----------------------------------------------------------------- |
-| `/api/status`              | GET    | Current project snapshot, active state, archives, per-session logs, and action metadata. |
+| `/api/status`              | GET    | Current project snapshot, active state, archives, continuous event history, and action metadata. |
 | `/api/comms-session/start` | POST   | Body `name`; append a `hello` event with `comms_session_start=true` and a new named session ID. Requires `COMMS_ACTOR`. |
 | `/api/comms-session/end`   | POST   | Body `session_id` or `name`; append a `release` event with `comms_session_end=true` for that named session. Requires `COMMS_ACTOR`. |
 | `/api/claim/release`       | POST   | Append a normal `release` event for one active claim. Body: `claim_id`, optional `result`/`reason`. Requires `COMMS_ACTOR`. |
@@ -246,15 +246,23 @@ what the backend currently allows:
     {"id": "release_claim", "label": "Release Claim", "method": "POST", "path": "/api/claim/release", "enabled": true},
     {"id": "retire_session_actor", "label": "Retire Session Actor", "method": "POST", "path": "/api/session/retire", "enabled": true},
     {"id": "transfer_leader", "label": "Transfer Leader", "method": "POST", "path": "/api/session/lead", "enabled": true},
-    {"id": "select_session_log", "label": "Select Session Event Log", "enabled": true}
+    {"id": "select_session_log", "label": "View Continuous History", "enabled": true}
   ]
 }
 ```
 
-Per-session logs are returned as `current_session.events` and
-`active_comms_sessions[].events` for open named sessions, plus
-`comms_sessions[].events` for archived named or legacy sessions. They are
-filtered views over the same append-only JSONL log, not separate log files.
+Top-level `events` is the canonical dashboard history. In single-repo mode it
+contains every event from that repository's append-only JSONL, including events
+from inactive, unended, archived, and legacy sessions. In unified mode it merges
+all valid repository histories newest-first. Every row includes `repo_hash`,
+`repo_name`, `session_id`, and `session_name` when available, so filtering never
+loses repository-qualified identity.
+
+`current_session.events`, `active_comms_sessions[].events`, and
+`comms_sessions[].events` remain session-summary compatibility views over the
+same records. The dashboard does not use them to partition History. Selecting a
+project or typing in the event filter only filters the canonical top-level
+array; no JSONL file is merged, rewritten, or truncated.
 
 `/api/status` also includes `lessons`, the list of global lesson slugs loaded
 from the user's comms data directory.
