@@ -15,6 +15,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   instead of separate event-log views.
 - History renders progressively in 500-row chunks while filtering against the
   complete event set, keeping large local stores responsive.
+- Minimum and release Go toolchains are pinned to patched versions 1.25.13 and
+  1.26.6 following standard-library advisories GO-2026-6090, GO-2026-6089, and
+  GO-2026-5972.
 
 ### Fixed
 
