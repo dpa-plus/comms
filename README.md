@@ -19,10 +19,10 @@
 > **comms is a tiny command-line tool that lets several AI coding agents — and you — work in the same repository at the same time without stepping on each other.**
 
 <p align="center">
-  <img src="assets/dashboard.png" alt="The comms dashboard: team roster, active claims, findings, notes, and a live session event log." width="900">
+  <img src="assets/dashboard.png" alt="The comms dashboard: team roster, active claims, findings, notes, and one continuous persistent history." width="900">
 </p>
 
-<p align="center"><em>The unified dashboard (<code>comms ui</code>) — every project in one tab. Pick one in the Projects sidebar to scope the whole view; it's pushed to your browser the instant anything changes.</em></p>
+<p align="center"><em>The unified dashboard (<code>comms ui</code>) — every project and the complete append-only history in one tab. Pick a project to focus the view; sessions remain context labels instead of separate histories.</em></p>
 
 ---
 
@@ -82,6 +82,11 @@ your-repo/.comms/                         ← committed to git (shared design)
 4. It **releases the lock and exits.**
 
 That's it. A `comms` command is a short-lived program that opens a file, appends a line, and quits. Reading state (`comms status`) just replays the log — no lock needed.
+
+The dashboard reads those same files into **one continuous persistent history**.
+Selecting a project filters the timeline without changing or hiding its stored
+events, and inactive, unended, and archived sessions remain visible. Project
+and session names are retained on every row as context, not separate log stores.
 
 ```mermaid
 flowchart LR
