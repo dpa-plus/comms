@@ -36,3 +36,6 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# comms creates this per-repo dir at runtime; it is local state, not source.
+/.comms/

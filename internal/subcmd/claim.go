@@ -26,6 +26,7 @@ func NewClaimCmd() *cobra.Command {
 		intent      string
 		stealID     string
 		stealReason string
+		task        string
 	)
 	cmd := &cobra.Command{
 		Use:   `claim "<scope>" ["<scope>" ...]`,
@@ -44,18 +45,19 @@ next-command to run.`,
 				Fatalf(2, "claim: --steal takes exactly one scope")
 			}
 			if len(args) == 1 {
-				return runClaim(args[0], intent, stealID, stealReason)
+				return runClaim(args[0], intent, stealID, stealReason, task)
 			}
-			return runClaimBatch(args, intent)
+			return runClaimBatch(args, intent, task)
 		},
 	}
 	cmd.Flags().StringVar(&intent, "intent", "", "one-line description of the change you're making (required)")
+	cmd.Flags().StringVar(&task, "task", "", "the task slug this edit belongs to; what puts you on that task and takes you off it when you release")
 	cmd.Flags().StringVar(&stealID, "steal", "", "claim ID to displace; must overlap the claimed scope. --reason is required only when it is still active — a stale claim (idle >=1h) is stolen without one")
 	cmd.Flags().StringVar(&stealReason, "reason", "", "justification for stealing a still-active claim (auto-filled for a stale one); printed in the audit trail")
 	return cmd
 }
 
-func runClaim(scopeRaw, intent, stealID, stealReason string) error {
+func runClaim(scopeRaw, intent, stealID, stealReason, task string) error {
 	if intent == "" {
 		Fatalf(2, "claim: --intent is required")
 	}
@@ -127,6 +129,9 @@ func runClaim(scopeRaw, intent, stealID, stealReason string) error {
 	// Build the claim event.
 	now := time.Now().UTC()
 	data := map[string]interface{}{"intent": intent}
+	if task != "" {
+		data["task"] = task
+	}
 	stampActiveCommsSession(rt, data)
 	if displaceID != "" {
 		data["steals"] = displaceID
@@ -169,7 +174,7 @@ func runClaim(scopeRaw, intent, stealID, stealReason string) error {
 // runClaimBatch claims several scopes in one locked pass. It validates policy
 // and conflicts for ALL scopes first and only appends events if every scope is
 // clear, so a multi-file task boundary is claimed atomically (or not at all).
-func runClaimBatch(scopeRaws []string, intent string) error {
+func runClaimBatch(scopeRaws []string, intent, task string) error {
 	if intent == "" {
 		Fatalf(2, "claim: --intent is required")
 	}
@@ -226,6 +231,9 @@ func runClaimBatch(scopeRaws []string, intent string) error {
 	evs := make([]event.Event, 0, len(scopes))
 	for _, sc := range scopes {
 		data := map[string]interface{}{"intent": intent}
+		if task != "" {
+			data["task"] = task
+		}
 		stampActiveCommsSession(rt, data)
 		ev := event.Event{
 			TS:    now,

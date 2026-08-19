@@ -37,6 +37,18 @@ type State struct {
 	// "recently completed work" trail. Session-end/retire/leader releases are
 	// excluded. Caller filters by `since`.
 	Releases []*Release
+
+	// Tasks keyed by slug. A map because tasks have a lifecycle and are looked up
+	// by identity, exactly like Claims; TaskEdges is a slice because an edge is an
+	// append-only fact. Both live in task.go, along with the reducer rules that
+	// keep an agent from verifying its own work.
+	Tasks     map[string]*Task
+	TaskEdges []*TaskEdge
+
+	// RefusedTaskStates are transitions the reducer would not apply — a
+	// self-review, or work marked done with failing checks. Kept rather than
+	// dropped so the operator can see the attempt.
+	RefusedTaskStates []*RefusedTransition
 }
 
 // Claim is an active exclusive claim on a scope.
@@ -48,6 +60,10 @@ type Claim struct {
 	Intent      string
 	SessionID   string
 	SessionName string
+	// Task is the slug this claim was tagged with, if any. It is what makes a
+	// task's progress derived from work agents already do, rather than a second
+	// bookkeeping step they have to remember.
+	Task string
 
 	// If non-empty, this claim displaced ForcedBy (an arbitrated steal).
 	StolenFromID string
@@ -77,6 +93,13 @@ type Session struct {
 	LastSeen    time.Time
 	SessionID   string
 	SessionName string
+
+	// Model identity, best-effort and optional. Recorded so the reducer can say
+	// whether a verification was independent or merely came from something with
+	// the same blind spots. Absent on any hello written before 0.3.0.
+	Model  string
+	Vendor string
+	Tier   int
 }
 
 // EndedCommsSession is an archived project-level coordination window.
@@ -155,6 +178,7 @@ func Fold(events []event.Event) *State {
 	s := &State{
 		Claims:   make(map[string]*Claim),
 		Sessions: make(map[string]*Session),
+		Tasks:    make(map[string]*Task),
 	}
 
 	var windowStart time.Time
@@ -223,6 +247,9 @@ func Fold(events []event.Event) *State {
 				Leader:      boolOf(ev.Data, "leader"),
 				SessionID:   stringOf(ev.Data, "comms_session_id"),
 				SessionName: stringOf(ev.Data, "comms_session_name"),
+				Model:       stringOf(ev.Data, "model"),
+				Vendor:      stringOf(ev.Data, "vendor"),
+				Tier:        intOf(ev.Data, "tier"),
 			}
 		case event.TypeClaim:
 			c, err := claimFromEvent(ev)
@@ -236,6 +263,12 @@ func Fold(events []event.Event) *State {
 				delete(s.Claims, c.StolenFromID)
 			}
 			s.Claims[c.ID] = c
+		case event.TypeTask:
+			s.applyTask(ev)
+		case event.TypeTaskEdge:
+			s.applyTaskEdge(ev)
+		case event.TypeTaskState:
+			s.applyTaskState(ev)
 		case event.TypeRelease:
 			// data.refs may be a single string or a []string for backward compat;
 			// we accept either.
@@ -365,6 +398,7 @@ func Fold(events []event.Event) *State {
 			sess.LastSeen = sess.TS
 		}
 	}
+	s.deriveTaskPhases()
 	return s
 }
 
@@ -393,6 +427,7 @@ func claimFromEvent(ev event.Event) (*Claim, error) {
 		Actor:        ev.Actor,
 		Scope:        sc,
 		Intent:       stringOf(ev.Data, "intent"),
+		Task:         stringOf(ev.Data, "task"),
 		SessionID:    stringOf(ev.Data, "comms_session_id"),
 		SessionName:  stringOf(ev.Data, "comms_session_name"),
 		StolenFromID: stringOf(ev.Data, "steals"),

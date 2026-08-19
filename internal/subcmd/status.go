@@ -166,6 +166,8 @@ func emitStatusHuman(rt *Runtime, cutoff time.Time, since string, staleAfter tim
 		}
 	}
 
+	emitTaskSummary(rt.State)
+
 	if len(docs) > 0 {
 		fmt.Println()
 		fmt.Printf("DOCS (%d): %s\n", len(docs), strings.Join(docs, ", "))
@@ -187,6 +189,28 @@ type statusJSONShape struct {
 	Notes    []statusNote    `json:"notes"`
 	Docs     []string        `json:"docs"`
 	Lessons  []string        `json:"lessons"`
+	Tasks    []statusTask    `json:"tasks"`
+}
+
+// statusTask is one node of the work graph. Phase, blockers and doers are all
+// derived by the reducer — none of them is written by an agent.
+type statusTask struct {
+	ID         string   `json:"id"`
+	Title      string   `json:"title"`
+	Phase      string   `json:"phase"`
+	Size       string   `json:"size,omitempty"`
+	Slots      int      `json:"slots"`
+	FreeSlots  int      `json:"free_slots"`
+	Doers      []string `json:"doers,omitempty"`
+	Did        string   `json:"done_by,omitempty"`
+	VerifiedBy string   `json:"verified_by,omitempty"`
+	// Independence says whether the verifier came from a different model family.
+	// "Verified" and "verified by something with the same blind spots" are
+	// different claims and the API should not blur them.
+	Independence string   `json:"independence,omitempty"`
+	Rejections   int      `json:"rejections,omitempty"`
+	BlockedBy    []string `json:"blocked_by,omitempty"`
+	Ref          string   `json:"ref,omitempty"`
 }
 
 type statusSession struct {
@@ -259,6 +283,14 @@ func emitStatusJSON(rt *Runtime, cutoff time.Time, staleAfter time.Duration) err
 	for _, n := range recentNotes(rt.State, cutoff, 50) {
 		out.Notes = append(out.Notes, statusNote{
 			ID: n.ID, Actor: n.Actor, Body: n.Body, Priority: n.Priority, TS: n.TS, SessionID: n.SessionID, SessionName: n.SessionName,
+		})
+	}
+	for _, t := range rt.State.SortedTasks() {
+		out.Tasks = append(out.Tasks, statusTask{
+			ID: t.ID, Title: t.Title, Phase: string(t.Phase), Size: t.Size,
+			Slots: t.Slots, FreeSlots: t.FreeSlots(), Doers: t.Doers,
+			Did: t.Did, VerifiedBy: t.VerifiedBy, Independence: t.Independence,
+			Rejections: t.Rejections, BlockedBy: t.BlockedBy, Ref: t.Ref,
 		})
 	}
 	out.Docs = listDocs(rt.Paths.Docs)
@@ -615,4 +647,55 @@ func listGlobalLessons() []string {
 	slugs := markdownSlugs(entries)
 	sort.Strings(slugs)
 	return slugs
+}
+
+// emitTaskSummary prints the work graph, but only the parts somebody could do
+// something about. A wall of blocked tasks is not status, it is noise — so
+// blocked work is a count, and the things that need a person are named.
+func emitTaskSummary(st *state.State) {
+	if st == nil || len(st.Tasks) == 0 {
+		return
+	}
+	var review, ready, doing, blocked, closed, cycles []*state.Task
+	for _, t := range st.SortedTasks() {
+		switch t.Phase {
+		case state.PhaseReview:
+			review = append(review, t)
+		case state.PhaseReady:
+			ready = append(ready, t)
+		case state.PhaseDoing:
+			doing = append(doing, t)
+		case state.PhaseBlocked:
+			blocked = append(blocked, t)
+		case state.PhaseClosed:
+			closed = append(closed, t)
+		case state.PhaseCycle:
+			cycles = append(cycles, t)
+		}
+	}
+	fmt.Println()
+	fmt.Printf("TASKS (%d open, %d closed)\n", len(review)+len(ready)+len(doing)+len(blocked)+len(cycles), len(closed))
+	for _, t := range review {
+		fmt.Printf("  VERIFY  %-16s %s\n", t.ID, t.Title)
+		fmt.Printf("          done by @%s — needs someone else\n", t.Did)
+	}
+	for _, t := range ready {
+		fmt.Printf("  READY   %-16s %s\n", t.ID, t.Title)
+	}
+	for _, t := range doing {
+		extra := ""
+		if free := t.FreeSlots(); free > 0 {
+			extra = fmt.Sprintf(" · %d slot(s) free", free)
+		}
+		fmt.Printf("  DOING   %-16s %s  (@%s%s)\n", t.ID, t.Title, strings.Join(t.Doers, ", @"), extra)
+	}
+	if len(blocked) > 0 {
+		fmt.Printf("  %d waiting on work that has not been verified yet\n", len(blocked))
+	}
+	for _, t := range cycles {
+		fmt.Printf("  CYCLE   %-16s depends on itself — the plan needs fixing\n", t.ID)
+	}
+	if n := len(st.RefusedTaskStates); n > 0 {
+		fmt.Printf("  %d refused transition(s) — see `comms task show`\n", n)
+	}
 }

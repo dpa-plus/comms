@@ -1577,13 +1577,13 @@ func TestSessionSwitchReleasesPriorActorClaimsAndHidesDormantSession(t *testing.
 	if err := runSessionStart("old session", "Claude Dev"); err != nil {
 		t.Fatalf("start old session: %v", err)
 	}
-	if err := runClaim("src/old.ts", "old work", "", ""); err != nil {
+	if err := runClaim("src/old.ts", "old work", "", "", ""); err != nil {
 		t.Fatalf("claim old work: %v", err)
 	}
 	if err := runSessionStart("new session", "Claude Dev"); err != nil {
 		t.Fatalf("start new session: %v", err)
 	}
-	if err := runClaim("src/new.ts", "new work", "", ""); err != nil {
+	if err := runClaim("src/new.ts", "new work", "", "", ""); err != nil {
 		t.Fatalf("claim new work: %v", err)
 	}
 

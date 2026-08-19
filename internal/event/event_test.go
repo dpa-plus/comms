@@ -87,7 +87,7 @@ func TestDecodeReportsUnknownTypeDistinctly(t *testing.T) {
 // compatibility safe. A binary may READ a type it does not know; it must never
 // WRITE one, or it would author events it cannot itself fold.
 func TestEncodeStillRefusesUnknownType(t *testing.T) {
-	e := Event{ID: "x", Actor: "a", Type: "task", TS: time.Now()}
+	e := Event{ID: "x", Actor: "a", Type: "not-a-type-yet", TS: time.Now()}
 	if _, err := e.Encode(); err == nil {
 		t.Fatalf("Encode must reject a type this build does not know")
 	}

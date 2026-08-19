@@ -78,7 +78,7 @@ func TestReadSkipsUnknownType(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now().UTC()
 	body := `{"ts":"` + now.Format(time.RFC3339Nano) + `","id":"` + NewID(now) + `","actor":"a","type":"hello"}
-{"ts":"` + now.Format(time.RFC3339Nano) + `","id":"` + NewID(now) + `","actor":"b","type":"task","data":{"task":"auth-api"}}
+{"ts":"` + now.Format(time.RFC3339Nano) + `","id":"` + NewID(now) + `","actor":"b","type":"not-a-type-yet","data":{"x":1}}
 {"ts":"` + now.Format(time.RFC3339Nano) + `","id":"` + NewID(now) + `","actor":"c","type":"note","data":{"body":"still here"}}
 `
 	path := writeFile(t, dir, "log.jsonl", body)
@@ -99,7 +99,7 @@ func TestReadSkipsUnknownType(t *testing.T) {
 func TestReadStillAbortsOnCorruptionAfterUnknownType(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now().UTC()
-	body := `{"ts":"` + now.Format(time.RFC3339Nano) + `","id":"` + NewID(now) + `","actor":"a","type":"task"}
+	body := `{"ts":"` + now.Format(time.RFC3339Nano) + `","id":"` + NewID(now) + `","actor":"a","type":"not-a-type-yet"}
 not-json
 `
 	path := writeFile(t, dir, "log.jsonl", body)

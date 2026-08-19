@@ -197,7 +197,7 @@ The agent then follows it whenever you say **`using-comms`**.
 ## Commands at a glance
 
 ```
-comms hello [<name>] [--label "Claude Dev"]   # session entry + friendly UI label
+comms hello [<name>] [--label "Claude Dev"] [--model claude-opus-5 --vendor anthropic]  # session entry; model/vendor let a verification say whether it was independent
 comms session start "<name>" [--label "..."]  # create + join a named comms session
 comms session join "<name>" [--label "..."]   # join an existing named comms session
 comms session end "<name>" [--reason "..."]   # archive one named session + release its claims
@@ -205,6 +205,15 @@ comms claim "<scope>" ["<scope>" ...] --intent "<text>" [--steal <id> [--reason 
 comms release [<id> ...|--latest|--all-mine] [--result "<text>"]  # selected IDs release atomically
 comms session retire <actor> [--reason "..."] # remove actor from active roster; releases its claims
 comms session lead [<actor>] [--reason "..."] # make exactly one active actor the leader
+comms plan --from plan.json                   # a whole decomposition in one write, or nothing
+comms task add <slug> --title "<instruction>" [--size S|M|L] [--slots N] [--check test] [--ref omni:AUF-2291]
+comms task edge <from> <to> --kind interface|artifact|sequence --provides "<what the later one consumes>"
+comms task done <slug> --check test=pass --note "<a decision you made>"   # finished, NOT closed
+comms task review <slug> --pass | --fail --finding "<what>" --evidence "<how to check>"
+comms task show                               # the graph, grouped by what you can do about it
+comms next                                    # what you could pick up right now
+comms brief <slug>                            # what you inherit before starting: interface + upstream decisions
+comms claim "<scope>" --task <slug> --intent "..."   # tagging a claim is what puts you on a task
 comms check <path>                            # PreToolUse hook (also: --stdin-json)
 comms check --staged                         # pre-commit guard: block peer-claimed staged paths
 comms status [--json]

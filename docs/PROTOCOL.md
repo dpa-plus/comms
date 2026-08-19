@@ -18,7 +18,7 @@ Common fields:
 | `ts`    | string | RFC3339 UTC, always normalized to UTC regardless of caller TZ.     |
 | `id`    | string | ULID (26 chars, time-prefixed, monotonic).                         |
 | `actor` | string | Validated COMMS_ACTOR. Per-session — never per-user.               |
-| `type`  | string | One of: `hello`, `claim`, `release`, `note`, `finding`. Readers skip types they do not know; writers never emit one. |
+| `type`  | string | One of: `hello`, `claim`, `release`, `note`, `finding`, `task`, `task_edge`, `task_state`. Readers skip types they do not know; writers never emit one. |
 | `scope` | array  | Optional. Only set on `claim` (and informational on `release`).    |
 | `data`  | object | Type-specific bag; all keys optional unless noted below.           |
 
@@ -165,6 +165,100 @@ Body is ≤200 Unicode runes (scalar values).
 `category` is one of: `bug`, `fix`, `ship`, `decision`, `gotcha`.
 
 `refs[].kind` is free-form but conventional: `path`, `commit`, `pr`, `issue`, `doc`, `url`.
+
+### `task`
+
+Declares a node of the work graph, or restates one that exists. A restatement
+edits the description only — re-titling verified work does not reopen it.
+
+```json
+{"data": {"task": "auth-api", "title": "Build session create / refresh / revoke",
+          "size": "L", "slots": 2, "checks": ["test", "types"], "ref": "omni:AUF-2291"}}
+```
+
+| Field    | Notes |
+| -------- | ----- |
+| `task`   | Slug: 2-32 chars, `[a-z][a-z0-9-]*`. Chosen to be SAID — quoted between agents, typed into a claim. Deliberately not a ULID: on a real store 99.5% of ULIDs share their 6-char short prefix. |
+| `title`  | Written as an instruction, not a label. Required on first declaration. |
+| `size`   | `S`, `M` or `L`. |
+| `slots`  | How many agents may work it at once. Default 1. |
+| `checks` | Names that must be reported passing before the task can be marked done. |
+| `ref`    | Opaque reference to wherever the real context lives, e.g. `omni:AUF-2291`. comms stores it and never resolves it. |
+
+### `task_edge`
+
+Records that `to` comes after `from`, and what `to` consumes from `from`.
+
+```json
+{"data": {"from": "auth-api", "to": "login-ui", "kind": "interface",
+          "provides": "POST /session, POST /session/refresh - httpOnly cookie, no bearer token"}}
+```
+
+`kind` is one of `interface` (B calls a surface A provides), `artifact` (B uses a
+file or schema A produced) or `sequence` (ordering only, nothing flows).
+Unrecognized kinds degrade to `sequence`.
+
+The distinction decides what a rejection costs: reworking a task forces a
+recheck of successors that CONSUME from it, and leaves successors that merely
+follow it alone. `provides` is what travels to whoever picks up `to`.
+
+Edges are their own events so any agent can add one at the moment it discovers
+the dependency — the only moment it is actually known. An edge whose endpoints
+are not both declared is ignored by the reducer; `comms plan` and `comms task
+edge` reject it up front.
+
+### `task_state`
+
+Moves a task along its two steps.
+
+```json
+{"data": {"task": "auth-api", "state": "done",
+          "checks": {"test": "pass", "types": "pass"},
+          "notes": ["Refresh rotation is single-use: replaying a spent token revokes the family."]}}
+```
+
+```json
+{"data": {"task": "auth-api", "state": "rejected", "findings": [
+  {"claim": "revoke will table-scan", "evidence": "EXPLAIN shows Seq Scan on refresh_tokens"}]}}
+```
+
+`state` is `done`, `verified` or `rejected`. The reducer REFUSES a transition
+rather than trusting the writer, and keeps the refusal:
+
+- `done` — refused unless every declared check is reported `pass`.
+- `verified` / `rejected` — refused when the actor is the agent who did the work.
+  A role suffix does not help: `claude-dev/review` is recognized as `claude-dev`.
+- `rejected` clears the doer and returns the task to open work. The graph is not
+  redrawn; the findings travel with it.
+
+`notes` are the handover: the decisions the doer made and why. They are what a
+verifier reads, and what `comms brief` passes along the edges to whoever picks up
+the tasks that come after.
+
+### Derived task state
+
+Nothing below is ever written into an event. All of it is computed by replaying
+the log, so the picture cannot contradict the data:
+
+| Phase    | Meaning |
+| -------- | ------- |
+| `ready`  | Every dependency is verified and nobody has claimed it. |
+| `doing`  | At least one agent holds a file claim tagged to this task. |
+| `review` | Finished, waiting for a second pair of eyes. |
+| `closed` | Verified. **Only now does it unblock its successors.** |
+| `blocked`| At least one dependency is not verified yet. |
+| `cycle`  | Reachable from itself. Surfaced rather than hidden; the reducer still terminates. |
+
+A task unblocks what comes after it when it is VERIFIED, not when it is merely
+finished. That is what keeps review on the critical path.
+
+Who is on a task is read off live claims tagged with `data.task`, so releasing a
+file takes the agent off the task with no separate bookkeeping step.
+
+A verification also records whether it was `independent` (the verifier's `vendor`
+differs from the doer's, taken from their `hello` events) or `same-family`.
+"Verified" and "verified by something with the same blind spots" are different
+claims and the protocol does not blur them.
 
 ## Scope grammar
 
