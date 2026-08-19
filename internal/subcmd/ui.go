@@ -39,9 +39,9 @@ func NewUICmd() *cobra.Command {
 		Long: `Serve a local dashboard.
 
 By default the dashboard is UNIFIED: it shows every comms project on this
-machine in one place, with a sidebar to pick which project/session to view.
-Run it once and you see all your agents across all repos — no need to start a
-UI per project. Scope it to a single repo with --repo /path/to/repo.
+machine in one place, with a sidebar to focus one project when needed. History
+is one persistent append-only timeline; project and session names are context
+labels, not separate logs. Scope the UI to one repo with --repo /path/to/repo.
 
 The UI binds to 127.0.0.1 by default, reads the same JSONL event logs as the
 CLI, and streams live updates to the browser over Server-Sent Events: a file
@@ -96,7 +96,7 @@ func runUI(addr string, demo, all bool, staleAfter time.Duration, forceOpen, noO
 	if demo {
 		fmt.Println("Demo mode: serving sample data only; no fake events are written.")
 	} else if all {
-		fmt.Println("Unified mode: showing every comms project on this machine; pick a project/session in the sidebar.")
+		fmt.Println("Unified mode: showing one persistent history across every comms project; use the sidebar to focus a project.")
 	} else {
 		fmt.Println("Single-repo mode (--repo): scoped to one repo. Run without --repo to see all projects.")
 	}
@@ -1023,12 +1023,16 @@ func toUIReleases(rs []*state.Release) []uiRelease {
 }
 
 type uiEvent struct {
-	ID      string     `json:"id"`
-	Actor   string     `json:"actor"`
-	Type    event.Type `json:"type"`
-	Scope   []string   `json:"scope,omitempty"`
-	Summary string     `json:"summary"`
-	TS      time.Time  `json:"ts"`
+	ID          string     `json:"id"`
+	Actor       string     `json:"actor"`
+	Type        event.Type `json:"type"`
+	Scope       []string   `json:"scope,omitempty"`
+	Summary     string     `json:"summary"`
+	TS          time.Time  `json:"ts"`
+	RepoHash    string     `json:"repo_hash,omitempty"`
+	RepoName    string     `json:"repo_name,omitempty"`
+	SessionID   string     `json:"session_id,omitempty"`
+	SessionName string     `json:"session_name,omitempty"`
 }
 
 type globalLogCandidate struct {
@@ -1108,17 +1112,24 @@ func buildUISnapshot(rt *Runtime, staleAfter time.Duration) uiSnapshot {
 	}
 	out.Releases = toUIReleases(recentReleases(rt.State, now.Add(-24*time.Hour), 12))
 	attachClaimsToActiveSessions(&out)
-	if out.Current != nil {
-		out.Events = out.Current.Events
-	} else if len(out.CommsSessions) > 0 {
-		out.Events = out.CommsSessions[0].Events
-	}
+	// History is the complete append-only runtime log, not whichever named
+	// session happens to be active or most recently archived. Sessions are useful
+	// coordination summaries, but they must never partition or hide audit rows.
+	out.Events = eventsToUIForProject(rt.Events, rt.Repo.Hash, rt.Repo.Name)
 	out.Actions = buildUIActions(out)
 	return out
 }
 
 func buildDemoUISnapshot(staleAfter time.Duration) uiSnapshot {
 	base := time.Date(2026, 5, 27, 10, 24, 0, 0, time.UTC)
+	const (
+		demoRepoHash = "3b9c1f2a77e4"
+		demoRepoName = "demo-project"
+		currentID    = "01JX2Q3Z5V6B6N9P0R1S2T3U4V"
+		currentName  = "demo preview"
+		archivedID   = "01JX2Q3M6M6B6N9P0R1S2T3U4V"
+		archivedName = "morning verification"
+	)
 	currentEvents := []uiEvent{
 		{ID: "01JX2Q3P8P8B6N9P0R1S2T3U4V", Actor: "codex-dev", Type: event.TypeNote, Summary: "PRIORITY: Everyone pause before touching aggregation until claim clears.", TS: base.Add(-1 * time.Minute)},
 		{ID: "01JX2Q3P9P9B6N9P0R1S2T3U4V", Actor: "codex-dev", Type: event.TypeFinding, Summary: "PRIORITY: decision: everyone should check live Meta numbers before shipping", TS: base.Add(-2 * time.Minute)},
@@ -1134,6 +1145,20 @@ func buildDemoUISnapshot(staleAfter time.Duration) uiSnapshot {
 		{ID: "01JX2Q3A1A1B6N9P0R1S2T3U4V", Actor: "codex-morning", Type: event.TypeClaim, Scope: []string{"src/auth/token.ts#validateToken"}, Summary: "review token expiry handling", TS: base.Add(-55 * time.Minute)},
 		{ID: "01JX2Q39191B6N9P0R1S2T3U4V", Actor: "claude-morning", Type: event.TypeHello, Summary: "started comms session: morning verification", TS: base.Add(-2 * time.Hour)},
 	}
+	for i := range currentEvents {
+		currentEvents[i].RepoHash = demoRepoHash
+		currentEvents[i].RepoName = demoRepoName
+		currentEvents[i].SessionID = currentID
+		currentEvents[i].SessionName = currentName
+	}
+	for i := range archivedEvents {
+		archivedEvents[i].RepoHash = demoRepoHash
+		archivedEvents[i].RepoName = demoRepoName
+		archivedEvents[i].SessionID = archivedID
+		archivedEvents[i].SessionName = archivedName
+	}
+	history := append(append([]uiEvent{}, currentEvents...), archivedEvents...)
+	sort.SliceStable(history, func(i, j int) bool { return history[i].TS.After(history[j].TS) })
 	claims := []uiClaim{
 		{ID: "01JX2Q3Y7W5B6N9P0R1S2T3U4V", Actor: "codex-dev", Scope: "src/aggregate/lead_counter.ts#L40-90", Intent: "fix lead double-counting in aggregation loop", TS: base.Add(-12 * time.Minute), Age: "12m"},
 		{ID: "01JX2Q3W5V3B6N9P0R1S2T3U4V", Actor: "claude-dev", Scope: "src/auth/token.ts#validateToken", Intent: "tighten JWT expiry validation", TS: base.Add(-18 * time.Minute), Age: "18m"},
@@ -1143,14 +1168,14 @@ func buildDemoUISnapshot(staleAfter time.Duration) uiSnapshot {
 		claims[i].Stale = base.Sub(claims[i].TS) >= staleAfter
 	}
 	current := uiCommsSession{
-		ID: "01JX2Q3Z5V6B6N9P0R1S2T3U4V", Name: "demo preview", StartedAt: base.Add(-13 * time.Minute), Actors: []string{"claude-dev", "codex-dev", "human-eli"},
+		ID: currentID, Name: currentName, StartedAt: base.Add(-13 * time.Minute), Actors: []string{"claude-dev", "codex-dev", "human-eli"},
 		Reason: "demo preview", EventCount: len(currentEvents), ClaimCount: 3, FindingCount: 3, NoteCount: 2, Events: currentEvents, Claims: claims,
 	}
 	return uiSnapshot{
 		Project: uiProject{
-			Name:            "demo-project",
+			Name:            demoRepoName,
 			Root:            "/demo/comms-project",
-			Hash:            "3b9c1f2a77e4",
+			Hash:            demoRepoHash,
 			LogPath:         "demo mode: sample events only; no log file is written",
 			Demo:            true,
 			MutationMessage: "Demo mode is read-only; starting and ending sessions is disabled.",
@@ -1163,7 +1188,7 @@ func buildDemoUISnapshot(staleAfter time.Duration) uiSnapshot {
 			{ID: "release_actor_claims", Label: "Release All Claims", Method: http.MethodPost, Path: "/api/claim/release-all", Enabled: false, Reason: "demo mode is read-only"},
 			{ID: "retire_session_actor", Label: "Retire Session Actor", Method: http.MethodPost, Path: "/api/session/retire", Enabled: false, Reason: "demo mode is read-only"},
 			{ID: "transfer_leader", Label: "Transfer Leader", Method: http.MethodPost, Path: "/api/session/lead", Enabled: false, Reason: "demo mode is read-only"},
-			{ID: "select_session_log", Label: "Select Session Event Log", Enabled: true, Reason: "client-side filtered view over current_session/events and comms_sessions/events"},
+			{ID: "select_session_log", Label: "View Continuous History", Enabled: true, Reason: "client-side filtering over the complete append-only event history"},
 		},
 		Current: &current,
 		Active:  []uiCommsSession{current},
@@ -1174,7 +1199,7 @@ func buildDemoUISnapshot(staleAfter time.Duration) uiSnapshot {
 		},
 		CommsSessions: []uiCommsSession{
 			{
-				ID: "01JX2Q3M6M6B6N9P0R1S2T3U4V", StartedAt: base.Add(-8 * time.Hour), EndedAt: base.Add(-30 * time.Minute),
+				ID: archivedID, Name: archivedName, StartedAt: base.Add(-8 * time.Hour), EndedAt: base.Add(-30 * time.Minute),
 				EndedBy: "human-eli", Reason: "morning verification pass finished",
 				Actors: []string{"claude-morning", "codex-morning", "human-eli"}, ReleasedRefs: 2,
 				EventCount: len(archivedEvents), ClaimCount: 1, FindingCount: 1, NoteCount: 0, Events: archivedEvents,
@@ -1198,7 +1223,7 @@ func buildDemoUISnapshot(staleAfter time.Duration) uiSnapshot {
 		},
 		Docs:    []string{"lead-counting", "tracker-architecture", "ui"},
 		Lessons: []string{"verify-data-before-ui", "claim-smallest-scope", "capture-filter-context"},
-		Events:  currentEvents,
+		Events:  history,
 		Updated: base.Add(18 * time.Second),
 	}
 }
@@ -1342,6 +1367,7 @@ func buildGlobalUISnapshot(staleAfter time.Duration) (uiSnapshot, error) {
 		ps.Releases = toUIReleases(recentReleases(st, findingCutoff, 12))
 		attachClaimsToProjectSession(&ps)
 		out.ProjectSessions = append(out.ProjectSessions, ps)
+		out.Events = append(out.Events, eventsToUIForProject(events, hash, repoName)...)
 
 		// Merged (project-prefixed) flat arrays, derived from the container in
 		// the same order/shape the previous code produced.
@@ -1407,11 +1433,9 @@ func buildGlobalUISnapshot(staleAfter time.Duration) (uiSnapshot, error) {
 		return out.Notes[i].TS.After(out.Notes[j].TS)
 	})
 	sort.Slice(out.Releases, func(i, j int) bool { return out.Releases[i].TS.After(out.Releases[j].TS) })
+	sort.SliceStable(out.Events, func(i, j int) bool { return out.Events[i].TS.After(out.Events[j].TS) })
 	if len(out.Active) > 0 {
 		out.Current = &out.Active[0]
-		out.Events = out.Current.Events
-	} else if len(out.CommsSessions) > 0 {
-		out.Events = out.CommsSessions[0].Events
 	}
 	attachClaimsToActiveSessions(&out)
 	out.Actions = buildUIActions(out)
@@ -1662,7 +1686,7 @@ func buildUIActions(snap uiSnapshot) []uiAction {
 	releaseAll := uiAction{ID: "release_actor_claims", Label: "Release All Claims", Method: http.MethodPost, Path: "/api/claim/release-all"}
 	retire := uiAction{ID: "retire_session_actor", Label: "Retire Session Actor", Method: http.MethodPost, Path: "/api/session/retire"}
 	lead := uiAction{ID: "transfer_leader", Label: "Transfer Leader", Method: http.MethodPost, Path: "/api/session/lead"}
-	logs := uiAction{ID: "select_session_log", Label: "Select Session Event Log", Enabled: true, Reason: "client-side filtered view over current_session/events and comms_sessions/events"}
+	logs := uiAction{ID: "select_session_log", Label: "View Continuous History", Enabled: true, Reason: "client-side filtering over the complete append-only event history"}
 
 	if snap.Project.Demo {
 		start.Reason = "demo mode is read-only"
@@ -1858,13 +1882,25 @@ func summarizeCommsWindow(id, name string, events []event.Event, current bool, e
 }
 
 func eventsToUI(events []event.Event) []uiEvent {
-	out := make([]uiEvent, 0, len(events))
-	for i := len(events) - 1; i >= 0; i-- {
-		ev := events[i]
+	sorted := append([]event.Event(nil), events...)
+	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].TS.Before(sorted[j].TS) })
+	out := make([]uiEvent, 0, len(sorted))
+	for i := len(sorted) - 1; i >= 0; i-- {
+		ev := sorted[i]
 		out = append(out, uiEvent{
 			ID: ev.ID, Actor: ev.Actor, Type: ev.Type, Scope: ev.Scope,
 			Summary: eventSummary(ev), TS: ev.TS,
+			SessionID: dataString(ev.Data, "comms_session_id"), SessionName: dataString(ev.Data, "comms_session_name"),
 		})
+	}
+	return out
+}
+
+func eventsToUIForProject(events []event.Event, repoHash, repoName string) []uiEvent {
+	out := eventsToUI(events)
+	for i := range out {
+		out[i].RepoHash = repoHash
+		out[i].RepoName = repoName
 	}
 	return out
 }
@@ -2475,6 +2511,11 @@ th {
   grid-column: 1 / -1;
   min-height: 420px;
 }
+.history-more {
+  display: flex;
+  justify-content: center;
+  padding: 14px;
+}
 /* The roster column is narrow, so the actor name + meta take the FULL width and
    the row actions sit on their own line beneath them — never overlapping the
    text or spilling past the row. They stay visible (matching the always-on
@@ -2626,7 +2667,6 @@ body.unified main {
   .panel-title {
     display: block;
   }
-  .panel-title select,
   .filter-input {
     width: 100%;
     margin-top: 8px;
@@ -2675,10 +2715,12 @@ body.unified main {
   .claims td:nth-child(5)::before { content: "Age"; }
   .claims td:nth-child(6)::before { content: "Action"; }
   .events td:nth-child(1)::before { content: "When"; }
-  .events td:nth-child(2)::before { content: "Type"; }
-  .events td:nth-child(3)::before { content: "Actor"; }
-  .events td:nth-child(4)::before { content: "Scope"; }
-  .events td:nth-child(5)::before { content: "Summary"; }
+  .events td:nth-child(2)::before { content: "Project"; }
+  .events td:nth-child(3)::before { content: "Session"; }
+  .events td:nth-child(4)::before { content: "Type"; }
+  .events td:nth-child(5)::before { content: "Actor"; }
+  .events td:nth-child(6)::before { content: "Scope"; }
+  .events td:nth-child(7)::before { content: "Summary"; }
 }
 </style>
 </head>
@@ -2733,13 +2775,12 @@ body.unified main {
   </div>
   <section class="panel events">
     <div class="panel-title">
-      <h2>Session Event Log</h2>
+      <h2>History</h2>
       <div class="panel-tools">
         <input id="eventFilter" class="filter-input" type="search" placeholder="Filter events">
-        <select id="sessionSelect" aria-label="Choose comms session log"></select>
       </div>
     </div>
-    <div class="hint" id="eventHint">Choose a session to see only that session's log rows. The physical JSONL remains append-only.</div>
+    <div class="hint" id="eventHint">Persistent append-only history. Sessions and projects are context labels, never separate logs.</div>
     <div id="events" class="scroll"></div>
   </section>
 </main>
@@ -2799,10 +2840,11 @@ function mutationHelp(data) {
 function actionByID(data, id) {
   return (data.actions || []).find(a => a.id === id) || {};
 }
-let selectedSessionID = localStorage.getItem('selectedSessionID') || 'current';
 let latestData = null;
 let latestView = null;
 let selectedProjectHash = localStorage.getItem('selectedProjectHash') || '';
+const HISTORY_PAGE_SIZE = 500;
+let historyRenderLimit = HISTORY_PAGE_SIZE;
 function isUnified(data) { return Array.isArray(data.project_sessions) && data.project_sessions.length > 0; }
 // currentView returns the slice of the snapshot the panels should render: a
 // single project's container when one is selected in unified mode, otherwise the
@@ -2867,7 +2909,7 @@ function selectProject(hash) {
   selectedProjectHash = hash || '';
   if (selectedProjectHash) localStorage.setItem('selectedProjectHash', selectedProjectHash);
   else localStorage.removeItem('selectedProjectHash');
-  selectedSessionID = 'current'; // re-default the session log within the new project
+  historyRenderLimit = HISTORY_PAGE_SIZE;
   if (latestData) applySnapshot(latestData);
 }
 function filterText(id) {
@@ -2969,7 +3011,7 @@ function applySnapshot(data) {
   el('commsSessions').innerHTML = renderRows(view.comms_sessions, s =>
     '<div class="row"><div class="actor">' + esc(s.name || 'Archived session') + '</div><div class="meta">' + fmtTime(s.started_at) + ' → ' + fmtTime(s.ended_at) + '</div><div class="meta">ended by @' + esc(s.ended_by) + ' · ' + esc(s.reason || 'comms session ended') + '</div><div class="meta">' + esc(s.event_count || 0) + ' event(s) · ' + esc(s.claim_count || 0) + ' claim(s) · ' + esc(s.finding_count || 0) + ' finding(s) · ' + esc(s.note_count || 0) + ' note(s)</div><div class="meta">' + esc((s.actors || []).map(a => '@' + a).join(', ')) + '</div></div>',
     'No archived comms sessions yet. Use End Comms Session when the project work window is done.');
-  renderSessionChoices(view);
+  renderHistory(data);
   renderClaims(data, view);
   el('findings').innerHTML = renderRows(view.findings, f => {
     const refs = (f.refs || []).map(r => {
@@ -2996,16 +3038,9 @@ function renderClaims(data, view) {
   const releaseAction = actionByID(data, 'release_claim');
   const retireAction = actionByID(data, 'retire_session_actor');
   const claimFilter = filterText('claimFilter');
-  const chosen = allSessionChoices(view).find(c => c.id === selectedSessionID);
-  const sourceClaims = chosen && chosen.active ? (chosen.session.claims || []) : (chosen ? [] : (view.claims || []));
-  const claims = sourceClaims
+  const claims = (view.claims || [])
     .filter(c => includesFilter([c.actor, c.session_name, c.scope, c.intent, c.age, c.id], claimFilter));
-  const scopeText = chosen ? (chosen.active ? 'Showing active claims for "' + (chosen.session.name || chosen.session.id) + '". ' : 'Archived sessions have no active claims. ') : 'Showing all active claims. ';
-  // Archive CTA: when an active named session has no open claims left, offer to
-  // archive it right from the empty state (it ended cleanly).
-  const endAction = actionByID(data, 'end_comms_session');
-  const canArchive = endAction.enabled && chosen && chosen.active && chosen.id !== 'current' && claims.length === 0 && !claimFilter;
-  const archiveBtn = canArchive ? '<div class="es-cta"><button class="small primary" type="button" data-archive-session>Archive this session</button></div>' : '';
+  const scopeText = 'Showing all active claims. ';
   let claimBody;
   if (claims.length) {
     // Readable claim CARDS (not a cramped fixed table): intent + scope get the
@@ -3027,10 +3062,8 @@ function renderClaims(data, view) {
     }).join('') + '</div>';
   } else if (claimFilter) {
     claimBody = '<div class="empty">No claims matching "' + esc(claimFilter) + '" <span class="es-clear" data-clear="claimFilter" role="button" tabindex="0">Clear</span></div>';
-  } else if (chosen && !chosen.active) {
-    claimBody = '<div class="empty">No active claims in archived sessions.</div>';
   } else {
-    claimBody = '<div class="empty-state"><div class="es-icon">&#10003;</div><div class="es-title">No active claims</div><div class="es-sub">All work in this view is released.</div>' + archiveBtn + '</div>';
+    claimBody = '<div class="empty-state"><div class="es-icon">&#10003;</div><div class="es-title">No active claims</div><div class="es-sub">All work in this view is released.</div></div>';
   }
   el('claims').innerHTML = '<div class="hint">' + esc(scopeText) + ' Claims older than ' + esc(data.project.stale_after) + ' are stale. ' + esc(mutationHelp(data)) + '</div>' + claimBody;
   el('claims').querySelectorAll('[data-release-claim]').forEach(button => {
@@ -3041,65 +3074,30 @@ function renderClaims(data, view) {
   });
   const clear = el('claims').querySelector('[data-clear="claimFilter"]');
   if (clear) clear.addEventListener('click', () => { el('claimFilter').value = ''; renderClaims(latestData, latestView); });
-  const archiveEl = el('claims').querySelector('[data-archive-session]');
-  if (archiveEl) archiveEl.addEventListener('click', () => endCommsSession().catch(showError));
 }
-function allSessionChoices(data) {
-  const out = [];
-  for (const s of data.active_comms_sessions || []) {
-    out.push({ id: s.id, label: 'Active: ' + (s.name || s.id.slice(0, 10)), session: s, active: true });
+function renderHistory(data) {
+  let events = data.events || [];
+  if (isUnified(data) && selectedProjectHash) {
+    events = events.filter(ev => ev.repo_hash === selectedProjectHash);
   }
-  if (!out.length && data.current_session) out.push({ id: 'current', label: 'Current session', session: data.current_session, active: true });
-  for (const s of data.comms_sessions || []) {
-    out.push({ id: s.id, label: 'Archive: ' + (s.name || fmtTime(s.started_at) + ' → ' + fmtTime(s.ended_at)), session: s, active: false });
-  }
-  return out;
-}
-function renderSessionChoices(data) {
-  const sel = el('sessionSelect');
-  const choices = allSessionChoices(data);
-  if (!choices.length) {
-    sel.innerHTML = '<option value="">No sessions yet</option>';
-    sel.disabled = true;
-    sel.style.display = 'none';
-    sel.dataset.sig = '';
-    el('events').innerHTML = empty('No session logs yet. An agent starts one with comms session start, or run comms ui --demo.');
-    return;
-  }
-  if (!choices.some(c => c.id === selectedSessionID)) selectedSessionID = choices[0].id;
-  sel.disabled = false;
-  // The selector only earns its place when there's more than one log to switch
-  // between (the active session plus archives). With a single session it does
-  // nothing, so hide it — the event log just shows that one session.
-  sel.style.display = choices.length > 1 ? '' : 'none';
-  // Only rebuild the <option> set when it actually changed, and never while the
-  // user has the dropdown open (focused). A live snapshot push that arrived
-  // mid-interaction would otherwise collapse an open menu and reset the
-  // selection. We still keep the selected log in sync below.
-  const sig = JSON.stringify(choices.map(c => [c.id, c.label]));
-  if (sel.dataset.sig !== sig && document.activeElement !== sel) {
-    sel.innerHTML = choices.map(c => '<option value="' + esc(c.id) + '">' + esc(c.label) + '</option>').join('');
-    sel.dataset.sig = sig;
-  }
-  if (document.activeElement !== sel && sel.value !== selectedSessionID) sel.value = selectedSessionID;
-  renderSelectedSessionLog(data);
-}
-function renderSelectedSessionLog(data) {
-  const chosen = allSessionChoices(data).find(c => c.id === selectedSessionID);
-  if (!chosen) {
-    el('events').innerHTML = empty('No selected session log.');
-    return;
-  }
-  const s = chosen.session;
-  const range = chosen.active ? 'Active session "' + (s.name || s.id) + '" started ' + fmtTime(s.started_at) : 'Archived session "' + (s.name || s.id) + '" ' + fmtTime(s.started_at) + ' → ' + fmtTime(s.ended_at);
-  el('eventHint').textContent = range + ' · ' + (s.event_count || 0) + ' event(s). The physical JSONL remains append-only; this table is filtered to the selected session.';
   const eventFilter = filterText('eventFilter');
-  const events = (s.events || []).filter(ev => includesFilter([fmtTime(ev.ts), ev.type, ev.actor, (ev.scope || []).join(', '), ev.summary], eventFilter));
-  el('events').innerHTML = renderTable(events, ['When', 'Type', 'Actor', 'Scope', 'Summary'], ev =>
-    '<tr><td>' + fmtTime(ev.ts) + '</td><td><span class="pill ' + esc(ev.type) + '">' + esc(ev.type) + '</span></td><td>@' + esc(ev.actor) + '</td><td><span class="scope">' + esc((ev.scope || []).join(', ')) + '</span></td><td>' + esc(ev.summary) + '</td></tr>',
-    eventFilter ? 'No events matching "' + esc(eventFilter) + '" <span class="es-clear" data-clear="eventFilter" role="button" tabindex="0">Clear</span>' : 'No log events in this session.');
+  const visible = events.filter(ev => includesFilter([
+    fmtTime(ev.ts), ev.repo_name, ev.repo_hash, ev.session_name, ev.session_id,
+    ev.type, ev.actor, (ev.scope || []).join(', '), ev.summary
+  ], eventFilter));
+  const rows = visible.slice(0, historyRenderLimit);
+  const focus = isUnified(data) && selectedProjectHash ? (latestView.repo_name || selectedProjectHash) : data.project.name;
+  el('eventHint').textContent = 'Persistent append-only history · ' + events.length + ' event(s) in ' + focus + '. Sessions and projects are context labels, never separate logs.';
+  el('events').innerHTML = renderTable(rows, ['When', 'Project', 'Session', 'Type', 'Actor', 'Scope', 'Summary'], ev =>
+    '<tr><td>' + fmtTime(ev.ts) + '</td><td>' + esc(ev.repo_name || data.project.name) + '</td><td>' + esc(ev.session_name || 'legacy') + '</td><td><span class="pill ' + esc(ev.type) + '">' + esc(ev.type) + '</span></td><td>@' + esc(ev.actor) + '</td><td><span class="scope">' + esc((ev.scope || []).join(', ')) + '</span></td><td>' + esc(ev.summary) + '</td></tr>',
+    eventFilter ? 'No events matching "' + esc(eventFilter) + '" <span class="es-clear" data-clear="eventFilter" role="button" tabindex="0">Clear</span>' : 'No history events yet.');
+  if (rows.length < visible.length) {
+    el('events').insertAdjacentHTML('beforeend', '<div class="history-more"><button class="small" type="button" data-history-more>Show 500 older events · ' + (visible.length - rows.length) + ' remaining</button></div>');
+  }
   const evClear = el('events').querySelector('[data-clear="eventFilter"]');
-  if (evClear) evClear.addEventListener('click', () => { el('eventFilter').value = ''; renderSelectedSessionLog(latestView); });
+  if (evClear) evClear.addEventListener('click', () => { el('eventFilter').value = ''; historyRenderLimit = HISTORY_PAGE_SIZE; renderHistory(latestData); });
+  const more = el('events').querySelector('[data-history-more]');
+  if (more) more.addEventListener('click', () => { historyRenderLimit += HISTORY_PAGE_SIZE; renderHistory(latestData); });
 }
 // endSessionTarget resolves which active named session the End button acts on:
 // the selected project's active session in unified mode (so the request routes
@@ -3123,8 +3121,6 @@ async function endCommsSession() {
     body: JSON.stringify({ reason, session_id: target.id, name: target.name, repo_hash: target.repo_hash })
   });
   if (!res.ok) throw new Error(await res.text());
-  selectedSessionID = 'current';
-  localStorage.removeItem('selectedSessionID');
   hideError();
   await load();
 }
@@ -3171,17 +3167,12 @@ el('endComms').addEventListener('click', () => {
   b.disabled = true; b.textContent = 'Ending…';
   endCommsSession().catch(showError).finally(() => { b.disabled = false; b.textContent = label; });
 });
-el('sessionSelect').addEventListener('change', () => {
-  selectedSessionID = el('sessionSelect').value;
-  localStorage.setItem('selectedSessionID', selectedSessionID);
-  if (latestView) renderSelectedSessionLog(latestView);
-  if (latestData) renderClaims(latestData, latestView);
-});
 el('claimFilter').addEventListener('input', () => {
   if (latestData) renderClaims(latestData, latestView);
 });
 el('eventFilter').addEventListener('input', () => {
-  if (latestView) renderSelectedSessionLog(latestView);
+  historyRenderLimit = HISTORY_PAGE_SIZE;
+  if (latestData) renderHistory(latestData);
 });
 el('theme').addEventListener('click', () => {
   const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
