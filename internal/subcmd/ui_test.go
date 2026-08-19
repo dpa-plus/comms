@@ -31,7 +31,7 @@ func TestBuildDemoUISnapshotMarksStaleAndShowsCommsArchive(t *testing.T) {
 		t.Fatalf("demo start action should be disabled: %+v", got)
 	}
 	if got := actionByIDForTest(snap.Actions, "select_session_log"); !got.Enabled {
-		t.Fatalf("session log action should be advertised: %+v", got)
+		t.Fatalf("continuous history action should be advertised: %+v", got)
 	}
 	if len(snap.Claims) != 3 {
 		t.Fatalf("demo claims len = %d, want 3", len(snap.Claims))
@@ -53,6 +53,10 @@ func TestBuildDemoUISnapshotMarksStaleAndShowsCommsArchive(t *testing.T) {
 	}
 	if len(snap.CommsSessions[0].Events) == 0 {
 		t.Fatalf("demo archive should include its own event log")
+	}
+	wantHistory := len(snap.Current.Events) + len(snap.CommsSessions[0].Events)
+	if len(snap.Events) != wantHistory {
+		t.Fatalf("demo continuous history len = %d, want current + archive = %d", len(snap.Events), wantHistory)
 	}
 	if len(snap.Notes) == 0 || !snap.Notes[0].Priority {
 		t.Fatalf("first demo note should be priority")
@@ -102,6 +106,59 @@ func TestBuildUISnapshotUsesEmptySlicesForMissingArchiveAndLessons(t *testing.T)
 	}
 	if strings.Contains(string(body), `"lessons":null`) {
 		t.Fatalf("lessons should encode as [], got %s", body)
+	}
+}
+
+func TestBuildUISnapshotKeepsInactiveUnarchivedSessionInContinuousHistory(t *testing.T) {
+	repo := setupUITestRepo(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("COMMS_ACTOR", "human-eli")
+	t.Setenv("USER", "eli")
+	t.Chdir(repo)
+
+	rt, err := Open(OpenOpts{Mutating: true})
+	if err != nil {
+		t.Fatalf("open runtime: %v", err)
+	}
+	now := time.Now().UTC()
+	for _, ev := range []event.Event{
+		{
+			TS: now.Add(-6 * time.Hour), ID: "01JX2Q3Y7W5B6N9P0R1S2T3H01", Actor: "claude-old", Type: event.TypeHello,
+			Data: map[string]interface{}{
+				"base_name": "claude", "comms_session_start": true,
+				"comms_session_id": "stale-unended", "comms_session_name": "stale but persistent",
+			},
+		},
+		{
+			TS: now.Add(-5 * time.Hour), ID: "01JX2Q3Y7W5B6N9P0R1S2T3H02", Actor: "claude-old", Type: event.TypeFinding,
+			Data: map[string]interface{}{
+				"category": "decision", "summary": "history must survive liveness expiry",
+				"comms_session_id": "stale-unended", "comms_session_name": "stale but persistent",
+			},
+		},
+	} {
+		if err := rt.Append(ev); err != nil {
+			_ = rt.Close()
+			t.Fatalf("append event: %v", err)
+		}
+	}
+
+	snap := buildUISnapshot(rt, 90*time.Minute)
+	if err := rt.Close(); err != nil {
+		t.Fatalf("close runtime: %v", err)
+	}
+
+	if len(snap.Active) != 0 {
+		t.Fatalf("stale unended session should not be active: %+v", snap.Active)
+	}
+	if len(snap.CommsSessions) != 0 {
+		t.Fatalf("unended session should not be archived: %+v", snap.CommsSessions)
+	}
+	if len(snap.Events) != 2 {
+		t.Fatalf("continuous history lost stale unended events: %+v", snap.Events)
+	}
+	if snap.Events[0].ID != "01JX2Q3Y7W5B6N9P0R1S2T3H02" || snap.Events[1].ID != "01JX2Q3Y7W5B6N9P0R1S2T3H01" {
+		t.Fatalf("continuous history should be newest first: %+v", snap.Events)
 	}
 }
 
@@ -282,6 +339,63 @@ func TestBuildGlobalUISnapshotPopulatesPerProjectContainers(t *testing.T) {
 	}
 }
 
+func TestBuildGlobalUISnapshotMergesContinuousHistoryWithProjectIdentity(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dataHome, err := paths.UserDataHome()
+	if err != nil {
+		t.Fatalf("user data home: %v", err)
+	}
+	now := time.Now().UTC()
+	projects := []struct {
+		hash, name, sessionID, sessionName string
+		ts                                 time.Time
+	}{
+		{"historyalpha1", "alpha", "session-alpha", "alpha work", now.Add(-6 * time.Hour)},
+		{"historybeta02", "beta", "session-beta", "beta work", now.Add(-5 * time.Hour)},
+	}
+	for _, p := range projects {
+		repoRoot := filepath.Join(home, p.name)
+		if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+			t.Fatalf("mkdir repo: %v", err)
+		}
+		logDir := filepath.Join(dataHome, "comms", p.hash)
+		if err := os.MkdirAll(logDir, 0o700); err != nil {
+			t.Fatalf("mkdir log dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(logDir, "repo-path.txt"), []byte(repoRoot+"\n"), 0o600); err != nil {
+			t.Fatalf("write repo path: %v", err)
+		}
+		ev := event.Event{
+			TS: p.ts, ID: event.NewID(p.ts), Actor: "claude-old", Type: event.TypeHello,
+			Data: map[string]interface{}{
+				"base_name": "claude", "comms_session_start": true,
+				"comms_session_id": p.sessionID, "comms_session_name": p.sessionName,
+			},
+		}
+		if err := event.Append(filepath.Join(logDir, "log.jsonl"), ev); err != nil {
+			t.Fatalf("append event: %v", err)
+		}
+	}
+
+	snap, err := buildGlobalUISnapshot(90 * time.Minute)
+	if err != nil {
+		t.Fatalf("build global snapshot: %v", err)
+	}
+	if len(snap.Active) != 0 {
+		t.Fatalf("old sessions should be inactive, got %+v", snap.Active)
+	}
+	if len(snap.Events) != 2 {
+		t.Fatalf("global continuous history = %d events, want 2: %+v", len(snap.Events), snap.Events)
+	}
+	if snap.Events[0].RepoHash != "historybeta02" || snap.Events[0].RepoName != "beta" || snap.Events[0].SessionID != "session-beta" || snap.Events[0].SessionName != "beta work" {
+		t.Fatalf("newest global event lost project/session identity: %+v", snap.Events[0])
+	}
+	if snap.Events[1].RepoHash != "historyalpha1" || snap.Events[1].RepoName != "alpha" || snap.Events[1].SessionID != "session-alpha" || snap.Events[1].SessionName != "alpha work" {
+		t.Fatalf("older global event lost project/session identity: %+v", snap.Events[1])
+	}
+}
+
 func TestBuildGlobalUISnapshotDedupesDuplicateRepoRoots(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -370,6 +484,36 @@ func TestUIServePageAndSnapshotShareBuildFingerprint(t *testing.T) {
 	}
 	if snap.Build != uiBuildID {
 		t.Fatalf("snapshot build = %q, want %q (page and stream must agree)", snap.Build, uiBuildID)
+	}
+}
+
+func TestUIHTMLUsesOneContinuousPersistentHistory(t *testing.T) {
+	if !strings.Contains(uiHTML, `<h2>History</h2>`) {
+		t.Fatal("dashboard must label the unified append-only timeline as History")
+	}
+	if !strings.Contains(uiHTML, `function renderHistory(data)`) {
+		t.Fatal("dashboard must render the canonical continuous history array")
+	}
+	for _, obsolete := range []string{`id="sessionSelect"`, `selectedSessionID`, `renderSelectedSessionLog`} {
+		if strings.Contains(uiHTML, obsolete) {
+			t.Fatalf("session-partitioned history state must be removed; found %q", obsolete)
+		}
+	}
+	if !strings.Contains(uiHTML, `Persistent append-only history`) {
+		t.Fatal("history panel must explain that rows persist independently of session activity")
+	}
+}
+
+func TestUIHistoryRendersInProgressiveChunksWithoutPartitioningSource(t *testing.T) {
+	for _, required := range []string{
+		`const HISTORY_PAGE_SIZE = 500;`,
+		`const rows = visible.slice(0, historyRenderLimit);`,
+		`data-history-more`,
+		`historyRenderLimit += HISTORY_PAGE_SIZE`,
+	} {
+		if !strings.Contains(uiHTML, required) {
+			t.Fatalf("continuous history must progressively render the complete filtered source; missing %q", required)
+		}
 	}
 }
 
