@@ -122,7 +122,15 @@ COMMS_ACTOR=human-you comms ui   # http://127.0.0.1:7878 — every project, one 
 
 > **Set `COMMS_ACTOR` to run it as an operator.** The dashboard's write actions — **Release** a claim, **Remove** (retire) a crashed agent, **End** a session — are attributed to you, so they only appear when `COMMS_ACTOR` is set to a real operator name (e.g. `human-you`; the bare names `eli/claude/codex/agent/user` are reserved). Run `comms ui` with it unset and the dashboard is **read-only** and those buttons stay hidden — set it and they appear.
 
-`comms ui` is **unified by default**: it shows *every* comms project on this machine in one window. A **Projects sidebar** on the left lists each project (and its sessions); click one and the whole dashboard — team roster, active claims (stale ones flagged), recent findings and notes, and the per-session event log — scopes to it. Run it **once** and watch all your agents across every repo, switching between them in the same tab. No starting a UI per project, and agents never have to "open" anything — they just write to their logs, which this one dashboard already sees.
+`comms ui` is **unified by default**: it shows *every* comms project on this machine in one window. A **Projects sidebar** on the left lists each project (and its sessions); click one and the whole dashboard — team roster, active claims (stale ones flagged), the **work graph**, recent findings and notes, and the continuous history — scopes to it. Run it **once** and watch all your agents across every repo, switching between them in the same tab. No starting a UI per project, and agents never have to "open" anything — they just write to their logs, which this one dashboard already sees.
+
+The **work graph** shows the tasks in the selected project: an arrow means the
+task it points at comes afterwards, and tasks joined to nothing sit apart from
+the rest, because they are. Finished work compresses to a dashed outline so the
+board shrinks as the project progresses; work waiting for a verifier is the
+loudest thing on it, because it is finished *and* holding up everything
+downstream. Layout is computed on the server, so an arrow can only point
+rightward — there is no geometry to get wrong in the browser.
 
 It updates by **push, not polling.** A file watcher inside `comms ui` is notified by the operating system the instant any project's `log.jsonl` changes; it rebuilds the snapshot once and streams it to every open browser tab over [Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events). So when any agent anywhere appends an event, the right project lights up in the sidebar **immediately**, and your laptop isn't burning cycles re-reading logs on a timer.
 

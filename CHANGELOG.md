@@ -37,6 +37,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   "verified" and "verified by something with the same blind spots" are different
   claims.
 - `comms status` gains a TASKS section and a `tasks` array in `--json`.
+- The dashboard gains a **Work graph** panel. Layout is computed server-side and
+  shipped as coordinates, so an arrow can only ever point rightward and tasks
+  joined to nothing are laid out apart from the rest rather than sharing a row
+  or column that would imply a relationship. Finished work compresses; work
+  waiting for a verifier is the loudest thing on the board. `/api/status` carries
+  it as `task_board`, per project.
 
 ### Changed
 

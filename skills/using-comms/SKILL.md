@@ -203,6 +203,11 @@ diff, not the author's transcript. If you are spawning a subagent to review, giv
 it the task and the diff and not your reasoning, keep it read-only, and let it
 report its own verdict.
 
+The operator's dashboard shows the same graph: an arrow means the task it points
+at comes afterwards, tasks joined to nothing are drawn apart, and work waiting
+for a verifier is the loudest thing on it. You do not need to open it — just keep
+the log honest and it follows.
+
 ### Where the real context lives
 
 A task can carry `--ref omni:AUF-2291`. comms stores the reference and never

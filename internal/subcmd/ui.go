@@ -835,8 +835,12 @@ type uiSnapshot struct {
 	Notes         []uiNote         `json:"notes"`
 	Releases      []uiRelease      `json:"releases"`
 	Docs          []string         `json:"docs"`
-	Lessons       []string         `json:"lessons"`
-	Events        []uiEvent        `json:"events"`
+	// TaskBoard is the work graph, already laid out. Empty in the all-projects
+	// view — dependencies live inside one repository, so the board follows the
+	// project you select rather than being merged across them.
+	TaskBoard *uiTaskBoard `json:"task_board,omitempty"`
+	Lessons   []string     `json:"lessons"`
+	Events    []uiEvent    `json:"events"`
 	// ProjectSessions is populated only in unified (all-projects) mode. Each
 	// entry is one project's own data with UN-prefixed ids/names, so the
 	// dashboard's sidebar can scope the whole view to a single project. The
@@ -869,6 +873,7 @@ type uiProjectSession struct {
 	Findings      []uiFinding      `json:"findings"`
 	Notes         []uiNote         `json:"notes"`
 	Releases      []uiRelease      `json:"releases"`
+	TaskBoard     *uiTaskBoard     `json:"task_board,omitempty"`
 }
 
 type uiProject struct {
@@ -1115,6 +1120,7 @@ func buildUISnapshot(rt *Runtime, staleAfter time.Duration) uiSnapshot {
 	// History is the complete append-only runtime log, not whichever named
 	// session happens to be active or most recently archived. Sessions are useful
 	// coordination summaries, but they must never partition or hide audit rows.
+	out.TaskBoard = buildTaskBoard(rt.State, now, staleAfter)
 	out.Events = eventsToUIForProject(rt.Events, rt.Repo.Hash, rt.Repo.Name)
 	out.Actions = buildUIActions(out)
 	return out
@@ -1365,6 +1371,7 @@ func buildGlobalUISnapshot(staleAfter time.Duration) (uiSnapshot, error) {
 			})
 		}
 		ps.Releases = toUIReleases(recentReleases(st, findingCutoff, 12))
+		ps.TaskBoard = buildTaskBoard(st, now, staleAfter)
 		attachClaimsToProjectSession(&ps)
 		out.ProjectSessions = append(out.ProjectSessions, ps)
 		out.Events = append(out.Events, eventsToUIForProject(events, hash, repoName)...)
@@ -2117,6 +2124,8 @@ const uiHTML = `<!doctype html>
   --accent: #0d7d72;
   --shadow: 0 1px 2px rgba(20,30,45,0.05), 0 10px 28px rgba(20,30,45,0.05);
   --ring: 0 0 0 3px rgba(13,125,114,0.22);
+  --amber-wash: #fdf4e7;
+  --blue-wash: #eef3ff;
   --content-max: 1680px;
 }
 :root[data-theme="dark"] {
@@ -2138,6 +2147,8 @@ const uiHTML = `<!doctype html>
   --accent: #52d7c9;
   --shadow: 0 1px 2px rgba(0,0,0,0.4), 0 14px 34px rgba(0,0,0,0.34);
   --ring: 0 0 0 3px rgba(82,215,201,0.26);
+  --amber-wash: #2a1f10;
+  --blue-wash: #18223a;
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; }
@@ -2300,9 +2311,10 @@ main {
   padding: 12px 24px 28px;
   display: grid;
   grid-template-columns: minmax(260px, 300px) minmax(680px, 1fr) minmax(300px, 360px);
-  grid-template-rows: minmax(560px, 62vh) minmax(420px, auto);
+  grid-template-rows: minmax(560px, 62vh) auto minmax(420px, auto);
   grid-template-areas:
     "roster claims signals"
+    "graph graph graph"
     "events events events";
   gap: 18px;
 }
@@ -2506,6 +2518,64 @@ th {
 .claim-stale td {
   background: var(--red-soft);
 }
+/* min-width:0 is load-bearing: a grid item defaults to min-width:auto, so a
+   board wider than the viewport would push the whole page sideways instead of
+   scrolling inside its own panel. */
+.graph { grid-area: graph; min-width: 0; }
+.board {
+  position: relative;
+  overflow: auto;
+  max-height: 520px;
+  background:
+    radial-gradient(circle at center, var(--soft) 1px, transparent 1.2px) 0 0 / 26px 26px,
+    var(--surface);
+}
+.board-stage { position: relative; }
+.wires { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
+.tnode {
+  position: absolute; box-sizing: border-box; border-radius: 6px; padding: 0 11px;
+  display: flex; flex-direction: column; justify-content: center; gap: 6px;
+  overflow: hidden; border: 1px solid var(--line); background: var(--surface-2);
+}
+.tnode .tt {
+  font-size: 12.5px; font-weight: 600; line-height: 1.25;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.tnode .tm {
+  display: flex; align-items: center; gap: 7px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px;
+  color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tsz {
+  font-size: 9.5px; border: 1px solid var(--line-strong); border-radius: 3px;
+  padding: 0 4px; line-height: 13px; flex: 0 0 auto;
+}
+/* the two steps every task has: do it, then somebody else verifies it */
+.trk { display: inline-flex; gap: 2px; flex: 0 0 auto; }
+.trk i { width: 13px; height: 3px; border-radius: 2px; display: block; background: var(--line-strong); }
+.trk i.d-on { background: var(--blue); }
+.trk i.d-ok { background: var(--teal); }
+.trk i.d-bad { background: var(--red); }
+.trk i.v-wait { background: var(--amber); }
+.trk i.v-ok { background: var(--teal); }
+/* work waiting for a second pair of eyes is the loudest thing on the board: it
+   is finished, and it is holding up everything downstream */
+.tnode.review { border-color: var(--amber); background: var(--amber-wash); }
+.tnode.review .tm { color: var(--amber); }
+.tnode.ready { border-color: var(--teal); background: var(--teal-soft); }
+.tnode.doing { border-color: var(--blue); background: var(--blue-wash); }
+.tnode.stale { border-color: var(--red); background: var(--red-soft); }
+.tnode.stale .tm { color: var(--red); }
+.tnode.cycle { border-color: var(--red); }
+.tnode.blocked { background: var(--surface); }
+.tnode.closed {
+  background: transparent; border-style: dashed; border-color: var(--line-strong);
+  opacity: .55; flex-direction: row; align-items: center; gap: 7px;
+}
+.tnode.closed .tt { font-size: 11px; -webkit-line-clamp: 1; color: var(--muted); }
+.tsplit { position: absolute; left: 0; right: 0; display: flex; align-items: center; gap: 12px; }
+.tsplit::before, .tsplit::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--soft); }
+.tsplit span { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
 .events {
   grid-area: events;
   grid-column: 1 / -1;
@@ -2547,6 +2617,7 @@ body.unified main {
   grid-template-columns: minmax(208px, 244px) minmax(218px, 262px) minmax(520px, 1fr) minmax(280px, 344px);
   grid-template-areas:
     "sidebar roster claims signals"
+    "sidebar graph graph graph"
     "sidebar events events events";
 }
 .project-row {
@@ -2627,7 +2698,7 @@ body.unified main {
   body { overflow: auto; }
   body.unified main {
     grid-template-columns: 1fr;
-    grid-template-areas: "sidebar" "roster" "claims" "signals" "events";
+    grid-template-areas: "sidebar" "roster" "claims" "signals" "graph" "events";
   }
   body.unified .sidebar { max-height: 320px; }
   header { height: auto; min-height: 76px; align-items: flex-start; padding-top: 12px; padding-bottom: 12px; }
@@ -2641,6 +2712,7 @@ body.unified main {
       "roster"
       "claims"
       "signals"
+      "graph"
       "events";
     overflow: visible;
     padding: 12px 16px 24px;
@@ -2773,6 +2845,14 @@ body.unified main {
       <div id="releases" class="scroll"></div>
     </section>
   </div>
+  <section class="panel graph">
+    <div class="panel-title">
+      <h2>Work graph</h2>
+      <div class="panel-tools"><span class="meta-inline" id="graphHint"></span></div>
+    </div>
+    <div class="hint">An arrow means the task it points at comes afterwards. Tasks joined to nothing are shown apart, because they are. A task only unblocks what follows once it has been VERIFIED, not when it is merely finished.</div>
+    <div id="board" class="board"></div>
+  </section>
   <section class="panel events">
     <div class="panel-title">
       <h2>History</h2>
@@ -3011,6 +3091,7 @@ function applySnapshot(data) {
   el('commsSessions').innerHTML = renderRows(view.comms_sessions, s =>
     '<div class="row"><div class="actor">' + esc(s.name || 'Archived session') + '</div><div class="meta">' + fmtTime(s.started_at) + ' → ' + fmtTime(s.ended_at) + '</div><div class="meta">ended by @' + esc(s.ended_by) + ' · ' + esc(s.reason || 'comms session ended') + '</div><div class="meta">' + esc(s.event_count || 0) + ' event(s) · ' + esc(s.claim_count || 0) + ' claim(s) · ' + esc(s.finding_count || 0) + ' finding(s) · ' + esc(s.note_count || 0) + ' note(s)</div><div class="meta">' + esc((s.actors || []).map(a => '@' + a).join(', ')) + '</div></div>',
     'No archived comms sessions yet. Use End Comms Session when the project work window is done.');
+  renderTaskBoard(view);
   renderHistory(data);
   renderClaims(data, view);
   el('findings').innerHTML = renderRows(view.findings, f => {
@@ -3075,6 +3156,105 @@ function renderClaims(data, view) {
   const clear = el('claims').querySelector('[data-clear="claimFilter"]');
   if (clear) clear.addEventListener('click', () => { el('claimFilter').value = ''; renderClaims(latestData, latestView); });
 }
+// The board is drawn from coordinates the server computed, so this only paints.
+// Layout in the browser would mean hand-rolled graph code inside a Go raw string
+// that cannot contain a backtick, testable only through the DOM.
+function renderTaskBoard(view) {
+  const b = view && view.task_board;
+  const host = el('board');
+  const hint = el('graphHint');
+  if (!b || (!b.tasks.length && !b.too_large)) {
+    hint.textContent = '';
+    host.innerHTML = empty(isUnified(latestData) && !selectedProjectHash
+      ? 'Pick a project on the left to see its work graph.'
+      : 'No tasks yet. An agent declares one with comms task add, or a whole plan with comms plan.');
+    return;
+  }
+  const bits = [];
+  if (b.review) bits.push(b.review + ' waiting to be verified');
+  if (b.ready) bits.push(b.ready + ' ready');
+  if (b.doing) bits.push(b.doing + ' being worked on');
+  if (b.blocked) bits.push(b.blocked + ' waiting');
+  bits.push(b.closed + ' closed');
+  if (b.cycles) bits.push(b.cycles + ' in a dependency cycle');
+  if (b.refused) bits.push(b.refused + ' refused');
+  hint.textContent = bits.join('  \u00b7  ');
+
+  if (b.too_large) {
+    host.innerHTML = empty(b.open + ' open task(s) is more than a picture can usefully show. Use comms task show.');
+    return;
+  }
+
+  let wires = '';
+  for (const e of b.edges) {
+    const stroke = e.satisfied ? 'var(--teal)' : e.live ? 'var(--blue)' : 'var(--line-strong)';
+    wires += '<path d="' + esc(e.d) + '" fill="none" stroke="' + stroke +
+      '" stroke-width="1.4" stroke-opacity="' + (e.satisfied || e.live ? '.75' : '.5') +
+      '" marker-end="url(#tip)"></path>';
+  }
+  let nodes = '';
+  for (const t of b.tasks) {
+    const cls = t.stale ? 'stale' : t.phase;
+    const box = 'left:' + t.x + 'px; top:' + t.y + 'px; width:' + t.w + 'px; height:' + t.h + 'px;';
+    if (t.phase === 'closed') {
+      nodes += '<div class="tnode closed" style="' + box + '" title="' + esc(taskTip(t)) + '">' +
+        '<span class="tm">&#10003;</span><span class="tt">' + esc(t.title) + '</span></div>';
+      continue;
+    }
+    nodes += '<div class="tnode ' + esc(cls) + '" style="' + box + '" title="' + esc(taskTip(t)) + '">' +
+      '<span class="tt">' + esc(t.title) + '</span>' +
+      '<span class="tm">' + (t.size ? '<span class="tsz">' + esc(t.size) + '</span>' : '') +
+      taskTrack(t) + '<span>' + esc(taskMeta(t)) + '</span></span></div>';
+  }
+  let split = '';
+  if (b.split_y) {
+    split = '<div class="tsplit" style="top:' + b.split_y + 'px;"><span>joined to nothing</span></div>';
+  }
+  host.innerHTML = '<div class="board-stage" style="width:' + b.w + 'px; height:' + b.h + 'px;">' +
+    '<svg class="wires" width="' + b.w + '" height="' + b.h + '">' +
+    '<defs><marker id="tip" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" ' +
+    'orient="auto-start-reverse"><path d="M0 1.5 9 5 0 8.5z" fill="context-stroke"></path></marker></defs>' +
+    wires + '</svg>' + split + nodes + '</div>';
+}
+
+// Two bars: the work, then the verification. Both are needed before anything
+// downstream moves, so both are always drawn.
+function taskTrack(t) {
+  let d = '';
+  if (t.phase === 'closed' || t.phase === 'review') d = 'd-ok';
+  else if (t.stale) d = 'd-bad';
+  else if (t.phase === 'doing') d = 'd-on';
+  let v = '';
+  if (t.phase === 'closed') v = 'v-ok';
+  else if (t.phase === 'review') v = 'v-wait';
+  return '<span class="trk"><i class="' + d + '"></i><i class="' + v + '"></i></span>';
+}
+
+function taskMeta(t) {
+  if (t.phase === 'review') return 'needs a verifier \u2014 not ' + t.done_by;
+  if (t.stale) return (t.doers || []).join(', ') + ' \u00b7 gone quiet';
+  if (t.phase === 'doing') {
+    const who = (t.doers || []).join(', ');
+    return t.free_slots > 0 ? who + ' \u00b7 ' + t.free_slots + ' slot free' : who;
+  }
+  if (t.phase === 'ready') return t.rejections ? 'sent back ' + t.rejections + 'x' : 'free \u2014 ' + t.slots + ' slot(s)';
+  if (t.phase === 'blocked') {
+    const b = t.blocked_by || [];
+    return 'after ' + b[0] + (b.length > 1 ? ' +' + (b.length - 1) : '');
+  }
+  if (t.phase === 'cycle') return 'depends on itself';
+  if (t.phase === 'closed') return 'verified by ' + t.verified_by;
+  return '';
+}
+
+function taskTip(t) {
+  const out = [t.id];
+  if (t.verified_by) out.push('verified by ' + t.verified_by + (t.independence ? ' (' + t.independence + ')' : ''));
+  if (t.ref) out.push(t.ref);
+  if (t.rejections) out.push('sent back ' + t.rejections + ' time(s)');
+  return out.join('  \u00b7  ');
+}
+
 function renderHistory(data) {
   let events = data.events || [];
   if (isUnified(data) && selectedProjectHash) {

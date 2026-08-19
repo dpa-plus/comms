@@ -358,6 +358,13 @@ same records. The dashboard does not use them to partition History. Selecting a
 project or typing in the event filter only filters the canonical top-level
 array; no JSONL file is merged, rewritten, or truncated.
 
+`/api/status` also includes `task_board`: the work graph for the selected
+project, already laid out. Nodes carry `x`/`y`/`w`/`h` and edges carry a `d` path
+string, so the page draws rather than computes. It is populated per project —
+the all-projects view has none, because a dependency between two repositories is
+not something comms models. `too_large` is set instead of a layout once a graph
+passes the point where a picture stops being comprehension.
+
 `/api/status` also includes `lessons`, the list of global lesson slugs loaded
 from the user's comms data directory.
 
