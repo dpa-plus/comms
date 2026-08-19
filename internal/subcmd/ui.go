@@ -3128,7 +3128,7 @@ function applySnapshot(data) {
   el('rosterCount').textContent = (view.sessions || []).length || '';
   el('sessions').innerHTML = renderRows(view.sessions, s => {
     // The handle goes on the meta line, not beside the label. In a 220px column
-    // a label plus a handle wrapped mid-hyphen ("@claude-" / "auftraege"), and
+    // a label plus a handle wrapped mid-hyphen ("@claude-" / "backend"), and
     // base_name is just the handle with its suffix cut off — the same name a
     // third time. Label on top, handle where the other identifiers already are.
     const title = s.label ? esc(s.label) : '@' + esc(s.actor);

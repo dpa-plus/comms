@@ -18,13 +18,20 @@ In desktop app sessions, prefix every command with a concrete actor. Prefer
 stable readable actors for the current role, plus a UI label on hello:
 
 ```bash
-COMMS_ACTOR=claude-dev comms hello --label "Claude Dev"
-COMMS_ACTOR=codex-dev comms hello --label "Codex Dev"
+COMMS_ACTOR=claude-dev comms hello --label "Claude Dev" --model claude-opus-5 --vendor anthropic
+COMMS_ACTOR=codex-dev comms hello --label "Codex Dev" --model gpt-5.5 --vendor openai
 COMMS_ACTOR=claude-dev comms status
 ```
 
 Pick one actor name when this skill starts and reuse it for the conversation.
 Do not use generic names like `eli`, `claude`, `codex`, `agent`, or `user`.
+
+`--model` and `--vendor` are optional (they fall back to `$COMMS_MODEL` and
+`$COMMS_VENDOR`) but say them anyway. comms uses the vendor to record whether a
+verification was `independent` — checked by something from a different maker than
+the agent that did the work — or `same-family`. "Verified" and "verified by
+something with the same blind spots" are different claims, and only the log can
+tell them apart later.
 
 ## Session Start
 
@@ -57,7 +64,8 @@ browser when run interactively (`--no-open` to suppress, `--open` to force).
 `comms ui` is **unified by default**: one tab with a left **Projects sidebar**
 listing every comms project on this machine. Selecting a project scopes the
 whole view — roster, active claims, recent findings/notes, a **Recently
-Completed** feed (from claim-release results), and the per-session event log —
+Completed** feed (from claim-release results), the **Work graph**, and the
+per-session event log —
 to that project, with live SSE updates the instant any project's log changes.
 A project shows as active when it has recent findings/notes/completed work, even
 with no named session and all claims released. The header shows the active
@@ -65,6 +73,16 @@ with no named session and all claims released. The header shows the active
 to the repo, so the UI matches what agents call the work. Scope to one repo with
 `comms ui --repo /path`. The launcher sets `COMMS_ACTOR=human-eli` so the
 operator can release claims from the dashboard.
+
+The top is a single rail: the project name (its tooltip carries the repo path,
+hash and log path), the active session name, and — only when they are not zero —
+red chips for **stale** claims, work **to verify**, and **dependency cycle**.
+Those chips are the whole alarm surface: if one is lit, something is waiting on an
+agent, and in the all-projects view they sum across every project. Counts sit in
+the heading of the panel that owns them (Team Roster, Active Claims) rather than
+in a summary row. Active claims are grouped by who holds them and why, with the
+intent and the directory every path shares printed once, so the list you scan is
+the files.
 
 The UI has **Start/End Comms Session** controls and a **Session Event Log**
 selector. Start/end-session are currently enabled in single-repo mode; claim
@@ -148,10 +166,32 @@ from the earlier.
 COMMS_ACTOR=claude-dev comms plan --from plan.json
 COMMS_ACTOR=claude-dev comms next
 COMMS_ACTOR=claude-dev comms brief auth-api
+COMMS_ACTOR=claude-dev comms task show
 ```
 
 `comms plan` appends the whole decomposition in one write and rejects it entirely
 if anything is wrong — an unknown endpoint, a duplicate edge, a dependency cycle.
+
+For one task at a time, or to extend a plan that already exists:
+
+```bash
+COMMS_ACTOR=claude-dev comms task add auth-api --title "Session create / refresh / revoke" \
+  --size L --slots 2 --check test --ref omni:AUF-2291
+COMMS_ACTOR=claude-dev comms task edge db-schema auth-api --kind artifact \
+  --provides "sessions table; uuid PKs, no cuid"
+```
+
+The edge `--kind` is load-bearing, not a label. `interface` and `artifact` mean
+the later task consumes something, so reworking the earlier one flags it for a
+recheck; `sequence` is ordering only and propagates nothing. Say what is consumed
+in `--provides` — that is the text `comms brief` hands to whoever picks the next
+task up.
+
+`comms next` is what you run when you finish something: it offers work waiting to
+be verified first (it is finished work holding up everything downstream, and it is
+cheap), then unclaimed tasks, then tasks with a free slot. It never offers you
+your own work to verify. `comms task show` prints the whole graph grouped by what
+you can do about it.
 
 **Run `comms brief <slug>` before you start a task.** It walks the incoming edges
 and gives you the interface or artifact you are building on plus the decisions the
@@ -204,9 +244,10 @@ it the task and the diff and not your reasoning, keep it read-only, and let it
 report its own verdict.
 
 The operator's dashboard shows the same graph: an arrow means the task it points
-at comes afterwards, tasks joined to nothing are drawn apart, and work waiting
-for a verifier is the loudest thing on it. You do not need to open it — just keep
-the log honest and it follows.
+at comes afterwards, and tasks joined to nothing are drawn apart. Work waiting for
+a verifier surfaces as a red **to verify** chip on the top rail, and a plan that
+can never finish as a **dependency cycle** chip — both visible without opening
+anything. You do not need to look at it. Keep the log honest and it follows.
 
 ### Where the real context lives
 
