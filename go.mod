@@ -1,6 +1,6 @@
 module github.com/dpa-plus/comms
 
-go 1.25.11
+go 1.25.13
 
 require (
 	github.com/fsnotify/fsnotify v1.10.1
