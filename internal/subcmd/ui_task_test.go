@@ -175,3 +175,44 @@ func TestUIHTMLHasNoBackticksInTheTaskRenderer(t *testing.T) {
 		}
 	}
 }
+
+// The rail is the whole top of the page now, and two of its invariants are the
+// kind that break silently rather than loudly.
+func TestTopRailInvariants(t *testing.T) {
+	// An alarm chip sets a display, and any display rule outranks the hidden
+	// attribute's UA display:none. Without this reset the rail permanently reads
+	// "0 STALE 0 TO VERIFY 0 DEPENDENCY CYCLE" in red — an alarm that is always
+	// on, which is the same as no alarm at all. This shipped broken once.
+	if !strings.Contains(uiHTML, "[hidden] { display: none !important; }") {
+		t.Error("the hidden reset is gone; the alarm chips will render permanently, showing zero")
+	}
+	for _, required := range []string{
+		`<span id="alStale" class="al" hidden>`,
+		`<span id="alVerify" class="al" hidden>`,
+		`<span id="alCycle" class="al" hidden>`,
+		"function renderTop(data, view, repoLabel, sel)",
+		"renderTop(data, view, repoLabel, sel);",
+		// The alert state must not change the rail's height, or every SSE frame
+		// that trips an alarm shoves the page down under the operator's cursor.
+		"header.alert { background: var(--red-soft); box-shadow: inset 0 -3px 0 var(--red); }",
+		// Filled chips need a foreground that survives both themes.
+		"--on-red:",
+		"color: var(--on-red);",
+	} {
+		if !strings.Contains(uiHTML, required) {
+			t.Errorf("the top rail is not wired up; missing %q", required)
+		}
+	}
+	// The band and its render function are deleted, not merely unused: leaving
+	// el('stats') behind is a null deref on every frame.
+	for _, gone := range []string{"renderStats", `id="stats"`, "stat-value", `id="projectMeta"`, `id="logPath"`} {
+		if strings.Contains(uiHTML, gone) {
+			t.Errorf("%q should have been deleted with the stats band", gone)
+		}
+	}
+	// task_board is absent from the merged all-projects snapshot by design, so
+	// the alarms must sum across projects there rather than reading one board.
+	if !strings.Contains(uiHTML, "(data.project_sessions || []).forEach(x => {") {
+		t.Error("the all-projects alarm sum is gone; every project would report zero at once")
+	}
+}

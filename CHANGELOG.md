@@ -46,6 +46,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The top of the dashboard is one 46px rail. It was 163px: a header carrying two
+  filesystem paths, and under it a summary band that was 78% empty background —
+  312px of tiles stretched across 1425. The paths moved into the title of the
+  project name that already identifies the checkout, and the counts moved into
+  the headings of the two panels that render the things being counted.
+- Stale claims, work waiting to be verified, and dependency cycles are now filled
+  red chips on that rail — the only filled shapes on it. All three exist at all
+  times and only toggle hidden, and the alert wash is an inset shadow rather than
+  a border, so an alarm appearing never moves the page by a pixel. In the
+  all-projects view they sum across projects, because a task graph belongs to one
+  repository and the merged snapshot carries no board of its own.
+- Active claims are grouped by whose work it is and why. One agent editing eight
+  files for one reason used to print that reason eight times and squeeze the
+  paths — the part you are scanning for — into a scrollbar; now the intent and
+  the directory every path shares are printed once, and each file is one line.
+- The dashboard's summary tiles only count what the page does not already show
+  in full. Findings, notes and the session archive are rendered a few hundred
+  pixels away, so tiles for them were chrome; `stale`, `to verify` and
+  `dependency cycle` appear only when they are not zero.
+- Recent findings, notes and completed work share one scrolling column instead of
+  three stacked boxes with three scrollbars, so a sentence is no longer cut in
+  half by the panel boundary above it.
+- The roster prints an agent's handle once, on the metadata line, instead of
+  beside the label where a narrow column broke it mid-hyphen.
 - Readers now skip log entries whose event type they do not recognize, warning
   once per read with the count, instead of refusing to read the file. Writers
   still refuse to emit an unknown type.
@@ -94,6 +118,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   protocol reference; it shipped in 0.2.0 but was missing from the endpoint table
   and the discoverable `actions` example.
 
+### Fixed
+
+- The history panel sized its grid row to its content, so a log of 11,000 events
+  made the page 52,000 pixels tall with a scrollbar thumb a few pixels high and
+  the panels you actually watch stranded at the top of it. The row is bounded and
+  the panel scrolls itself, as the rest of the layout already did.
+
 ## [0.2.1] - 2026-08-19
 
 ### Changed
@@ -108,6 +139,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   GO-2026-5972.
 
 ### Fixed
+
 
 - Inactive or unended named sessions no longer disappear from the dashboard
   after their actors and claims age out of the active window.
