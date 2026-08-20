@@ -15,6 +15,16 @@ import (
 	"strings"
 )
 
+// ErrNoRepo means no git repository could be identified for a path.
+//
+// It is deliberately distinct from "the repository is there but unreadable".
+// Callers act on the difference: a pre-edit hook has nothing to say about a file
+// outside any repository and must let the edit through, whereas a repository it
+// can name but cannot read is a real failure worth stopping for. Before this
+// existed the two collapsed into one error and the hook blocked every edit made
+// outside a checkout.
+var ErrNoRepo = errors.New("repo: no git repository")
+
 // Identity captures the resolved repo identity.
 //
 //   - Root is the absolute, symlinks-resolved repo root.
@@ -30,16 +40,6 @@ type Identity struct {
 
 // Discover resolves the current repo by running `git rev-parse --show-toplevel`
 // from `start`. If gitTopLevelOverride is non-empty, it bypasses git entirely.
-// ErrNoRepo means no git repository could be identified for a path.
-//
-// It is deliberately distinct from "the repository is there but unreadable".
-// Callers act on the difference: a pre-edit hook has nothing to say about a file
-// outside any repository and must let the edit through, whereas a repository it
-// can name but cannot read is a real failure worth stopping for. Before this
-// existed the two collapsed into one error and the hook blocked every edit made
-// outside a checkout.
-var ErrNoRepo = errors.New("repo: no git repository")
-
 func Discover(start, gitTopLevelOverride string) (Identity, error) {
 	var root string
 	if gitTopLevelOverride != "" {
