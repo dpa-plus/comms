@@ -170,9 +170,19 @@ the append-only audit log.
 
 ## Working the Task Graph
 
-When work is big enough to have parts, put it in the graph. A task is what should
-happen; an edge says one task comes after another and what the later one consumes
-from the earlier.
+**Work with more than one step gets a task before it gets a claim.** Declare it
+first — `comms plan --from` for a whole decomposition, `comms task add` for a
+single one — then claim files with `--task <slug>`. A one-file, one-step fix does
+not need a task; anything you would describe to a colleague in more than one
+sentence does.
+
+This is a rule, not a suggestion, and it is stated as one deliberately. When it
+was phrased as "put it in the graph when work is big enough", agents skipped it:
+across 4,356 real claims exactly one carried a task. Nothing was broken — the
+instruction was soft, and soft instructions lose to hard ones every time.
+
+A task is what should happen; an edge says one task comes after another and what
+the later one consumes from the earlier.
 
 ```bash
 COMMS_ACTOR=claude-dev comms plan --from plan.json
@@ -430,4 +440,9 @@ Do not edit `.zshrc`.
 Do not start `comms` automatically.
 Do not claim files unless the user invoked `using-comms`.
 
-**Before any Edit or Write tool call in an active `using-comms` workflow, claim the file with the selected `COMMS_ACTOR`.**
+**Before any Edit or Write tool call in an active `using-comms` workflow, claim the file with the selected `COMMS_ACTOR`.** The claim is what stops two agents
+editing one file: `comms check` now genuinely blocks the edit when somebody else
+holds the path, and the refusal is recorded, so a claim you skip is a collision
+nobody can see.
+
+**Before starting multi-step work, declare it as a task or a plan, and pass `--task` on the claims that carry it out.**

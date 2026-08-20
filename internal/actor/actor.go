@@ -40,7 +40,17 @@ const (
 // In Mutating mode an unset or generic name returns ("", err) — err.Error()
 // is the user-facing message the CLI prints to stderr.
 func Resolve(mode Mode) (string, error) {
-	raw := os.Getenv(EnvVar)
+	return ResolveName(os.Getenv(EnvVar), mode)
+}
+
+// ResolveName validates an actor name that did not come from the environment.
+//
+// One process, one COMMS_ACTOR is right for a CLI invocation and wrong for a
+// long-lived server that acts on behalf of several agents over one connection.
+// Splitting the validation out lets such a caller pass the name per request and
+// still get exactly the same rules — charset, and the refusal to let a
+// per-person name like "claude" stand in for a per-session actor.
+func ResolveName(raw string, mode Mode) (string, error) {
 	if raw == "" {
 		if mode == ReadOnly {
 			return "", nil

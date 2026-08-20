@@ -249,7 +249,7 @@ block from `examples/settings.json.snippet`:
 }
 ```
 
-The SessionStart hook announces the session and shows recent activity. The PreToolUse hook calls `comms check` with the tool input JSON on stdin — if another actor holds the file you're about to edit, the hook exits 1 and Claude sees the conflict report.
+The SessionStart hook announces the session and shows recent activity. The PreToolUse hook calls `comms check` with the tool input JSON on stdin — if another actor holds the file you're about to edit, the hook exits 2, which is the code Claude Code treats as a block, and the conflict report on stderr goes back to the model.
 
 ## 5. Claude Code skill
 

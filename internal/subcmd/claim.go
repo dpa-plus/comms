@@ -96,7 +96,16 @@ func runClaim(scopeRaw, intent, stealID, stealReason, task string) error {
 			Fatalf(2, "claim: --steal %s targets %s, which does not overlap the scope you are claiming (%s) — steal the claim blocking THIS scope",
 				short(target.ID), target.Scope.String(), scope.String())
 		}
-		idle := time.Since(target.TS)
+		// Idle means "the agent holding this has gone quiet", NOT "this claim is
+		// old". Reading target.TS measured how long ago the claim was FILED, so a
+		// perfectly live agent that had held a file for an hour was declared stale
+		// and its work taken from under it. Every event an actor emits is a passive
+		// heartbeat, so its session LastSeen is the real liveness signal.
+		idleFrom := target.TS
+		if sess := rt.State.Sessions[target.Actor]; sess != nil && sess.LastSeen.After(idleFrom) {
+			idleFrom = sess.LastSeen
+		}
+		idle := time.Since(idleFrom)
 		stale := idle >= staleClaimAfter
 		if stealReason == "" {
 			if stale {
@@ -123,6 +132,7 @@ func runClaim(scopeRaw, intent, stealID, stealReason, task string) error {
 			Holders:         conflicts,
 			StaleAfter:      staleClaimAfter,
 		})
+		recordBlocked(rt, scope.String(), intent, conflicts)
 		os.Exit(1)
 	}
 
@@ -216,6 +226,7 @@ func runClaimBatch(scopeRaws []string, intent, task string) error {
 			Holders:         holders,
 			StaleAfter:      staleClaimAfter,
 		})
+		recordBlocked(rt, joinScopeStrings(scopes), intent, holders)
 		os.Exit(1)
 	}
 
@@ -364,4 +375,35 @@ func findingMatchesAnyScope(f *state.Finding, scopes []overlap.Scope) bool {
 		}
 	}
 	return false
+}
+
+// recordBlocked writes the refusal to the log before the process exits.
+//
+// This is the only event in comms that is evidence the tool did its job: a
+// collision that did not happen. Until it existed, a refused claim printed a
+// conflict report to stderr and vanished, which is why a store holding 4,356
+// claims could report exactly zero collisions ever prevented.
+//
+// Best effort by design. The refusal has already been decided by the time we get
+// here and the caller is about to exit non-zero either way; failing to record it
+// must never turn a correct block into a crash.
+func recordBlocked(rt *Runtime, scope, intent string, holders []*state.Claim) {
+	if rt == nil || len(holders) == 0 {
+		return
+	}
+	h := holders[0]
+	data := map[string]interface{}{
+		"scope":        scope,
+		"holder":       h.Actor,
+		"holder_scope": h.Scope.String(),
+	}
+	if intent != "" {
+		data["intent"] = intent
+	}
+	stampActiveCommsSession(rt, data)
+	now := time.Now().UTC()
+	_ = rt.Append(event.Event{
+		TS: now, ID: event.NewID(now), Actor: rt.Actor,
+		Type: event.TypeBlocked, Scope: []string{scope}, Data: data,
+	})
 }

@@ -18,12 +18,27 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// NewCheckCmd builds `comms check`. Used by Claude Code's PreToolUse hook;
-// returns:
+// NewCheckCmd builds `comms check`. Two different consumers read its exit code
+// and they do NOT agree on what the numbers mean, which is worth stating plainly
+// because getting it wrong silently disabled this command for its whole life.
+//
+// Claude Code's PreToolUse contract: 2 blocks the tool call and feeds stderr back
+// to the model; ANY other non-zero code is treated as "the hook itself failed",
+// reported to the user, and the edit proceeds. A git pre-commit hook, by
+// contrast, aborts on any non-zero at all.
+//
+// So:
 //
 //	0 — path clear (or held by same actor)
-//	1 — blocked by another actor's active claim
+//	2 — blocked by another actor's active claim (PreToolUse path — must be 2)
+//	1 — blocked, --staged path (feeds git, where any non-zero aborts)
 //	2 — system error (broken log, unreadable dir)
+//
+// Blocked and system-error share code 2 on the hook path, and that is the safe
+// direction: if comms cannot read the log it cannot prove the path is clear, so
+// it should stop rather than wave the edit through. Note what this used to do —
+// a real conflict exited 1 and Claude Code let the edit through, while a comms
+// bug exited 2 and blocked it. The behaviour was exactly inverted.
 //
 // In --stdin-json mode the path is extracted from the JSON Claude Code sends
 // on the hook stdin. Otherwise the path is the positional argument.
@@ -136,7 +151,21 @@ func runCheck(args []string, stdinJSON, staged bool) error {
 		Holders:         conflicts,
 		StaleAfter:      staleClaimAfter,
 	})
-	os.Exit(1)
+	// The hook refusing an edit is the same evidence as a refused claim, and it
+	// is the one that fires most often. check runs read-only and unlocked on
+	// every edit, so take a writable handle only here, on the rare path where
+	// something was actually blocked.
+	if w, err := Open(OpenOpts{Mutating: true}); err == nil {
+		recordBlocked(w, scope.String(), "", conflicts)
+		_ = w.Close()
+	}
+	// EXIT 2, NOT 1. Claude Code's PreToolUse contract treats 2 as "block this
+	// tool call and show stderr to the model", and every other non-zero code as
+	// "the hook itself failed" — which is reported to the user and lets the edit
+	// through. This exited 1 from the day it shipped, so the pre-edit hook has
+	// never once blocked an edit in any session. The conflict report was written
+	// to stderr and thrown away.
+	os.Exit(2)
 	return nil
 }
 
@@ -243,6 +272,9 @@ func checkStagedPaths(rt *Runtime, paths []string) error {
 				recoveryPrefix, shellQuote(literalPathspec))
 		}
 	}
+	// NOT 2. This gate feeds a git pre-commit hook, where any non-zero aborts the
+	// commit, and 1 is what the contract and the test say. Only the PreToolUse
+	// path above needs 2, because only Claude Code distinguishes the codes.
 	os.Exit(1)
 	return nil
 }

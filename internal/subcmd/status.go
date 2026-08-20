@@ -167,6 +167,7 @@ func emitStatusHuman(rt *Runtime, cutoff time.Time, since string, staleAfter tim
 	}
 
 	emitTaskSummary(rt.State)
+	emitBlockedSummary(rt.State, cutoff, since)
 
 	if len(docs) > 0 {
 		fmt.Println()
@@ -697,5 +698,36 @@ func emitTaskSummary(st *state.State) {
 	}
 	if n := len(st.RefusedTaskStates); n > 0 {
 		fmt.Printf("  %d refused transition(s) — see `comms task show`\n", n)
+	}
+}
+
+// emitBlockedSummary prints how many collisions comms actually prevented.
+//
+// This is the number the tool exists to produce and the only one that answers
+// "is claiming files worth the ceremony". It reports the all-time total, not
+// just the window: a prevented collision is not news that goes stale, and the
+// point of the line is to let a total accumulate somewhere visible.
+func emitBlockedSummary(st *state.State, cutoff time.Time, since string) {
+	if st == nil || len(st.Blocked) == 0 {
+		return
+	}
+	recent := 0
+	for _, b := range st.Blocked {
+		if !b.TS.Before(cutoff) {
+			recent++
+		}
+	}
+	fmt.Println()
+	fmt.Printf("COLLISIONS PREVENTED: %d all time", len(st.Blocked))
+	if recent > 0 {
+		fmt.Printf(", %d in the last %s", recent, since)
+	}
+	fmt.Println()
+	shown := st.Blocked
+	if len(shown) > 3 {
+		shown = shown[len(shown)-3:]
+	}
+	for _, b := range shown {
+		fmt.Printf("  @%s was stopped from editing %s (held by @%s)\n", b.Actor, b.Scope, b.Holder)
 	}
 }

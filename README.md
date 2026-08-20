@@ -222,7 +222,8 @@ comms task show                               # the graph, grouped by what you c
 comms next                                    # what you could pick up right now
 comms brief <slug>                            # what you inherit before starting: interface + upstream decisions
 comms claim "<scope>" --task <slug> --intent "..."   # tagging a claim is what puts you on a task
-comms check <path>                            # PreToolUse hook (also: --stdin-json)
+comms check <path>                            # PreToolUse hook (also: --stdin-json); exits 2 to block
+comms mcp                                     # serve the same verbs as MCP tools over stdio
 comms check --staged                         # pre-commit guard: block peer-claimed staged paths
 comms status [--json]
 comms log [--actor X] [--since 1h] [--scope path] [--type list] [--category cat]

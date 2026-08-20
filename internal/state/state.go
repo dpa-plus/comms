@@ -49,6 +49,24 @@ type State struct {
 	// self-review, or work marked done with failing checks. Kept rather than
 	// dropped so the operator can see the attempt.
 	RefusedTaskStates []*RefusedTransition
+
+	// Blocked are claims comms refused because someone else held the scope, in
+	// chronological order. This is the tool's own evidence that it works: every
+	// entry is a collision that did not happen. Caller filters by `since`.
+	Blocked []*Blocked
+}
+
+// Blocked is one refused claim — who wanted what, and who already had it.
+type Blocked struct {
+	ID          string
+	TS          time.Time
+	Actor       string
+	Scope       string
+	Intent      string
+	Holder      string
+	HolderScope string
+	SessionID   string
+	SessionName string
 }
 
 // Claim is an active exclusive claim on a scope.
@@ -364,6 +382,19 @@ func Fold(events []event.Event) *State {
 					delete(namedWindows, sessionID)
 				}
 			}
+		case event.TypeBlocked:
+			// A claim comms refused. Recording it is the point: this is the only
+			// event that is evidence the tool prevented something.
+			s.Blocked = append(s.Blocked, &Blocked{
+				ID: ev.ID, TS: ev.TS, Actor: ev.Actor,
+				Scope:       stringOf(ev.Data, "scope"),
+				Intent:      stringOf(ev.Data, "intent"),
+				Holder:      stringOf(ev.Data, "holder"),
+				HolderScope: stringOf(ev.Data, "holder_scope"),
+				SessionID:   stringOf(ev.Data, "comms_session_id"),
+				SessionName: stringOf(ev.Data, "comms_session_name"),
+			})
+
 		case event.TypeFinding:
 			s.Findings = append(s.Findings, &Finding{
 				ID:          ev.ID,
