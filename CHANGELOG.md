@@ -8,6 +8,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `comms mcp` serves the coordination verbs as MCP tools over stdio, so claiming,
+  checking and releasing sit in an agent's tool list every turn instead of being
+  commands somebody has to remember to run. Six verbs mapping one-to-one onto
+  existing commands — no registration, no inbox, no severity ladder. JSON-RPC with
+  no SDK, so the dependency list is unchanged. `docs/DESIGN.md` cut an MCP server
+  originally and now records why that was reversed.
+- Every tool takes an `actor`, and `Open` accepts a per-request actor override.
+  `COMMS_ACTOR` is per process; one MCP server may act for several agents over one
+  connection.
+- A `blocked` event records a claim comms refused. It is the only evidence the
+  tool prevents anything, and `comms status` reports it as COLLISIONS PREVENTED.
 - A task graph. `task`, `task_edge` and `task_state` events describe what work
   exists, the order it must happen in, and how far along it is. State is computed
   by replaying the log — nothing writes "ready" or "blocked" into an event.
@@ -85,6 +96,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   silently omitting it.
 
 ### Fixed
+
+- The pre-edit hook never blocked an edit. Claude Code's PreToolUse contract
+  treats exit 2 as "block this call" and every other non-zero code as "the hook
+  failed"; `comms check` exited 1 on a conflict from the day it shipped, so the
+  conflict report went to stderr and was discarded. It was also inverted: comms
+  uses exit 2 for its own system errors, so a broken log blocked edits while a
+  real collision did not. Only the PreToolUse path changes — `check --staged`
+  feeds git, where any non-zero aborts and 1 is the documented value.
+- Stealing a stale claim measured how long ago the claim was filed rather than
+  whether the agent holding it had gone quiet, so a live agent that had held a
+  file for an hour had its work taken. It now reads the holder's last activity,
+  which every event already records.
+- A finding filed without an explicit path ref is anchored to the claim its
+  author holds. Findings only ever resurface through their path refs, so an
+  unanchored one was written and never read again; on the real store 720 of 1,501
+  findings had no path ref and 415 of those were written while their author held
+  an open claim.
 
 - The history panel sized its grid row to its content, so a log of 11,000 events
   made the page 52,000 pixels tall with a scrollbar thumb a few pixels high and

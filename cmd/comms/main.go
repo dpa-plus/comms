@@ -53,6 +53,7 @@ func main() {
 		subcmd.NewBriefCmd(),
 		subcmd.NewSessionCmd(),
 		subcmd.NewUICmd(),
+		subcmd.NewMCPCmd(),
 		subcmd.NewVersionCmd(build),
 	)
 	// Hidden helpers used by tests and the SessionStart hook.

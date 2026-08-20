@@ -120,3 +120,89 @@ func readLogLines(t *testing.T, home string) []string {
 	}
 	return out
 }
+
+// A finding only ever resurfaces through its path refs: claiming a file prints
+// prior findings on that path, and that is the only automatic read path in the
+// tool. On the real store 415 findings were filed while their author held an
+// open claim and carried no path ref at all — comms knew the file and discarded
+// it, so those findings were written once and never seen again.
+func TestFindingIsAnchoredToTheClaimTheAuthorHolds(t *testing.T) {
+	bin := buildCommsBinary(t)
+	repo := setupTestRepo(t)
+	home := t.TempDir()
+
+	claim := exec.Command(bin, "claim", "src/billing.ts", "--intent", "vat rounding")
+	claim.Dir = repo
+	claim.Env = childEnv(home, "author-agent")
+	if out, err := claim.CombinedOutput(); err != nil {
+		t.Fatalf("claim: %v: %s", err, out)
+	}
+
+	// No --ref at all: exactly how README and the skill teach it.
+	find := exec.Command(bin, "find", "gotcha", "rounding must happen after summing, not per line")
+	find.Dir = repo
+	find.Env = childEnv(home, "author-agent")
+	if out, err := find.CombinedOutput(); err != nil {
+		t.Fatalf("find: %v: %s", err, out)
+	}
+
+	release := exec.Command(bin, "release", "--all-mine", "--result", "done")
+	release.Dir = repo
+	release.Env = childEnv(home, "author-agent")
+	if out, err := release.CombinedOutput(); err != nil {
+		t.Fatalf("release: %v: %s", err, out)
+	}
+
+	// A different agent claiming that file must be shown the gotcha.
+	next := exec.Command(bin, "claim", "src/billing.ts", "--intent", "add a currency")
+	next.Dir = repo
+	next.Env = childEnv(home, "next-agent")
+	out, err := next.CombinedOutput()
+	if err != nil {
+		t.Fatalf("second claim: %v: %s", err, out)
+	}
+	if !strings.Contains(string(out), "rounding must happen after summing") {
+		t.Fatalf("the prior gotcha did not resurface on the file it was about; got:\n%s", out)
+	}
+}
+
+// An explicit anchor must always win over the guess.
+func TestExplicitPathRefIsNotOverriddenByTheHeldClaim(t *testing.T) {
+	bin := buildCommsBinary(t)
+	repo := setupTestRepo(t)
+	home := t.TempDir()
+
+	claim := exec.Command(bin, "claim", "src/held.ts", "--intent", "work")
+	claim.Dir = repo
+	claim.Env = childEnv(home, "author-agent")
+	if out, err := claim.CombinedOutput(); err != nil {
+		t.Fatalf("claim: %v: %s", err, out)
+	}
+	find := exec.Command(bin, "find", "decision", "the real subject is elsewhere", "--ref", "path:src/other.ts")
+	find.Dir = repo
+	find.Env = childEnv(home, "author-agent")
+	if out, err := find.CombinedOutput(); err != nil {
+		t.Fatalf("find: %v: %s", err, out)
+	}
+
+	for _, line := range readLogLines(t, home) {
+		var e map[string]interface{}
+		if json.Unmarshal([]byte(line), &e) != nil || e["type"] != "finding" {
+			continue
+		}
+		data, _ := e["data"].(map[string]interface{})
+		refs, _ := data["refs"].([]interface{})
+		var paths []string
+		for _, r := range refs {
+			m, _ := r.(map[string]interface{})
+			if m["kind"] == "path" {
+				paths = append(paths, m["value"].(string))
+			}
+		}
+		if len(paths) != 1 || paths[0] != "src/other.ts" {
+			t.Fatalf("explicit ref should be the only path ref, got %v", paths)
+		}
+		return
+	}
+	t.Fatal("no finding event found")
+}

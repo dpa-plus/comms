@@ -54,6 +54,11 @@ type OpenOpts struct {
 	// goroutine block forever behind a CLI that holds the lock. When ==0, Open
 	// keeps the original unbounded blocking acquire (the CLI behavior).
 	LockTimeout time.Duration
+
+	// Actor overrides COMMS_ACTOR for this open. Empty means read the
+	// environment, which is what every CLI command does. A server handling
+	// several agents over one connection sets it per request instead.
+	Actor string
 }
 
 // Runtime is the resolved working context for a single command.
@@ -74,7 +79,7 @@ func Open(opts OpenOpts) (*Runtime, error) {
 	if opts.Mutating {
 		mode = actor.Mutating
 	}
-	a, err := actor.Resolve(mode)
+	a, err := actor.ResolveName(firstNonEmptyActor(opts.Actor, os.Getenv(actor.EnvVar)), mode)
 	if err != nil {
 		return nil, err
 	}
@@ -244,4 +249,12 @@ func (r *Runtime) Close() error {
 func Fatalf(code int, format string, args ...interface{}) {
 	fmt.Fprintf(os.Stderr, "comms: "+format+"\n", args...)
 	os.Exit(code)
+}
+
+// firstNonEmptyActor picks the explicit per-request actor over the ambient one.
+func firstNonEmptyActor(override, env string) string {
+	if override != "" {
+		return override
+	}
+	return env
 }
