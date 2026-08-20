@@ -870,8 +870,11 @@ type uiSnapshot struct {
 // snapshot. Field names mirror uiSnapshot so the frontend can render a scoped
 // project view through the same code paths as the merged view.
 type uiProjectSession struct {
-	RepoHash      string           `json:"repo_hash"`
-	RepoName      string           `json:"repo_name"`
+	RepoHash string `json:"repo_hash"`
+	RepoName string `json:"repo_name"`
+	// Ephemeral marks a store whose repo lives under a temp root. A label for
+	// the board to group or dim by, never a reason to hide the project.
+	Ephemeral     bool             `json:"ephemeral,omitempty"`
 	Root          string           `json:"root"`
 	LogPath       string           `json:"log_path"`
 	Current       *uiCommsSession  `json:"current_session,omitempty"`
@@ -895,6 +898,11 @@ type uiProject struct {
 	MutationsEnabled bool   `json:"mutations_enabled"`
 	MutationMessage  string `json:"mutation_message,omitempty"`
 	StaleAfter       string `json:"stale_after"`
+	// UnlistedStores counts logs the all-projects view found but could not show:
+	// stores with no recorded repo path, which cannot be named or acted on.
+	// Reported so that setting them aside is visible rather than silent — an
+	// unlisted store is still a store, and a user who has one deserves to know.
+	UnlistedStores int `json:"unlisted_stores,omitempty"`
 }
 
 type uiAction struct {
@@ -1288,6 +1296,7 @@ func buildGlobalUISnapshot(staleAfter time.Duration) (uiSnapshot, error) {
 	}
 	candidates := map[string]globalLogCandidate{}
 	var candidateKeys []string
+	unidentified := 0
 	for _, entry := range entries {
 		if !entry.IsDir() || entry.Name() == "global" {
 			continue
@@ -1295,20 +1304,30 @@ func buildGlobalUISnapshot(staleAfter time.Duration) (uiSnapshot, error) {
 		hash := entry.Name()
 		logDir := filepath.Join(root, hash)
 		repoRoot := strings.TrimSpace(readSmallFile(filepath.Join(logDir, "repo-path.txt")))
-		if repoRoot != "" {
-			if _, err := os.Stat(repoRoot); err != nil {
-				if os.IsNotExist(err) {
-					continue
-				}
-			}
-			if isScratchRepoRoot(repoRoot) {
+		if repoRoot == "" {
+			// A store with no recorded repo path cannot be named, navigated to,
+			// or acted on: repoRootForGlobalHash fails for it, so every mutation
+			// the board offers is dead for this row. It listed as a bare 12-char
+			// hash, and on a real machine those outnumbered the genuine projects
+			// nine to one — 47 hashes against 5 named repos, every one of them a
+			// throwaway store left behind by a test run. That is not a project
+			// list any more, it is a haystack.
+			//
+			// Counted rather than silently dropped: the board reports how many it
+			// set aside, so a store that matters is never invisible, only
+			// unlisted.
+			unidentified++
+			continue
+		}
+		if _, err := os.Stat(repoRoot); err != nil {
+			if os.IsNotExist(err) {
 				continue
 			}
 		}
-		repoName := hash
-		if repoRoot != "" {
-			repoName = filepath.Base(repoRoot)
+		if isScratchRepoRoot(repoRoot) {
+			continue
 		}
+		repoName := filepath.Base(repoRoot)
 		events, err := event.Read(filepath.Join(logDir, "log.jsonl"))
 		if err != nil {
 			continue
@@ -1328,6 +1347,7 @@ func buildGlobalUISnapshot(staleAfter time.Duration) (uiSnapshot, error) {
 			candidates[key] = candidate
 		}
 	}
+	out.Project.UnlistedStores = unidentified
 	cutoff := now.Add(-activeWindow)
 	findingCutoff := now.Add(-24 * time.Hour)
 	for _, key := range candidateKeys {
@@ -1349,6 +1369,7 @@ func buildGlobalUISnapshot(staleAfter time.Duration) (uiSnapshot, error) {
 			RepoHash:      hash,
 			RepoName:      repoName,
 			Root:          repoRoot,
+			Ephemeral:     isEphemeralRepoRoot(repoRoot),
 			LogPath:       filepath.Join(root, hash, "log.jsonl"),
 			Active:        append([]uiCommsSession(nil), active...),
 			CommsSessions: append([]uiCommsSession(nil), archived...),
@@ -1540,6 +1561,43 @@ func isScratchRepoRoot(repoRoot string) bool {
 	for _, temp := range scratchTempRoots() {
 		rel, err := filepath.Rel(temp, root)
 		if err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel) {
+			return true
+		}
+	}
+	return false
+}
+
+// isEphemeralRepoRoot reports whether a repo lives under a throwaway temp root.
+//
+// This LABELS a project; it must never filter one out. That distinction was
+// learned the hard way: filtering on it emptied the all-projects view in every
+// test that builds its fixtures under t.TempDir(), which is the same false
+// positive a user would hit working in a temp checkout. Location is a hint
+// about importance, not evidence that something is not real work.
+//
+// Deliberately separate from isScratchRepoRoot, which additionally requires the
+// directory to be NAMED comms-* or test-comms-*. That name rule was written for
+// this tool's own fixtures and rightly excludes them; it does not catch the
+// other throwaways a test run leaves behind — testrepo, hooktest, idtest,
+// demo-repo — which are real stores and stay listed, just marked.
+func isEphemeralRepoRoot(repoRoot string) bool {
+	repoRoot = strings.TrimSpace(repoRoot)
+	if repoRoot == "" {
+		return false
+	}
+	root := filepath.Clean(repoRoot)
+	if abs, err := filepath.Abs(root); err == nil {
+		root = abs
+	}
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		root = resolved
+	}
+	for _, temp := range scratchTempRoots() {
+		rel, err := filepath.Rel(temp, root)
+		if err != nil || rel == "." || rel == ".." || filepath.IsAbs(rel) {
+			continue
+		}
+		if !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			return true
 		}
 	}
