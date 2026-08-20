@@ -6,6 +6,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-20
+
+A minor bump rather than a patch: this adds four event types and five commands,
+and it changes what `comms check` returns when it blocks. Anything reading that
+exit code needs to know.
+
 ### Added
 
 - `comms mcp` serves the coordination verbs as MCP tools over stdio, so claiming,
