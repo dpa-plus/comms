@@ -34,13 +34,21 @@ const (
 	TypeTask      Type = "task"
 	TypeTaskEdge  Type = "task_edge"
 	TypeTaskState Type = "task_state"
+
+	// TypeBlocked records a claim comms REFUSED because someone else held an
+	// overlapping scope. It is the only moment that proves the tool did its job,
+	// and until now it was the one moment nothing wrote down: the conflict went to
+	// stderr and the process exited. That is why a store of 4,356 claims reported
+	// zero collisions ever prevented — not because none were, but because a
+	// prevented one left no trace.
+	TypeBlocked Type = "blocked"
 )
 
 // Valid reports whether t is one of the known event types.
 func (t Type) Valid() bool {
 	switch t {
 	case TypeHello, TypeClaim, TypeRelease, TypeNote, TypeFinding,
-		TypeTask, TypeTaskEdge, TypeTaskState:
+		TypeTask, TypeTaskEdge, TypeTaskState, TypeBlocked:
 		return true
 	}
 	return false
@@ -53,7 +61,7 @@ func (t Type) Valid() bool {
 // whitelists in two packages, and adding a type meant remembering both.
 func KnownTypes() string {
 	all := []Type{TypeHello, TypeClaim, TypeRelease, TypeNote, TypeFinding,
-		TypeTask, TypeTaskEdge, TypeTaskState}
+		TypeTask, TypeTaskEdge, TypeTaskState, TypeBlocked}
 	names := make([]string, 0, len(all))
 	for _, t := range all {
 		names = append(names, string(t))
