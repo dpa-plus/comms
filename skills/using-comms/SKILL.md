@@ -249,6 +249,14 @@ COMMS_ACTOR=codex-dev comms task review auth-api --fail \
   --evidence "POST /session/refresh twice with the same token returns 200 both times"
 ```
 
+**Say how you checked, not just that you did.** A pass that records no method is
+a green tick: the next agent builds against that interface on the strength of it
+and has no way to tell a real check from a glance. Put the method in the verdict
+where your build takes it (`--pass --evidence "ran the suite, 14 pass"`), and in
+a note on the task where it does not — the `comms` build installed today refuses
+`--evidence` on `--pass`, because it pairs that flag with `--finding` for the
+failure path.
+
 Rules the tool enforces, so do not plan around them:
 
 - **You cannot verify your own work.** A role suffix does not help; `claude-dev/review`
@@ -448,6 +456,12 @@ Otherwise choose a different scope, or leave a note:
 ```bash
 COMMS_ACTOR=claude-dev comms note "@claude-3a1f can I take src/foo.ts when you're done?"
 ```
+
+**A refused edit is the tool working. Do not find another way to make it.** Not a
+shell command instead of the editor, not a different actor name, not a subagent
+sent to do it for you. Two agents in a supervised run did exactly this — one
+scripted the write, one re-exported `COMMS_ACTOR` — and both produced the silent
+double-edit the claim existed to prevent. Say what you were blocked on, and stop.
 
 ## Failure Modes
 
