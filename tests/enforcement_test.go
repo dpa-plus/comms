@@ -99,7 +99,11 @@ func TestRefusedClaimIsRecordedInTheLog(t *testing.T) {
 func readLogLines(t *testing.T, home string) []string {
 	t.Helper()
 	var out []string
-	root := filepath.Join(home, "Library", "Application Support", "comms")
+	// Walk from HOME, not from a hardcoded store path: comms uses
+	// ~/Library/Application Support on macOS and $XDG_DATA_HOME (or
+	// ~/.local/share) on Linux, so naming either one makes this test pass on one
+	// CI runner and fail on the other.
+	root := home
 	_ = filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || filepath.Base(p) != "log.jsonl" {
 			return nil
