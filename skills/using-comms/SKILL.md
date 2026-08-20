@@ -292,6 +292,15 @@ COMMS_ACTOR=claude-dev comms claim "frontend/src/lib/aggregate.ts#L40-90" --inte
 COMMS_ACTOR=claude-dev comms claim "src/auth.ts#validateToken" --intent "tighten JWT expiry check"
 ```
 
+If the pre-edit hook is installed, this is enforced rather than advisory: an
+Edit or Write to a path somebody else holds is stopped before it happens, and
+the refusal is written to the log. `comms status` reports the running total as
+COLLISIONS PREVENTED — the only number that shows the tool is doing its job.
+
+The hook works out which actor you are from your agent session, recorded when
+you ran `comms hello`. You do not need `COMMS_ACTOR` exported into the
+environment for it, and it will not mistake your own claim for somebody else's.
+
 Claim several scopes for one task in a single call — each gets its own claim
 event under the shared `--intent`, and the batch is all-or-nothing (if any
 scope conflicts, nothing is claimed):
@@ -376,6 +385,18 @@ writing a note that explains how the system works or who owns what, it is a
 COMMS_ACTOR=claude-dev comms note "@codex-dev heads-up: Prisma migration lands next session"
 ```
 
+## Tools Instead of Commands
+
+`comms mcp` serves the same verbs as MCP tools over stdio: `comms_check`,
+`comms_claim`, `comms_release`, `comms_status`, `comms_note`, `comms_find`. If
+your host has it configured, prefer the tools — they are in front of you every
+turn, whereas this skill only loads when somebody types its name.
+
+The tools write the same events to the same log as the CLI, so a session using
+tools and a session using commands coordinate with each other without either
+knowing which the other used. Each tool takes an `actor` argument, because one
+server process may act for several agents.
+
 ## Docs
 
 ```bash
@@ -430,8 +451,20 @@ COMMS_ACTOR=claude-dev comms note "@claude-3a1f can I take src/foo.ts when you'r
 
 ## Failure Modes
 
-- Exit 1 means blocked by another actor or a policy rule; show the user.
-- Exit 2 means system error; warn the user and continue only if they approve.
+Exit codes are not uniform, because two different consumers read them and they
+disagree about what the numbers mean.
+
+- `comms claim` refused because somebody else holds the scope: **exit 1**. Show
+  the user; do not retry, and do not `--steal` without their say-so.
+- `comms check <path>` / `--stdin-json` blocked: **exit 2**. That is the code
+  Claude Code's PreToolUse contract treats as "block this edit and show the model
+  why"; any other non-zero is read as "the hook itself failed" and the edit goes
+  through anyway.
+- `comms check --staged` blocked: **exit 1**. That one feeds a git pre-commit
+  hook, where any non-zero aborts the commit.
+- System error (unreadable log, missing directory): **exit 2**. On the hook path
+  that shares a code with "blocked", deliberately — if comms cannot read the log
+  it cannot prove the path is clear, so stopping is the safe direction.
 
 ## What This Skill Does Not Do
 
