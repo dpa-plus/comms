@@ -3,6 +3,7 @@ package subcmd
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"github.com/dpa-plus/comms/internal/actor"
 	"github.com/dpa-plus/comms/internal/overlap"
 	"github.com/dpa-plus/comms/internal/render"
+	"github.com/dpa-plus/comms/internal/repo"
 	"github.com/dpa-plus/comms/internal/state"
 	"github.com/spf13/cobra"
 )
@@ -113,10 +115,46 @@ func runCheck(args []string, stdinJSON, staged bool) error {
 		path = args[0]
 	}
 
+	// Resolve the repository from the FILE, not from the process.
+	//
+	// A hook does not run where the file lives. Claude Code's working directory is
+	// wherever the session was started, which is routinely a parent folder holding
+	// several checkouts — and is very often not a repository at all. Resolving from
+	// the process meant the hook failed on every edit whenever that was true,
+	// including for files that were plainly inside a repository.
+	repoHint := ""
+	if stdinJSON && filepath.IsAbs(path) {
+		// Walk up to the nearest directory that exists. Creating a new file in a
+		// new directory is ordinary — the editing tool makes the parents — but the
+		// hook runs BEFORE that happens, so the file's own directory frequently
+		// does not exist yet. Handing a non-existent path to repo discovery makes
+		// it fail on a stat, which used to block the write.
+		d := filepath.Dir(path)
+		for {
+			if st, err := os.Stat(d); err == nil && st.IsDir() {
+				repoHint = d
+				break
+			}
+			parent := filepath.Dir(d)
+			if parent == d {
+				break // reached the root without finding anything that exists
+			}
+			d = parent
+		}
+	}
 	// check is read-only on the log; SkipLock=true so we never block on a
 	// long-running claim/release in another process.
-	rt, err := Open(OpenOpts{Mutating: false, SkipLock: true})
+	rt, err := Open(OpenOpts{Mutating: false, SkipLock: true, RepoRootOverride: repoHint})
 	if err != nil {
+		// NOT exit 2. Failing to find a repository is not "I cannot tell whether
+		// this path is clear" — it is "there is nothing here to coordinate", and the
+		// safe answer to that is to let the edit through. Exiting 2 blocks it, which
+		// made every edit outside a repository impossible the moment the hook was
+		// installed. Only a repository we CAN identify but CANNOT read is worth
+		// stopping for, and that is handled below.
+		if errors.Is(err, repo.ErrNoRepo) {
+			return nil
+		}
 		Fatalf(2, "check: %v", err)
 	}
 	defer rt.Close()
