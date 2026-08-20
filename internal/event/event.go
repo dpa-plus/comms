@@ -17,7 +17,7 @@ import (
 	"github.com/oklog/ulid/v2"
 )
 
-// Type is the discriminator for an event. Five total — kept small on purpose.
+// Type is the discriminator for an event. Kept small on purpose.
 type Type string
 
 const (
@@ -26,12 +26,21 @@ const (
 	TypeRelease Type = "release"
 	TypeNote    Type = "note"
 	TypeFinding Type = "finding"
+
+	// The task graph. A task is what should happen; an edge is the order it must
+	// happen in and what the later task consumes from the earlier one; a state
+	// event moves a task along its two steps — do it, then a DIFFERENT agent
+	// verifies it.
+	TypeTask      Type = "task"
+	TypeTaskEdge  Type = "task_edge"
+	TypeTaskState Type = "task_state"
 )
 
-// Valid reports whether t is one of the five known event types.
+// Valid reports whether t is one of the known event types.
 func (t Type) Valid() bool {
 	switch t {
-	case TypeHello, TypeClaim, TypeRelease, TypeNote, TypeFinding:
+	case TypeHello, TypeClaim, TypeRelease, TypeNote, TypeFinding,
+		TypeTask, TypeTaskEdge, TypeTaskState:
 		return true
 	}
 	return false
@@ -43,8 +52,10 @@ func (t Type) Valid() bool {
 // from the same place as Valid. Before this there were two hand-maintained
 // whitelists in two packages, and adding a type meant remembering both.
 func KnownTypes() string {
-	names := make([]string, 0, 5)
-	for _, t := range []Type{TypeHello, TypeClaim, TypeRelease, TypeNote, TypeFinding} {
+	all := []Type{TypeHello, TypeClaim, TypeRelease, TypeNote, TypeFinding,
+		TypeTask, TypeTaskEdge, TypeTaskState}
+	names := make([]string, 0, len(all))
+	for _, t := range all {
 		names = append(names, string(t))
 	}
 	return strings.Join(names, ",")

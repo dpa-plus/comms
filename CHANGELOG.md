@@ -6,6 +6,44 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- A task graph. `task`, `task_edge` and `task_state` events describe what work
+  exists, the order it must happen in, and how far along it is. State is computed
+  by replaying the log — nothing writes "ready" or "blocked" into an event.
+- Every task is two steps: an agent does it, then a **different** agent verifies
+  it. A task unblocks what comes after it only once it has been **verified**, not
+  when it is merely finished, which puts review on the critical path rather than
+  at the end.
+- The reducer refuses transitions rather than trusting the writer, and keeps the
+  refusal: a self-review is rejected (including one wearing a role suffix, so
+  `claude-dev/review` cannot verify `claude-dev`), and work whose declared checks
+  did not pass cannot reach review.
+- Edges carry what the later task **consumes** from the earlier one, not just the
+  ordering. `interface` and `artifact` edges propagate a rework to their
+  successors; `sequence` edges do not. `comms brief <slug>` walks the incoming
+  edges and hands an agent the interface it depends on plus the decisions the
+  upstream agent recorded while building it.
+- `comms plan --from` appends a whole decomposition atomically, validating slugs,
+  sizes, unknown endpoints, duplicate edges and dependency cycles first. A cyclic
+  plan writes nothing.
+- `comms next` — work waiting to be verified first, and never work you did
+  yourself. `comms task show` groups the graph by what can be done about it.
+- `comms claim --task <slug>` ties a file claim to a task, so who is working on
+  what is derived from work agents already do rather than a second bookkeeping
+  step. Releasing the file takes the agent off the task.
+- `comms hello --model/--vendor` (or `$COMMS_MODEL` / `$COMMS_VENDOR`). A
+  verification then records whether it was `independent` or `same-family`:
+  "verified" and "verified by something with the same blind spots" are different
+  claims.
+- `comms status` gains a TASKS section and a `tasks` array in `--json`.
+- The dashboard gains a **Work graph** panel. Layout is computed server-side and
+  shipped as coordinates, so an arrow can only ever point rightward and tasks
+  joined to nothing are laid out apart from the rest rather than sharing a row
+  or column that would imply a relationship. Finished work compresses; work
+  waiting for a verifier is the loudest thing on the board. `/api/status` carries
+  it as `task_board`, per project.
+
 ### Changed
 
 - Readers now skip log entries whose event type they do not recognize, warning

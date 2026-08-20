@@ -151,6 +151,82 @@ notes/findings; ignore it unless the user explicitly asks you to set a leader
 old actors" — `session retire` removes them from the active view while preserving
 the append-only audit log.
 
+## Working the Task Graph
+
+When work is big enough to have parts, put it in the graph. A task is what should
+happen; an edge says one task comes after another and what the later one consumes
+from the earlier.
+
+```bash
+COMMS_ACTOR=claude-dev comms plan --from plan.json
+COMMS_ACTOR=claude-dev comms next
+COMMS_ACTOR=claude-dev comms brief auth-api
+```
+
+`comms plan` appends the whole decomposition in one write and rejects it entirely
+if anything is wrong — an unknown endpoint, a duplicate edge, a dependency cycle.
+
+**Run `comms brief <slug>` before you start a task.** It walks the incoming edges
+and gives you the interface or artifact you are building on plus the decisions the
+upstream agent recorded. Without it you will re-decide questions that were already
+settled, and probably differently.
+
+Tag your claims so the graph tracks itself:
+
+```bash
+COMMS_ACTOR=claude-dev comms claim "src/auth/session.ts" --task auth-api --intent "server-side sessions"
+```
+
+That is what puts you on the task and what takes you off it when you release. No
+separate status to remember.
+
+### Two steps: do it, then somebody else verifies it
+
+```bash
+COMMS_ACTOR=claude-dev comms task done auth-api --check test=pass \
+  --note "Refresh rotation is single-use: replaying a spent token revokes the family." \
+  --note "httpOnly cookie rather than localStorage - the security questionnaire asks about XSS."
+```
+
+`done` does **not** close the task, and nothing downstream moves until it is
+verified. Write the notes as decisions and their reasons, not a summary of the
+diff — the arguable choices are what a reviewer needs and what travels to whoever
+picks up the next task.
+
+```bash
+COMMS_ACTOR=codex-dev comms task review auth-api --pass
+COMMS_ACTOR=codex-dev comms task review auth-api --fail \
+  --finding "replaying a spent refresh token still succeeds" \
+  --evidence "POST /session/refresh twice with the same token returns 200 both times"
+```
+
+Rules the tool enforces, so do not plan around them:
+
+- **You cannot verify your own work.** A role suffix does not help; `claude-dev/review`
+  is still `claude-dev`.
+- **Declared checks must pass** before work can even reach review.
+- **A finding must be checkable** — an input that breaks it, a line that contradicts
+  the spec, a case the tests miss. The rule on the other side is "if the reason is
+  real, fix it, whoever gave it", and an opinion cannot be acted on that way.
+- **One verdict.** Do not iterate to agreement with the author; escalate to a third
+  agent or to the user instead.
+
+Verify in a **fresh session** wherever you can: read the task, the notes and the
+diff, not the author's transcript. If you are spawning a subagent to review, give
+it the task and the diff and not your reasoning, keep it read-only, and let it
+report its own verdict.
+
+The operator's dashboard shows the same graph: an arrow means the task it points
+at comes afterwards, tasks joined to nothing are drawn apart, and work waiting
+for a verifier is the loudest thing on it. You do not need to open it — just keep
+the log honest and it follows.
+
+### Where the real context lives
+
+A task can carry `--ref omni:AUF-2291`. comms stores the reference and never
+resolves it; `comms brief` prints the command (`omni context AUF-2291`). Run it
+when you need the customer background — that is Omni's data, not comms'.
+
 ## Claim Before Edits
 
 Before editing a file in a coordinated project:

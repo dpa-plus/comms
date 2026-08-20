@@ -39,10 +39,10 @@ func TestRunHelloKeepsLeaderOnReentry(t *testing.T) {
 	t.Setenv("USER", "eli")
 	t.Chdir(repo)
 
-	if err := runHello(nil, "Codex Dev"); err != nil {
+	if err := runHello(nil, "Codex Dev", "", ""); err != nil {
 		t.Fatalf("first hello: %v", err)
 	}
-	if err := runHello(nil, "Codex Dev"); err != nil {
+	if err := runHello(nil, "Codex Dev", "", ""); err != nil {
 		t.Fatalf("second hello: %v", err)
 	}
 
