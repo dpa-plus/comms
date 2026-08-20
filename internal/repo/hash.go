@@ -30,6 +30,16 @@ type Identity struct {
 
 // Discover resolves the current repo by running `git rev-parse --show-toplevel`
 // from `start`. If gitTopLevelOverride is non-empty, it bypasses git entirely.
+// ErrNoRepo means no git repository could be identified for a path.
+//
+// It is deliberately distinct from "the repository is there but unreadable".
+// Callers act on the difference: a pre-edit hook has nothing to say about a file
+// outside any repository and must let the edit through, whereas a repository it
+// can name but cannot read is a real failure worth stopping for. Before this
+// existed the two collapsed into one error and the hook blocked every edit made
+// outside a checkout.
+var ErrNoRepo = errors.New("repo: no git repository")
+
 func Discover(start, gitTopLevelOverride string) (Identity, error) {
 	var root string
 	if gitTopLevelOverride != "" {
@@ -37,7 +47,7 @@ func Discover(start, gitTopLevelOverride string) (Identity, error) {
 	} else {
 		out, err := runGit(start, "rev-parse", "--show-toplevel")
 		if err != nil {
-			return Identity{}, fmt.Errorf("repo: cannot find git root from %q: %w (use --repo /absolute/repo/path or COMMS_REPO to target a repo explicitly)", start, err)
+			return Identity{}, fmt.Errorf("repo: cannot find git root from %q: %w (use --repo /absolute/repo/path or COMMS_REPO to target a repo explicitly): %w", start, err, ErrNoRepo)
 		}
 		root = strings.TrimSpace(out)
 	}
@@ -123,7 +133,7 @@ func findGitRootByWalking(path string) (string, error) {
 		}
 		dir = parent
 	}
-	return "", fmt.Errorf("repo: cannot find git root from explicit path %q", abs)
+	return "", fmt.Errorf("repo: cannot find git root from explicit path %q: %w", abs, ErrNoRepo)
 }
 
 // resolveDeepestAncestor walks up from abs until filepath.EvalSymlinks

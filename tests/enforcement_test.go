@@ -210,3 +210,77 @@ func TestExplicitPathRefIsNotOverriddenByTheHeldClaim(t *testing.T) {
 	}
 	t.Fatal("no finding event found")
 }
+
+// A hook does not run where the file lives. Claude Code's working directory is
+// wherever the session started — routinely a parent folder holding several
+// checkouts, and very often not a repository at all. Resolving the repository
+// from the process meant the hook failed on every edit whenever that was true,
+// and because "no repository" exited 2, that failure BLOCKED the edit. Installing
+// the hook made editing anything outside the session's own checkout impossible.
+func TestHookResolvesTheRepoFromTheFileNotTheProcess(t *testing.T) {
+	bin := buildCommsBinary(t)
+	repo := setupTestRepo(t)
+	home := t.TempDir()
+	outside := t.TempDir() // a directory that is NOT a repository
+
+	claim := exec.Command(bin, "claim", "src/held.txt", "--intent", "peer work")
+	claim.Dir = repo
+	claim.Env = childEnv(home, "peer-agent")
+	if out, err := claim.CombinedOutput(); err != nil {
+		t.Fatalf("claim: %v: %s", err, out)
+	}
+
+	payload := func(p string) string {
+		return `{"session_id":"other","tool_name":"Edit","tool_input":{"file_path":"` + p + `"}}`
+	}
+	run := func(cwd, body string) int {
+		c := exec.Command(bin, "check", "--stdin-json")
+		c.Dir = cwd
+		c.Env = childEnv(home, "")
+		c.Stdin = strings.NewReader(body)
+		if err := c.Run(); err != nil {
+			if ee, ok := err.(*exec.ExitError); ok {
+				return ee.ExitCode()
+			}
+			t.Fatalf("run: %v", err)
+		}
+		return 0
+	}
+
+	// The whole point: cwd is outside any repository, the file is inside one.
+	if got := run(outside, payload(filepath.Join(repo, "src", "held.txt"))); got != 2 {
+		t.Errorf("peer-held file with cwd outside the repo: exit %d, want 2 (blocked)", got)
+	}
+	if got := run(outside, payload(filepath.Join(repo, "src", "free.txt"))); got != 0 {
+		t.Errorf("unclaimed file with cwd outside the repo: exit %d, want 0", got)
+	}
+}
+
+// "No repository" is not "I cannot tell whether this is clear" — it is "there is
+// nothing here to coordinate", and the only safe answer is to allow. Exiting 2
+// made every edit outside a checkout impossible, including creating a new file in
+// a directory that does not exist yet, which is what the editing tool does
+// constantly.
+func TestHookAllowsEditsWhereThereIsNoRepositoryToCoordinate(t *testing.T) {
+	bin := buildCommsBinary(t)
+	home := t.TempDir()
+	plain := t.TempDir()
+
+	for _, tc := range []struct{ name, path string }{
+		{"existing directory, no repo", filepath.Join(plain, "f.txt")},
+		{"new file in directories that do not exist yet", filepath.Join(plain, "a", "b", "c", "f.txt")},
+	} {
+		c := exec.Command(bin, "check", "--stdin-json")
+		c.Dir = plain
+		c.Env = childEnv(home, "")
+		c.Stdin = strings.NewReader(
+			`{"session_id":"x","tool_name":"Write","tool_input":{"file_path":"` + tc.path + `"}}`)
+		if err := c.Run(); err != nil {
+			code := -1
+			if ee, ok := err.(*exec.ExitError); ok {
+				code = ee.ExitCode()
+			}
+			t.Errorf("%s: exit %d, want 0 — a hook that blocks here makes the tool unusable", tc.name, code)
+		}
+	}
+}
