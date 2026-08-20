@@ -104,7 +104,18 @@ func Read(path string) ([]Event, error) {
 		events  []Event
 		seen    = make(map[string]struct{})
 		lineNum int
+		unknown int
 	)
+	// One line at the end rather than one per event: a newer comms writing a few
+	// thousand events of a type we predate should tell the operator once, not
+	// bury the real output.
+	defer func() {
+		if unknown > 0 {
+			fmt.Fprintf(os.Stderr,
+				"comms: warning: log %s: skipped %d line(s) of an event type this build does not know; a newer comms wrote them\n",
+				path, unknown)
+		}
+	}()
 	for {
 		lineNum++
 		line, hasNewline, err := readLine(br)
@@ -135,6 +146,14 @@ func Read(path string) ([]Event, error) {
 		}
 		ev, derr := Decode(trimmed)
 		if derr != nil {
+			// A type we do not know is not corruption — it is a newer writer.
+			// Skip it and carry on, the same way a duplicate ID is skipped below.
+			// Everything else still aborts: a log we cannot parse is not a log we
+			// should silently act on.
+			if errors.Is(derr, ErrUnknownType) {
+				unknown++
+				continue
+			}
 			return nil, &ErrCorrupt{Path: path, Line: lineNum, Cause: derr}
 		}
 		if _, dup := seen[ev.ID]; dup {

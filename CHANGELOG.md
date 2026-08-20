@@ -8,6 +8,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Readers now skip log entries whose event type they do not recognize, warning
+  once per read with the count, instead of refusing to read the file. Writers
+  still refuse to emit an unknown type.
+
+  This is what makes it possible to add an event type at all. Previously one
+  unrecognized line aborted the whole read, so a single event written by a newer
+  `comms` made `status`, `log`, `claim`, `note` and the `check` pre-edit hook all
+  fail on that repository. Install this release everywhere before any newer
+  version writes a new type.
+- `comms log --type` validation and its flag help now read the known type list
+  from one place, so the two can no longer drift apart.
+- `comms log` prints a plain row for an event type it cannot render, rather than
+  silently omitting it.
 - The dashboard streams history incrementally. `/api/status` and the first frame
   a new client receives still carry the complete log; later Server-Sent Events
   frames carry only rows appended since the previous frame, marked
