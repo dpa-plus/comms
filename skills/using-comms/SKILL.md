@@ -57,7 +57,7 @@ browser when run interactively (`--no-open` to suppress, `--open` to force).
 `comms ui` is **unified by default**: one tab with a left **Projects sidebar**
 listing every comms project on this machine. Selecting a project scopes the
 whole view — roster, active claims, recent findings/notes, a **Recently
-Completed** feed (from claim-release results), and the per-session event log —
+Completed** feed (from claim-release results), and History —
 to that project, with live SSE updates the instant any project's log changes.
 A project shows as active when it has recent findings/notes/completed work, even
 with no named session and all claims released. The header shows the active
@@ -66,10 +66,20 @@ to the repo, so the UI matches what agents call the work. Scope to one repo with
 `comms ui --repo /path`. The launcher sets `COMMS_ACTOR=human-eli` so the
 operator can release claims from the dashboard.
 
-The UI has **Start/End Comms Session** controls and a **Session Event Log**
-selector. Start/end-session are currently enabled in single-repo mode; claim
-**release works in the unified view too** (routed to the owning repo). The Docs
-and Global Lessons panels were removed from the dashboard — `comms doc` /
+**History is one continuous, newest-first log**, never split per session. It
+shows every event from every valid project — including inactive, unended, and
+archived sessions. Projects and sessions are context labels and filters over
+that single list, so selecting a project or typing in the filter never hides
+older history and never merges or rewrites any JSONL file. Long histories render
+in 500-row chunks behind a **Show 500 older events** button while the filter
+still matches the complete set.
+
+The UI has **Start/End Comms Session** controls. In the unified all-project view
+comms enables the mutations it can route to the owning repo — **Release Claim**,
+**Release All Claims**, **End Comms Session**, and **Remove** (retire an actor);
+**Start Comms Session** and **Transfer Leader** stay single-repo only. Every one
+of them additionally requires `COMMS_ACTOR` on the UI process. The Docs and
+Global Lessons panels were removed from the dashboard — `comms doc` /
 `comms lesson` remain CLI-only.
 
 ## Repo Path Recovery
@@ -111,10 +121,13 @@ curl -fsS http://127.0.0.1:7878/api/status
 ```
 
 The backend advertises `actions`, including `start_comms_session`,
-`end_comms_session`, `release_claim`, `retire_session_actor`, and
-`transfer_leader`. It also returns `active_comms_sessions[].events`,
-`current_session.events`, and `comms_sessions[].events`; those are filtered
-views over the append-only JSONL log.
+`end_comms_session`, `release_claim`, `release_actor_claims`,
+`retire_session_actor`, and `transfer_leader`. History is the top-level `events`
+array — one continuous, newest-first list over the append-only JSONL log. The
+session views carry their counts (`event_count` and friends) but not their own
+copy of the events. `/api/status` always returns the complete history; the
+`/api/events` stream sends only what was appended since its last frame, marked
+`events_delta`, alongside an `events_total` the client reconciles against.
 
 To end one named session from the CLI:
 

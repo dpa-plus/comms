@@ -59,6 +59,40 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   from one place, so the two can no longer drift apart.
 - `comms log` prints a plain row for an event type it cannot render, rather than
   silently omitting it.
+- The dashboard streams history incrementally. `/api/status` and the first frame
+  a new client receives still carry the complete log; later Server-Sent Events
+  frames carry only rows appended since the previous frame, marked
+  `events_delta`, and the page merges them by event ID. Filtering still runs over
+  every row, and a push now costs what changed instead of the whole append-only
+  log — on a store of 11,000 events that is roughly 4.8 MB per push down to tens
+  of kilobytes.
+- Session views no longer repeat the events already present in the top-level
+  history. `current_session`, `active_comms_sessions[]`, `comms_sessions[]`, and
+  their `project_sessions[]` equivalents keep their summary counts and drop their
+  `events` arrays, which nothing has read since history became continuous.
+- Every snapshot reports `events_total`, so a client whose frame was coalesced
+  away can detect that it is short and refetch once rather than silently miss
+  audit rows.
+
+### Fixed
+
+- A dashboard rebuild that finishes out of order can no longer hand a newly
+  opened tab a staler history than one already broadcast.
+- Opening a dashboard tab at the same moment the server publishes can no longer
+  wedge that tab's stream before it receives anything.
+- A snapshot refetch that loses the race with a live update no longer discards
+  the newer rows it arrived alongside, and is no longer treated as having
+  reconciled when it could not.
+- Running the dashboard scoped to one repository no longer clears the project
+  selected in the all-project sidebar.
+- The retired per-session log selector's `selectedSessionID` key is removed from
+  browser storage instead of lingering.
+
+### Documentation
+
+- `POST /api/claim/release-all` (`release_actor_claims`) is documented in the
+  protocol reference; it shipped in 0.2.0 but was missing from the endpoint table
+  and the discoverable `actions` example.
 
 ## [0.2.1] - 2026-08-19
 

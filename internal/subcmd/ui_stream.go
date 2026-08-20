@@ -37,6 +37,19 @@ type hub struct {
 	mu      sync.Mutex
 	clients map[chan []byte]struct{}
 	last    []byte
+	// newestSeen is the newest event timestamp already carried by a broadcast.
+	// The next frame only has to repeat history from there, which is what keeps
+	// a push proportional to what changed instead of to the whole log. It only
+	// ever rises, so a frame can never be trimmed against a watermark that moved
+	// backwards.
+	newestSeen time.Time
+	// issued/applied order concurrent rebuilds. Each rebuild takes a ticket before
+	// it starts and publishes with it; a ticket older than one already applied
+	// means a slower rebuild finished last, and its result is dropped. Wrapping
+	// uint64 is left unguarded on purpose: one ticket is issued per rebuild, and a
+	// rebuild happens per appended event, so exhausting it is not reachable.
+	issued  uint64
+	applied uint64
 }
 
 func newHub() *hub {
@@ -49,12 +62,17 @@ func newHub() *hub {
 func (h *hub) subscribe() chan []byte {
 	ch := make(chan []byte, 1)
 	h.mu.Lock()
-	h.clients[ch] = struct{}{}
-	last := h.last
-	h.mu.Unlock()
-	if last != nil {
-		ch <- last // safe: freshly created cap-1 buffer is empty
+	// Prime BEFORE registering, while the channel is still invisible to
+	// broadcasters. Registering first and sending after unlocking looks harmless
+	// — the buffer is fresh — but a publish landing in between fills the cap-1
+	// buffer, and the prime send then blocks forever on a channel nobody is
+	// reading yet: the SSE handler is still inside this call. Sending under the
+	// lock is safe precisely because an unregistered cap-1 channel cannot block.
+	if h.last != nil {
+		ch <- h.last
 	}
+	h.clients[ch] = struct{}{}
+	h.mu.Unlock()
 	return ch
 }
 
@@ -71,14 +89,50 @@ func (h *hub) unsubscribe(ch chan []byte) {
 	h.mu.Unlock()
 }
 
-// broadcast stores the snapshot as the new prime value and delivers it to every
-// client with coalescing semantics: a slow client that has not drained the prior
-// frame simply has it replaced with the newer one (cap-1 buffer). The hub never
-// blocks on a slow client, and a client can never fall more than one frame
-// behind — exactly the right trade-off for a "latest state wins" dashboard.
-func (h *hub) broadcast(payload []byte) {
+// beginPublish hands out the next rebuild ticket together with the watermark that
+// rebuild should trim against, atomically. Ordering rebuilds by ticket rather than
+// by their newest event keeps the decision independent of the clock and of the
+// event data: a store whose newest event disappears (a repository removed, or a
+// log that stopped being readable) lowers the newest timestamp, and rejecting
+// frames on that basis would stall every later push until the wall clock caught
+// up. A counter cannot go backwards.
+func (h *hub) beginPublish() (ticket uint64, watermark time.Time) {
 	h.mu.Lock()
-	h.last = payload
+	defer h.mu.Unlock()
+	h.issued++
+	return h.issued, h.newestSeen
+}
+
+// publish stores the FULL frame as the new prime value — every newly connected
+// client still gets the complete history — and broadcasts the DELTA frame to
+// clients that already have it. Delivery is coalescing: a slow client that has
+// not drained the prior frame simply has it replaced with the newer one (cap-1
+// buffer). The hub never blocks on a slow client, and a client can never fall
+// more than one frame behind — exactly the right trade-off for a "latest state
+// wins" dashboard. Coalescing can drop a delta, which is why every frame also
+// carries events_total: the page notices it is short and refetches once.
+func (h *hub) publish(ticket uint64, full, delta []byte, newest time.Time) {
+	payload := delta
+	if payload == nil {
+		payload = full
+	}
+	h.mu.Lock()
+	// Rebuilds run concurrently — the watcher goroutine and the cold-start call in
+	// serveEvents both publish — so a slow one can finish AFTER a newer one. Drop
+	// it: otherwise it overwrites the prime frame with a staler history that a new
+	// tab would be handed, and coalescing could replace a queued newer frame with
+	// it while carrying an events_total low enough that no client notices it is
+	// short. A rebuild that simply found no new event has a fresh ticket and is
+	// still delivered — claims, rosters and sessions change without one.
+	if ticket <= h.applied {
+		h.mu.Unlock()
+		return
+	}
+	h.applied = ticket
+	h.last = full
+	if newest.After(h.newestSeen) {
+		h.newestSeen = newest
+	}
 	for ch := range h.clients {
 		select {
 		case ch <- payload:
@@ -110,14 +164,109 @@ func (h *hub) hasSnapshot() bool {
 // the body as JSON, so dropping the previous pretty-printing is transparent to
 // them and also trims the payload on the wire.
 func (s uiServer) snapshotJSON() ([]byte, error) {
+	full, _, _, err := s.snapshotFrames(time.Time{})
+	return full, err
+}
+
+// snapshotFrames builds the snapshot ONCE and renders the two wire forms:
+//
+//   - full:  the complete history. What /api/status returns and what primes a
+//     newly connected SSE client, so a fresh tab can filter over every row.
+//   - delta: the same snapshot carrying only history at or after `since`. What
+//     already-connected clients receive, so a push costs what changed instead of
+//     re-sending the entire append-only log on every single event.
+//
+// A zero `since` means "no client has history yet"; only the full frame is built.
+// The boundary is inclusive (rows AT the watermark are repeated) because two
+// events can share a timestamp — the page merges by event ID, so a repeat is
+// free and a miss would not be.
+func (s uiServer) snapshotFrames(since time.Time) (full, delta []byte, newest time.Time, err error) {
 	snap, err := s.buildSnapshot()
 	if err != nil {
-		return nil, err
+		return nil, nil, time.Time{}, err
 	}
-	// Stamp the front-end build on every snapshot (one chokepoint for all modes) so
-	// the page can tell when it is running against a redeployed server and reload.
+	finalizeSnapshot(&snap)
+	newest = newestEventTS(snap.Events)
+	full, err = json.Marshal(snap)
+	if err != nil {
+		return nil, nil, time.Time{}, err
+	}
+	if since.IsZero() {
+		return full, nil, newest, nil
+	}
+	snap.Events = eventsAtOrAfter(snap.Events, since)
+	snap.EventsDelta = true
+	delta, err = json.Marshal(snap)
+	if err != nil {
+		return nil, nil, time.Time{}, err
+	}
+	return full, delta, newest, nil
+}
+
+// finalizeSnapshot prepares a freshly built snapshot for the wire, at the one
+// chokepoint every mode passes through: stamp the front-end build (so an open
+// page notices a redeployed binary), record the true history size (so a client
+// can tell it is missing rows), and drop the per-session event copies.
+//
+// Those copies used to be the compatibility view the dashboard filtered on. Since
+// history became one continuous list they are dead weight the page never reads —
+// measured at roughly a fifth of the payload — while event_count, which it does
+// read, is already carried alongside them.
+func finalizeSnapshot(snap *uiSnapshot) {
 	snap.Build = uiBuildID
-	return json.Marshal(snap)
+	snap.EventsTotal = len(snap.Events)
+	pruneSessionEvents(snap)
+}
+
+// pruneSessionEvents strips the duplicated per-session event slices from every
+// session view in the snapshot, leaving the counts intact.
+func pruneSessionEvents(snap *uiSnapshot) {
+	if snap == nil {
+		return
+	}
+	if snap.Current != nil {
+		snap.Current.Events = nil
+	}
+	pruneCommsSessionEvents(snap.Active)
+	pruneCommsSessionEvents(snap.CommsSessions)
+	for i := range snap.ProjectSessions {
+		ps := &snap.ProjectSessions[i]
+		if ps.Current != nil {
+			ps.Current.Events = nil
+		}
+		pruneCommsSessionEvents(ps.Active)
+		pruneCommsSessionEvents(ps.CommsSessions)
+	}
+}
+
+func pruneCommsSessionEvents(sessions []uiCommsSession) {
+	for i := range sessions {
+		sessions[i].Events = nil
+	}
+}
+
+// newestEventTS returns the latest timestamp in a history slice. History is built
+// newest-first, but this scans rather than trusting the order: the watermark it
+// feeds decides what a delta may omit, so being wrong here would drop rows.
+func newestEventTS(events []uiEvent) time.Time {
+	var newest time.Time
+	for _, ev := range events {
+		if ev.TS.After(newest) {
+			newest = ev.TS
+		}
+	}
+	return newest
+}
+
+// eventsAtOrAfter returns the history rows at or after `since`, preserving order.
+func eventsAtOrAfter(events []uiEvent, since time.Time) []uiEvent {
+	out := make([]uiEvent, 0, 16)
+	for _, ev := range events {
+		if !ev.TS.Before(since) {
+			out = append(out, ev)
+		}
+	}
+	return out
 }
 
 func (s uiServer) buildSnapshot() (uiSnapshot, error) {
@@ -140,12 +289,13 @@ func (s uiServer) buildSnapshot() (uiSnapshot, error) {
 // change detected by the watcher. A build failure is logged and skipped — the
 // last good snapshot stays primed and the next change retries.
 func (s uiServer) publishSnapshot() {
-	body, err := s.snapshotJSON()
+	ticket, watermark := s.hub.beginPublish()
+	full, delta, newest, err := s.snapshotFrames(watermark)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "comms ui: snapshot rebuild failed: %v\n", err)
 		return
 	}
-	s.hub.broadcast(body)
+	s.hub.publish(ticket, full, delta, newest)
 }
 
 // serveEvents streams snapshots to the browser over Server-Sent Events. One

@@ -841,6 +841,15 @@ type uiSnapshot struct {
 	TaskBoard *uiTaskBoard `json:"task_board,omitempty"`
 	Lessons   []string     `json:"lessons"`
 	Events    []uiEvent    `json:"events"`
+	// EventsTotal is how many history rows this snapshot covers in total,
+	// including rows a delta frame trimmed. The page compares it against the
+	// history it has merged and refetches /api/status once if they disagree, so a
+	// coalesced (dropped) push can never silently lose audit rows.
+	EventsTotal int `json:"events_total"`
+	// EventsDelta marks a frame whose Events carries only rows appended since the
+	// previous push. /api/status and the frame that primes a newly connected SSE
+	// client always carry the complete history and never set it.
+	EventsDelta bool `json:"events_delta,omitempty"`
 	// ProjectSessions is populated only in unified (all-projects) mode. Each
 	// entry is one project's own data with UN-prefixed ids/names, so the
 	// dashboard's sidebar can scope the whole view to a single project. The
@@ -2925,6 +2934,76 @@ let latestView = null;
 let selectedProjectHash = localStorage.getItem('selectedProjectHash') || '';
 const HISTORY_PAGE_SIZE = 500;
 let historyRenderLimit = HISTORY_PAGE_SIZE;
+// v0.2.1 replaced the per-session log selector with one continuous History. Drop
+// the key it stored so it does not linger forever in every existing browser.
+try { localStorage.removeItem('selectedSessionID'); } catch (e) {}
+// History arrives incrementally: /api/status — and the frame that primes a newly
+// connected EventSource — carry every row, and each later push carries only what
+// was appended since. We keep the merged log here so the filter still runs over
+// EVERY row, and reconcile against events_total: if a push was coalesced away and
+// we are short, refetch the complete snapshot once. That is what lets a push cost
+// what changed without ever silently losing an audit row.
+// history-merge:begin — extracted verbatim and executed by TestUIHistoryMergeLogic.
+let historyEvents = [];
+let historySeen = new Set();
+let historyResyncing = false;
+let historyResyncedTotal = -1;
+let historyMergeSeq = 0;
+function mergeHistory(data) {
+  historyMergeSeq++;
+  const incoming = data.events || [];
+  // A complete frame may REPLACE what we hold only when nothing merged while it
+  // was in flight — load() stamps that. The /api/status body we fetch to recover
+  // can lose the race with a delta that arrives before it resolves, and replacing
+  // wholesale with that older body would drop rows we had already merged.
+  //
+  // Freshness cannot be judged from the newest timestamp alone: a bulk release or
+  // batch claim stamps every event it generates with the same instant, so a frame
+  // can share our newest timestamp while holding fewer of the rows at it. Anything
+  // not provably current is merged as a union instead, which cannot lose a row.
+  if (!data.events_delta && (historyEvents.length === 0 || data.history_authoritative)) {
+    historyEvents = incoming.slice();
+    historySeen = new Set(historyEvents.map(ev => ev.id));
+  } else {
+    let added = false;
+    for (const ev of incoming) {
+      if (historySeen.has(ev.id)) continue;
+      historySeen.add(ev.id);
+      historyEvents.push(ev);
+      added = true;
+    }
+    // Newest first. Compare parsed instants, never the RFC3339 strings: Go trims
+    // trailing zeros from fractional seconds, so "…:00.5Z" sorts before "…:00Z"
+    // lexicographically while being the later instant. The id only breaks a
+    // same-millisecond tie so the rendered order stays stable across merges — it
+    // is NOT a causal ordering, which is why state.Fold refuses to sort by ULID.
+    if (added) historyEvents.sort((a, b) => {
+      const d = Date.parse(b.ts) - Date.parse(a.ts);
+      if (d) return d;
+      return a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
+    });
+  }
+  data.events = historyEvents;
+  const total = data.events_total;
+  // Resync at most once per distinct total, so a server that legitimately reports
+  // fewer rows than we hold (a repository whose log went unreadable) cannot turn
+  // the reconciliation into a refetch on every single push. The total is recorded
+  // only once the recovery actually succeeded — marking it up front would let a
+  // failed fetch permanently suppress the retry for rows we are still missing.
+  if (typeof total === 'number' && total !== historyEvents.length && !historyResyncing && historyResyncedTotal !== total) {
+    historyResyncing = true;
+    load()
+      // "Handled" means we actually agree with that total now — not merely that the
+      // request came back. A recovery can resolve yet only be able to union, because
+      // a pushed frame merged while it was in flight and its body is no longer
+      // provably current. Recording the total then would suppress every later
+      // attempt at a count we never reconciled.
+      .then(() => { historyResyncedTotal = historyEvents.length === total ? total : -1; })
+      .catch(err => { historyResyncedTotal = -1; showError(err); })
+      .finally(() => { historyResyncing = false; });
+  }
+}
+// history-merge:end
 function isUnified(data) { return Array.isArray(data.project_sessions) && data.project_sessions.length > 0; }
 // currentView returns the slice of the snapshot the panels should render: a
 // single project's container when one is selected in unified mode, otherwise the
@@ -3017,9 +3096,15 @@ function renderStats(data) {
   ].join('');
 }
 async function load() {
+  // Snapshot the merge counter first: if a pushed frame merges while this request
+  // is in flight, the body we get back is older than what we already hold and must
+  // not replace it. See mergeHistory.
+  const seq = historyMergeSeq;
   const res = await fetch('/api/status', { cache: 'no-store' });
   if (!res.ok) throw new Error(await res.text());
-  applySnapshot(await res.json());
+  const data = await res.json();
+  data.history_authoritative = historyMergeSeq === seq;
+  applySnapshot(data);
 }
 function applySnapshot(data) {
   // If the server was redeployed under this tab, reload to the new shell before
@@ -3028,10 +3113,14 @@ function applySnapshot(data) {
   if (maybeReloadForBuild(data)) return;
   hideError();
   latestData = data;
+  mergeHistory(data);
   const unified = isUnified(data);
   document.body.classList.toggle('unified', unified);
   // Self-heal a stale project selection (project gone, or no longer unified).
-  if (selectedProjectHash && !(data.project_sessions || []).some(p => p.repo_hash === selectedProjectHash)) {
+  // Only unified mode can judge whether the selected project still exists — in
+  // single-repo mode project_sessions is empty for every project, so clearing
+  // here would wipe the operator's sidebar selection on any comms ui --repo run.
+  if (isUnified(data) && selectedProjectHash && !(data.project_sessions || []).some(p => p.repo_hash === selectedProjectHash)) {
     selectedProjectHash = '';
     localStorage.removeItem('selectedProjectHash');
   }
