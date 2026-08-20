@@ -108,9 +108,13 @@ type Session struct {
 	// actor's events regardless of which comms session they belong to. This is
 	// deliberate — liveness is "is this agent's process alive?", which is a
 	// property of the actor, not of any one named session.
-	LastSeen    time.Time
-	SessionID   string
-	SessionName string
+	LastSeen time.Time
+	// AgentSession is the host agent's session id (Claude Code's session_id),
+	// recorded at hello. It is how a PreToolUse hook — which has no COMMS_ACTOR
+	// of its own — identifies which actor is asking.
+	AgentSession string
+	SessionID    string
+	SessionName  string
 
 	// Model identity, best-effort and optional. Recorded so the reducer can say
 	// whether a verification was independent or merely came from something with
@@ -256,18 +260,19 @@ func Fold(events []event.Event) *State {
 		switch ev.Type {
 		case event.TypeHello:
 			s.Sessions[ev.Actor] = &Session{
-				Actor:       ev.Actor,
-				Label:       stringOf(ev.Data, "label"),
-				TS:          ev.TS,
-				BaseName:    stringOf(ev.Data, "base_name"),
-				Hostname:    stringOf(ev.Data, "hostname"),
-				TTY:         stringOf(ev.Data, "tty"),
-				Leader:      boolOf(ev.Data, "leader"),
-				SessionID:   stringOf(ev.Data, "comms_session_id"),
-				SessionName: stringOf(ev.Data, "comms_session_name"),
-				Model:       stringOf(ev.Data, "model"),
-				Vendor:      stringOf(ev.Data, "vendor"),
-				Tier:        intOf(ev.Data, "tier"),
+				Actor:        ev.Actor,
+				Label:        stringOf(ev.Data, "label"),
+				TS:           ev.TS,
+				BaseName:     stringOf(ev.Data, "base_name"),
+				Hostname:     stringOf(ev.Data, "hostname"),
+				TTY:          stringOf(ev.Data, "tty"),
+				Leader:       boolOf(ev.Data, "leader"),
+				SessionID:    stringOf(ev.Data, "comms_session_id"),
+				SessionName:  stringOf(ev.Data, "comms_session_name"),
+				Model:        stringOf(ev.Data, "model"),
+				Vendor:       stringOf(ev.Data, "vendor"),
+				Tier:         intOf(ev.Data, "tier"),
+				AgentSession: stringOf(ev.Data, "agent_session"),
 			}
 		case event.TypeClaim:
 			c, err := claimFromEvent(ev)

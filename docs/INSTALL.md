@@ -240,14 +240,18 @@ block from `examples/settings.json.snippet`:
 {
   "hooks": {
     "SessionStart": [
-      {"type": "command", "command": "comms hello && comms status --since 24h"}
+      {"hooks": [{"type": "command", "command": "comms hello && comms status --since 24h"}]}
     ],
     "PreToolUse": [
-      {"matcher": "Edit|Write", "type": "command", "command": "comms check --stdin-json"}
+      {"matcher": "Edit|Write", "hooks": [{"type": "command", "command": "comms check --stdin-json"}]}
     ]
   }
 }
 ```
+
+Note the **nested `hooks` array**. A flat `{"matcher", "type", "command"}` does not
+match the settings schema and is ignored without an error — the hook simply never
+runs. Earlier versions of this document showed the flat form.
 
 The SessionStart hook announces the session and shows recent activity. The PreToolUse hook calls `comms check` with the tool input JSON on stdin — if another actor holds the file you're about to edit, the hook exits 2, which is the code Claude Code treats as a block, and the conflict report on stderr goes back to the model.
 

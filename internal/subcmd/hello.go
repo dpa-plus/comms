@@ -81,6 +81,18 @@ func runHello(args []string, label, model, vendor string) error {
 			"leader":    isLeader,
 		},
 	}
+	// Record which agent session this actor belongs to.
+	//
+	// COMMS_ACTOR is set per COMMAND in practice (agents prefix each invocation),
+	// not in the session environment. A PreToolUse hook inherits the environment
+	// and therefore has no actor at all — so it could not tell the agent that
+	// holds a claim from a stranger, and blocked agents from editing files they
+	// had just claimed themselves. The hook payload carries the same session id
+	// that is in this process's environment, so recording it here is what lets
+	// the hook work out who is asking. See resolveHookActor in check.go.
+	if s := os.Getenv("CLAUDE_CODE_SESSION_ID"); s != "" {
+		ev.Data["agent_session"] = s
+	}
 	if label != "" {
 		ev.Data["label"] = label
 	}
