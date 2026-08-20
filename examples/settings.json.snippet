@@ -1,19 +1,28 @@
 {
   "_comment": "Merge this `hooks` block into your existing ~/.claude/settings.json.",
-  "_comment_actor": "$COMMS_ACTOR must be set BEFORE Claude Code launches. Use the `cc` shell wrapper in your ~/.zshrc (see INSTALL.md).",
+  "_comment_shape": "Note the NESTED `hooks` array inside each entry. A flat {matcher, type, command} does not match the settings schema and is silently ignored — the hook simply never runs.",
+  "_comment_actor": "COMMS_ACTOR does NOT need to be set before Claude Code launches. `comms hello` records the agent session id, and the PreToolUse hook resolves the caller from the session id in its payload, so it can tell your own claims from a peer's without inheriting any environment.",
 
   "hooks": {
     "SessionStart": [
       {
-        "type": "command",
-        "command": "comms hello && comms status --since 24h"
+        "hooks": [
+          {
+            "type": "command",
+            "command": "comms hello && comms status --since 24h"
+          }
+        ]
       }
     ],
     "PreToolUse": [
       {
         "matcher": "Edit|Write",
-        "type": "command",
-        "command": "comms check --stdin-json"
+        "hooks": [
+          {
+            "type": "command",
+            "command": "comms check --stdin-json"
+          }
+        ]
       }
     ]
   }
