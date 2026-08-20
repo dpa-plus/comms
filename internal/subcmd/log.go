@@ -32,7 +32,7 @@ func NewLogCmd() *cobra.Command {
 	cmd.Flags().StringVar(&actor, "actor", "", "filter to events by this actor")
 	cmd.Flags().StringVar(&since, "since", "24h", "lookback window")
 	cmd.Flags().StringVar(&scope, "scope", "", "filter to events whose scope overlaps this path")
-	cmd.Flags().StringVar(&types, "type", "", "comma-separated event types (hello,claim,release,note,finding)")
+	cmd.Flags().StringVar(&types, "type", "", "comma-separated event types ("+event.KnownTypes()+")")
 	cmd.Flags().StringVar(&category, "category", "", "for findings: filter by category (bug/fix/ship/decision/gotcha)")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "raw JSONL output")
 	return cmd
@@ -110,12 +110,10 @@ func parseTypeSet(s string) (map[string]struct{}, error) {
 	out := make(map[string]struct{})
 	for _, p := range strings.Split(s, ",") {
 		t := strings.TrimSpace(p)
-		switch event.Type(t) {
-		case event.TypeHello, event.TypeClaim, event.TypeRelease, event.TypeNote, event.TypeFinding:
-			out[t] = struct{}{}
-		default:
-			return nil, fmt.Errorf("unknown event type %q; choose hello, claim, release, note, or finding", t)
+		if !event.Type(t).Valid() {
+			return nil, fmt.Errorf("unknown event type %q; choose %s", t, event.KnownTypes())
 		}
+		out[t] = struct{}{}
 	}
 	return out, nil
 }
@@ -206,6 +204,11 @@ func printEventHuman(ev event.Event) {
 		cat, _ := ev.Data["category"].(string)
 		sum, _ := ev.Data["summary"].(string)
 		fmt.Printf("%s  finding  @%s  [%s] %s\n", ts, ev.Actor, cat, sum)
+	default:
+		// Reachable only if this build learns to READ a type it cannot render —
+		// print the row rather than dropping it silently, so a newer comms's
+		// events are at least visible in the history.
+		fmt.Printf("%s  %-8s @%s\n", ts, ev.Type, ev.Actor)
 	}
 }
 

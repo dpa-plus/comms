@@ -37,6 +37,36 @@ type State struct {
 	// "recently completed work" trail. Session-end/retire/leader releases are
 	// excluded. Caller filters by `since`.
 	Releases []*Release
+
+	// Tasks keyed by slug. A map because tasks have a lifecycle and are looked up
+	// by identity, exactly like Claims; TaskEdges is a slice because an edge is an
+	// append-only fact. Both live in task.go, along with the reducer rules that
+	// keep an agent from verifying its own work.
+	Tasks     map[string]*Task
+	TaskEdges []*TaskEdge
+
+	// RefusedTaskStates are transitions the reducer would not apply — a
+	// self-review, or work marked done with failing checks. Kept rather than
+	// dropped so the operator can see the attempt.
+	RefusedTaskStates []*RefusedTransition
+
+	// Blocked are claims comms refused because someone else held the scope, in
+	// chronological order. This is the tool's own evidence that it works: every
+	// entry is a collision that did not happen. Caller filters by `since`.
+	Blocked []*Blocked
+}
+
+// Blocked is one refused claim — who wanted what, and who already had it.
+type Blocked struct {
+	ID          string
+	TS          time.Time
+	Actor       string
+	Scope       string
+	Intent      string
+	Holder      string
+	HolderScope string
+	SessionID   string
+	SessionName string
 }
 
 // Claim is an active exclusive claim on a scope.
@@ -48,6 +78,10 @@ type Claim struct {
 	Intent      string
 	SessionID   string
 	SessionName string
+	// Task is the slug this claim was tagged with, if any. It is what makes a
+	// task's progress derived from work agents already do, rather than a second
+	// bookkeeping step they have to remember.
+	Task string
 
 	// If non-empty, this claim displaced ForcedBy (an arbitrated steal).
 	StolenFromID string
@@ -74,9 +108,20 @@ type Session struct {
 	// actor's events regardless of which comms session they belong to. This is
 	// deliberate — liveness is "is this agent's process alive?", which is a
 	// property of the actor, not of any one named session.
-	LastSeen    time.Time
-	SessionID   string
-	SessionName string
+	LastSeen time.Time
+	// AgentSession is the host agent's session id (Claude Code's session_id),
+	// recorded at hello. It is how a PreToolUse hook — which has no COMMS_ACTOR
+	// of its own — identifies which actor is asking.
+	AgentSession string
+	SessionID    string
+	SessionName  string
+
+	// Model identity, best-effort and optional. Recorded so the reducer can say
+	// whether a verification was independent or merely came from something with
+	// the same blind spots. Absent on any hello written before 0.3.0.
+	Model  string
+	Vendor string
+	Tier   int
 }
 
 // EndedCommsSession is an archived project-level coordination window.
@@ -155,6 +200,7 @@ func Fold(events []event.Event) *State {
 	s := &State{
 		Claims:   make(map[string]*Claim),
 		Sessions: make(map[string]*Session),
+		Tasks:    make(map[string]*Task),
 	}
 
 	var windowStart time.Time
@@ -214,15 +260,19 @@ func Fold(events []event.Event) *State {
 		switch ev.Type {
 		case event.TypeHello:
 			s.Sessions[ev.Actor] = &Session{
-				Actor:       ev.Actor,
-				Label:       stringOf(ev.Data, "label"),
-				TS:          ev.TS,
-				BaseName:    stringOf(ev.Data, "base_name"),
-				Hostname:    stringOf(ev.Data, "hostname"),
-				TTY:         stringOf(ev.Data, "tty"),
-				Leader:      boolOf(ev.Data, "leader"),
-				SessionID:   stringOf(ev.Data, "comms_session_id"),
-				SessionName: stringOf(ev.Data, "comms_session_name"),
+				Actor:        ev.Actor,
+				Label:        stringOf(ev.Data, "label"),
+				TS:           ev.TS,
+				BaseName:     stringOf(ev.Data, "base_name"),
+				Hostname:     stringOf(ev.Data, "hostname"),
+				TTY:          stringOf(ev.Data, "tty"),
+				Leader:       boolOf(ev.Data, "leader"),
+				SessionID:    stringOf(ev.Data, "comms_session_id"),
+				SessionName:  stringOf(ev.Data, "comms_session_name"),
+				Model:        stringOf(ev.Data, "model"),
+				Vendor:       stringOf(ev.Data, "vendor"),
+				Tier:         intOf(ev.Data, "tier"),
+				AgentSession: stringOf(ev.Data, "agent_session"),
 			}
 		case event.TypeClaim:
 			c, err := claimFromEvent(ev)
@@ -236,6 +286,12 @@ func Fold(events []event.Event) *State {
 				delete(s.Claims, c.StolenFromID)
 			}
 			s.Claims[c.ID] = c
+		case event.TypeTask:
+			s.applyTask(ev)
+		case event.TypeTaskEdge:
+			s.applyTaskEdge(ev)
+		case event.TypeTaskState:
+			s.applyTaskState(ev)
 		case event.TypeRelease:
 			// data.refs may be a single string or a []string for backward compat;
 			// we accept either.
@@ -331,6 +387,19 @@ func Fold(events []event.Event) *State {
 					delete(namedWindows, sessionID)
 				}
 			}
+		case event.TypeBlocked:
+			// A claim comms refused. Recording it is the point: this is the only
+			// event that is evidence the tool prevented something.
+			s.Blocked = append(s.Blocked, &Blocked{
+				ID: ev.ID, TS: ev.TS, Actor: ev.Actor,
+				Scope:       stringOf(ev.Data, "scope"),
+				Intent:      stringOf(ev.Data, "intent"),
+				Holder:      stringOf(ev.Data, "holder"),
+				HolderScope: stringOf(ev.Data, "holder_scope"),
+				SessionID:   stringOf(ev.Data, "comms_session_id"),
+				SessionName: stringOf(ev.Data, "comms_session_name"),
+			})
+
 		case event.TypeFinding:
 			s.Findings = append(s.Findings, &Finding{
 				ID:          ev.ID,
@@ -365,6 +434,7 @@ func Fold(events []event.Event) *State {
 			sess.LastSeen = sess.TS
 		}
 	}
+	s.deriveTaskPhases()
 	return s
 }
 
@@ -393,6 +463,7 @@ func claimFromEvent(ev event.Event) (*Claim, error) {
 		Actor:        ev.Actor,
 		Scope:        sc,
 		Intent:       stringOf(ev.Data, "intent"),
+		Task:         stringOf(ev.Data, "task"),
 		SessionID:    stringOf(ev.Data, "comms_session_id"),
 		SessionName:  stringOf(ev.Data, "comms_session_name"),
 		StolenFromID: stringOf(ev.Data, "steals"),

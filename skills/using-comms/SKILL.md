@@ -18,13 +18,20 @@ In desktop app sessions, prefix every command with a concrete actor. Prefer
 stable readable actors for the current role, plus a UI label on hello:
 
 ```bash
-COMMS_ACTOR=claude-dev comms hello --label "Claude Dev"
-COMMS_ACTOR=codex-dev comms hello --label "Codex Dev"
+COMMS_ACTOR=claude-dev comms hello --label "Claude Dev" --model claude-opus-5 --vendor anthropic
+COMMS_ACTOR=codex-dev comms hello --label "Codex Dev" --model gpt-5.5 --vendor openai
 COMMS_ACTOR=claude-dev comms status
 ```
 
 Pick one actor name when this skill starts and reuse it for the conversation.
 Do not use generic names like `eli`, `claude`, `codex`, `agent`, or `user`.
+
+`--model` and `--vendor` are optional (they fall back to `$COMMS_MODEL` and
+`$COMMS_VENDOR`) but say them anyway. comms uses the vendor to record whether a
+verification was `independent` — checked by something from a different maker than
+the agent that did the work — or `same-family`. "Verified" and "verified by
+something with the same blind spots" are different claims, and only the log can
+tell them apart later.
 
 ## Session Start
 
@@ -57,7 +64,7 @@ browser when run interactively (`--no-open` to suppress, `--open` to force).
 `comms ui` is **unified by default**: one tab with a left **Projects sidebar**
 listing every comms project on this machine. Selecting a project scopes the
 whole view — roster, active claims, recent findings/notes, a **Recently
-Completed** feed (from claim-release results), and the per-session event log —
+Completed** feed (from claim-release results), the **Work graph**, and History —
 to that project, with live SSE updates the instant any project's log changes.
 A project shows as active when it has recent findings/notes/completed work, even
 with no named session and all claims released. The header shows the active
@@ -66,10 +73,30 @@ to the repo, so the UI matches what agents call the work. Scope to one repo with
 `comms ui --repo /path`. The launcher sets `COMMS_ACTOR=human-eli` so the
 operator can release claims from the dashboard.
 
-The UI has **Start/End Comms Session** controls and a **Session Event Log**
-selector. Start/end-session are currently enabled in single-repo mode; claim
-**release works in the unified view too** (routed to the owning repo). The Docs
-and Global Lessons panels were removed from the dashboard — `comms doc` /
+The top is a single rail: the project name (its tooltip carries the repo path,
+hash and log path), the active session name, and — only when they are not zero —
+red chips for **stale** claims, work **to verify**, and **dependency cycle**.
+Those chips are the whole alarm surface: if one is lit, something is waiting on an
+agent, and in the all-projects view they sum across every project. Counts sit in
+the heading of the panel that owns them (Team Roster, Active Claims) rather than
+in a summary row. Active claims are grouped by who holds them and why, with the
+intent and the directory every path shares printed once, so the list you scan is
+the files.
+
+**History is one continuous, newest-first log**, never split per session. It
+shows every event from every valid project — including inactive, unended, and
+archived sessions. Projects and sessions are context labels and filters over
+that single list, so selecting a project or typing in the filter never hides
+older history and never merges or rewrites any JSONL file. Long histories render
+in 500-row chunks behind a **Show 500 older events** button while the filter
+still matches the complete set.
+
+The UI has **Start/End Comms Session** controls. In the unified all-project view
+comms enables the mutations it can route to the owning repo — **Release Claim**,
+**Release All Claims**, **End Comms Session**, and **Remove** (retire an actor);
+**Start Comms Session** and **Transfer Leader** stay single-repo only. Every one
+of them additionally requires `COMMS_ACTOR` on the UI process. The Docs and
+Global Lessons panels were removed from the dashboard — `comms doc` /
 `comms lesson` remain CLI-only.
 
 ## Repo Path Recovery
@@ -111,10 +138,13 @@ curl -fsS http://127.0.0.1:7878/api/status
 ```
 
 The backend advertises `actions`, including `start_comms_session`,
-`end_comms_session`, `release_claim`, `retire_session_actor`, and
-`transfer_leader`. It also returns `active_comms_sessions[].events`,
-`current_session.events`, and `comms_sessions[].events`; those are filtered
-views over the append-only JSONL log.
+`end_comms_session`, `release_claim`, `release_actor_claims`,
+`retire_session_actor`, and `transfer_leader`. History is the top-level `events`
+array — one continuous, newest-first list over the append-only JSONL log. The
+session views carry their counts (`event_count` and friends) but not their own
+copy of the events. `/api/status` always returns the complete history; the
+`/api/events` stream sends only what was appended since its last frame, marked
+`events_delta`, alongside an `events_total` the client reconciles against.
 
 To end one named session from the CLI:
 
@@ -138,6 +168,115 @@ notes/findings; ignore it unless the user explicitly asks you to set a leader
 old actors" — `session retire` removes them from the active view while preserving
 the append-only audit log.
 
+## Working the Task Graph
+
+**Work with more than one step gets a task before it gets a claim.** Declare it
+first — `comms plan --from` for a whole decomposition, `comms task add` for a
+single one — then claim files with `--task <slug>`. A one-file, one-step fix does
+not need a task; anything you would describe to a colleague in more than one
+sentence does.
+
+This is a rule, not a suggestion, and it is stated as one deliberately. When it
+was phrased as "put it in the graph when work is big enough", agents skipped it:
+across 4,356 real claims exactly one carried a task. Nothing was broken — the
+instruction was soft, and soft instructions lose to hard ones every time.
+
+A task is what should happen; an edge says one task comes after another and what
+the later one consumes from the earlier.
+
+```bash
+COMMS_ACTOR=claude-dev comms plan --from plan.json
+COMMS_ACTOR=claude-dev comms next
+COMMS_ACTOR=claude-dev comms brief auth-api
+COMMS_ACTOR=claude-dev comms task show
+```
+
+`comms plan` appends the whole decomposition in one write and rejects it entirely
+if anything is wrong — an unknown endpoint, a duplicate edge, a dependency cycle.
+
+For one task at a time, or to extend a plan that already exists:
+
+```bash
+COMMS_ACTOR=claude-dev comms task add auth-api --title "Session create / refresh / revoke" \
+  --size L --slots 2 --check test --ref omni:AUF-2291
+COMMS_ACTOR=claude-dev comms task edge db-schema auth-api --kind artifact \
+  --provides "sessions table; uuid PKs, no cuid"
+```
+
+The edge `--kind` is load-bearing, not a label. `interface` and `artifact` mean
+the later task consumes something, so reworking the earlier one flags it for a
+recheck; `sequence` is ordering only and propagates nothing. Say what is consumed
+in `--provides` — that is the text `comms brief` hands to whoever picks the next
+task up.
+
+`comms next` is what you run when you finish something: it offers work waiting to
+be verified first (it is finished work holding up everything downstream, and it is
+cheap), then unclaimed tasks, then tasks with a free slot. It never offers you
+your own work to verify. `comms task show` prints the whole graph grouped by what
+you can do about it.
+
+**Run `comms brief <slug>` before you start a task.** It walks the incoming edges
+and gives you the interface or artifact you are building on plus the decisions the
+upstream agent recorded. Without it you will re-decide questions that were already
+settled, and probably differently.
+
+Tag your claims so the graph tracks itself:
+
+```bash
+COMMS_ACTOR=claude-dev comms claim "src/auth/session.ts" --task auth-api --intent "server-side sessions"
+```
+
+That is what puts you on the task and what takes you off it when you release. No
+separate status to remember.
+
+### Two steps: do it, then somebody else verifies it
+
+```bash
+COMMS_ACTOR=claude-dev comms task done auth-api --check test=pass \
+  --note "Refresh rotation is single-use: replaying a spent token revokes the family." \
+  --note "httpOnly cookie rather than localStorage - the security questionnaire asks about XSS."
+```
+
+`done` does **not** close the task, and nothing downstream moves until it is
+verified. Write the notes as decisions and their reasons, not a summary of the
+diff — the arguable choices are what a reviewer needs and what travels to whoever
+picks up the next task.
+
+```bash
+COMMS_ACTOR=codex-dev comms task review auth-api --pass
+COMMS_ACTOR=codex-dev comms task review auth-api --fail \
+  --finding "replaying a spent refresh token still succeeds" \
+  --evidence "POST /session/refresh twice with the same token returns 200 both times"
+```
+
+Rules the tool enforces, so do not plan around them:
+
+- **You cannot verify your own work.** A role suffix does not help; `claude-dev/review`
+  is still `claude-dev`.
+- **Declared checks must pass** before work can even reach review.
+- **A finding must be checkable** — an input that breaks it, a line that contradicts
+  the spec, a case the tests miss. The rule on the other side is "if the reason is
+  real, fix it, whoever gave it", and an opinion cannot be acted on that way.
+- **One verdict.** Do not iterate to agreement with the author; escalate to a third
+  agent or to the user instead.
+
+Verify in a **fresh session** wherever you can: read the task, the notes and the
+diff, not the author's transcript. If you are spawning a subagent to review, give
+it the task and the diff and not your reasoning, keep it read-only, and let it
+report its own verdict.
+
+The operator's dashboard shows the same graph: an arrow means the task it points
+at comes afterwards, and tasks joined to nothing are drawn apart. Work waiting for
+a verifier surfaces as a red **to verify** chip on the top rail, and a plan that
+can never finish as a **dependency cycle** chip — both visible without opening
+anything. You do not need to look at it. Keep the log honest and it follows.
+
+### Where the real context lives
+
+A task can carry `--ref omni:AUF-2291`. comms stores the reference and never
+resolves it; `comms brief` prints the command (`omni context AUF-2291`). Run it
+when you need the customer background — that is Omni's data, not comms'.
+
 ## Claim Before Edits
 
 Before editing a file in a coordinated project:
@@ -152,6 +291,15 @@ Use narrower anchors when practical:
 COMMS_ACTOR=claude-dev comms claim "frontend/src/lib/aggregate.ts#L40-90" --intent "rewrite aggregation loop"
 COMMS_ACTOR=claude-dev comms claim "src/auth.ts#validateToken" --intent "tighten JWT expiry check"
 ```
+
+If the pre-edit hook is installed, this is enforced rather than advisory: an
+Edit or Write to a path somebody else holds is stopped before it happens, and
+the refusal is written to the log. `comms status` reports the running total as
+COLLISIONS PREVENTED — the only number that shows the tool is doing its job.
+
+The hook works out which actor you are from your agent session, recorded when
+you ran `comms hello`. You do not need `COMMS_ACTOR` exported into the
+environment for it, and it will not mistake your own claim for somebody else's.
 
 Claim several scopes for one task in a single call — each gets its own claim
 event under the shared `--intent`, and the batch is all-or-nothing (if any
@@ -237,6 +385,18 @@ writing a note that explains how the system works or who owns what, it is a
 COMMS_ACTOR=claude-dev comms note "@codex-dev heads-up: Prisma migration lands next session"
 ```
 
+## Tools Instead of Commands
+
+`comms mcp` serves the same verbs as MCP tools over stdio: `comms_check`,
+`comms_claim`, `comms_release`, `comms_status`, `comms_note`, `comms_find`. If
+your host has it configured, prefer the tools — they are in front of you every
+turn, whereas this skill only loads when somebody types its name.
+
+The tools write the same events to the same log as the CLI, so a session using
+tools and a session using commands coordinate with each other without either
+knowing which the other used. Each tool takes an `actor` argument, because one
+server process may act for several agents.
+
 ## Docs
 
 ```bash
@@ -291,8 +451,20 @@ COMMS_ACTOR=claude-dev comms note "@claude-3a1f can I take src/foo.ts when you'r
 
 ## Failure Modes
 
-- Exit 1 means blocked by another actor or a policy rule; show the user.
-- Exit 2 means system error; warn the user and continue only if they approve.
+Exit codes are not uniform, because two different consumers read them and they
+disagree about what the numbers mean.
+
+- `comms claim` refused because somebody else holds the scope: **exit 1**. Show
+  the user; do not retry, and do not `--steal` without their say-so.
+- `comms check <path>` / `--stdin-json` blocked: **exit 2**. That is the code
+  Claude Code's PreToolUse contract treats as "block this edit and show the model
+  why"; any other non-zero is read as "the hook itself failed" and the edit goes
+  through anyway.
+- `comms check --staged` blocked: **exit 1**. That one feeds a git pre-commit
+  hook, where any non-zero aborts the commit.
+- System error (unreadable log, missing directory): **exit 2**. On the hook path
+  that shares a code with "blocked", deliberately — if comms cannot read the log
+  it cannot prove the path is clear, so stopping is the safe direction.
 
 ## What This Skill Does Not Do
 
@@ -301,4 +473,9 @@ Do not edit `.zshrc`.
 Do not start `comms` automatically.
 Do not claim files unless the user invoked `using-comms`.
 
-**Before any Edit or Write tool call in an active `using-comms` workflow, claim the file with the selected `COMMS_ACTOR`.**
+**Before any Edit or Write tool call in an active `using-comms` workflow, claim the file with the selected `COMMS_ACTOR`.** The claim is what stops two agents
+editing one file: `comms check` now genuinely blocks the edit when somebody else
+holds the path, and the refusal is recorded, so a claim you skip is a collision
+nobody can see.
+
+**Before starting multi-step work, declare it as a task or a plan, and pass `--task` on the claims that carry it out.**

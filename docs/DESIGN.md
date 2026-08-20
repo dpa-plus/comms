@@ -12,9 +12,31 @@
 
 ### What we cut
 
-- **Severity ladders, threaded inboxes, MCP server, registration tokens, deputies** — `mcp-agent-mail` had all of these. They added ceremony that agents kept skipping.
+- **Severity ladders, threaded inboxes, registration tokens, deputies** — `mcp-agent-mail` had all of these. They added ceremony that agents kept skipping.
+- **An MCP server** — cut for the same reason, and later *reversed*. See below.
 - **A single unbounded markdown file** — `COMMS.md` grew to 1632 lines, had no targeted reads, and iCloud forked it on concurrent writes.
 - **Heartbeats and TTLs** — agents don't have a sense of time; claims would expire mid-session. We replaced this with "user arbitrates dead sessions" — see below.
+
+### What we cut and then brought back
+
+**The MCP server.** It was cut with the rest of `mcp-agent-mail`'s apparatus, on
+the grounds that it was ceremony agents skipped. The ceremony judgement was
+right. The transport judgement was wrong, and the log says so: across 4,356 real
+claims exactly **one** carried a task. Not because the task graph was broken —
+because the instruction to use it lived in a skill that forbids auto-triggering
+and only loads when a human types its name. A CLI an agent has to be told to run
+loses to a tool sitting in its tool list every turn.
+
+`comms mcp` is therefore the same protocol with none of what was actually
+objectionable: six verbs mapping one-to-one onto existing commands, no
+registration, no inbox, no severity ladder. It speaks JSON-RPC over stdio with no
+SDK, because the subset a tool server needs is small and stable and comms would
+rather own 300 lines than carry a dependency.
+
+One thing had to change underneath it. `COMMS_ACTOR` is per process, and an MCP
+server is one long-lived process that may act for several agents, so every tool
+takes an `actor` argument and `Open` accepts a per-request override. The
+environment variable remains the default.
 
 ## Key decisions
 

@@ -122,7 +122,15 @@ COMMS_ACTOR=human-you comms ui   # http://127.0.0.1:7878 — every project, one 
 
 > **Set `COMMS_ACTOR` to run it as an operator.** The dashboard's write actions — **Release** a claim, **Remove** (retire) a crashed agent, **End** a session — are attributed to you, so they only appear when `COMMS_ACTOR` is set to a real operator name (e.g. `human-you`; the bare names `eli/claude/codex/agent/user` are reserved). Run `comms ui` with it unset and the dashboard is **read-only** and those buttons stay hidden — set it and they appear.
 
-`comms ui` is **unified by default**: it shows *every* comms project on this machine in one window. A **Projects sidebar** on the left lists each project (and its sessions); click one and the whole dashboard — team roster, active claims (stale ones flagged), recent findings and notes, and the per-session event log — scopes to it. Run it **once** and watch all your agents across every repo, switching between them in the same tab. No starting a UI per project, and agents never have to "open" anything — they just write to their logs, which this one dashboard already sees.
+`comms ui` is **unified by default**: it shows *every* comms project on this machine in one window. A **Projects sidebar** on the left lists each project (and its sessions); click one and the whole dashboard — team roster, active claims (stale ones flagged), the **work graph**, recent findings and notes, and the continuous history — scopes to it. Run it **once** and watch all your agents across every repo, switching between them in the same tab. No starting a UI per project, and agents never have to "open" anything — they just write to their logs, which this one dashboard already sees.
+
+The **work graph** shows the tasks in the selected project: an arrow means the
+task it points at comes afterwards, and tasks joined to nothing sit apart from
+the rest, because they are. Finished work compresses to a dashed outline so the
+board shrinks as the project progresses; work waiting for a verifier is the
+loudest thing on it, because it is finished *and* holding up everything
+downstream. Layout is computed on the server, so an arrow can only point
+rightward — there is no geometry to get wrong in the browser.
 
 It updates by **push, not polling.** A file watcher inside `comms ui` is notified by the operating system the instant any project's `log.jsonl` changes; it rebuilds the snapshot once and streams it to every open browser tab over [Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events). So when any agent anywhere appends an event, the right project lights up in the sidebar **immediately**, and your laptop isn't burning cycles re-reading logs on a timer.
 
@@ -197,7 +205,7 @@ The agent then follows it whenever you say **`using-comms`**.
 ## Commands at a glance
 
 ```
-comms hello [<name>] [--label "Claude Dev"]   # session entry + friendly UI label
+comms hello [<name>] [--label "Claude Dev"] [--model claude-opus-5 --vendor anthropic]  # session entry; model/vendor let a verification say whether it was independent
 comms session start "<name>" [--label "..."]  # create + join a named comms session
 comms session join "<name>" [--label "..."]   # join an existing named comms session
 comms session end "<name>" [--reason "..."]   # archive one named session + release its claims
@@ -205,7 +213,17 @@ comms claim "<scope>" ["<scope>" ...] --intent "<text>" [--steal <id> [--reason 
 comms release [<id> ...|--latest|--all-mine] [--result "<text>"]  # selected IDs release atomically
 comms session retire <actor> [--reason "..."] # remove actor from active roster; releases its claims
 comms session lead [<actor>] [--reason "..."] # make exactly one active actor the leader
-comms check <path>                            # PreToolUse hook (also: --stdin-json)
+comms plan --from plan.json                   # a whole decomposition in one write, or nothing
+comms task add <slug> --title "<instruction>" [--size S|M|L] [--slots N] [--check test] [--ref omni:AUF-2291]
+comms task edge <from> <to> --kind interface|artifact|sequence --provides "<what the later one consumes>"
+comms task done <slug> --check test=pass --note "<a decision you made>"   # finished, NOT closed
+comms task review <slug> --pass | --fail --finding "<what>" --evidence "<how to check>"
+comms task show                               # the graph, grouped by what you can do about it
+comms next                                    # what you could pick up right now
+comms brief <slug>                            # what you inherit before starting: interface + upstream decisions
+comms claim "<scope>" --task <slug> --intent "..."   # tagging a claim is what puts you on a task
+comms check <path>                            # PreToolUse hook (also: --stdin-json); exits 2 to block
+comms mcp                                     # serve the same verbs as MCP tools over stdio
 comms check --staged                         # pre-commit guard: block peer-claimed staged paths
 comms status [--json]
 comms log [--actor X] [--since 1h] [--scope path] [--type list] [--category cat]

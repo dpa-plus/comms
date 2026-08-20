@@ -15,7 +15,7 @@ import (
 // NewHelloCmd announces a session in the log and prints the active actor
 // prominently (first line of output) so misconfiguration is visible.
 func NewHelloCmd() *cobra.Command {
-	var label string
+	var label, model, vendor string
 	cmd := &cobra.Command{
 		Use:   "hello [<name>]",
 		Short: "Announce this session in the log",
@@ -26,14 +26,20 @@ Without an argument, $COMMS_ACTOR must be set (or this is a read-only
 "who am I" lookup).`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runHello(args, label)
+			return runHello(args, label, model, vendor)
 		},
 	}
 	cmd.Flags().StringVar(&label, "label", "", "friendly display label for this actor in status/UI")
+	// Recorded so a verification can say whether it was independent. Two agents
+	// from the same family share blind spots, and "verified" should not blur that
+	// with "verified by something that thinks the same way". Falls back to
+	// $COMMS_MODEL / $COMMS_VENDOR so a wrapper can set it once.
+	cmd.Flags().StringVar(&model, "model", "", "model backing this agent, e.g. claude-opus-5 (default $COMMS_MODEL)")
+	cmd.Flags().StringVar(&vendor, "vendor", "", "who makes it, e.g. anthropic (default $COMMS_VENDOR)")
 	return cmd
 }
 
-func runHello(args []string, label string) error {
+func runHello(args []string, label, model, vendor string) error {
 	// If an explicit name is given, that becomes the actor for this call.
 	// We still validate it against the same rules COMMS_ACTOR would face.
 	if len(args) == 1 {
@@ -42,6 +48,13 @@ func runHello(args []string, label string) error {
 	label = strings.TrimSpace(label)
 	if err := validateLabel(label); err != nil {
 		return err
+	}
+	model = firstNonEmpty(strings.TrimSpace(model), os.Getenv("COMMS_MODEL"))
+	vendor = strings.ToLower(firstNonEmpty(strings.TrimSpace(vendor), os.Getenv("COMMS_VENDOR")))
+	for name, v := range map[string]string{"--model": model, "--vendor": vendor} {
+		if err := rejectControlText("hello "+name, v, 60); err != nil {
+			Fatalf(2, "hello: %v", err)
+		}
 	}
 	rt, err := Open(OpenOpts{Mutating: true})
 	if err != nil {
@@ -68,8 +81,26 @@ func runHello(args []string, label string) error {
 			"leader":    isLeader,
 		},
 	}
+	// Record which agent session this actor belongs to.
+	//
+	// COMMS_ACTOR is set per COMMAND in practice (agents prefix each invocation),
+	// not in the session environment. A PreToolUse hook inherits the environment
+	// and therefore has no actor at all — so it could not tell the agent that
+	// holds a claim from a stranger, and blocked agents from editing files they
+	// had just claimed themselves. The hook payload carries the same session id
+	// that is in this process's environment, so recording it here is what lets
+	// the hook work out who is asking. See resolveHookActor in check.go.
+	if s := os.Getenv("CLAUDE_CODE_SESSION_ID"); s != "" {
+		ev.Data["agent_session"] = s
+	}
 	if label != "" {
 		ev.Data["label"] = label
+	}
+	if model != "" {
+		ev.Data["model"] = model
+	}
+	if vendor != "" {
+		ev.Data["vendor"] = vendor
 	}
 	stampActiveCommsSession(rt, ev.Data)
 	if err := rt.Append(ev); err != nil {

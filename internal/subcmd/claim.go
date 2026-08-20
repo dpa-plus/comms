@@ -26,6 +26,7 @@ func NewClaimCmd() *cobra.Command {
 		intent      string
 		stealID     string
 		stealReason string
+		task        string
 	)
 	cmd := &cobra.Command{
 		Use:   `claim "<scope>" ["<scope>" ...]`,
@@ -44,18 +45,19 @@ next-command to run.`,
 				Fatalf(2, "claim: --steal takes exactly one scope")
 			}
 			if len(args) == 1 {
-				return runClaim(args[0], intent, stealID, stealReason)
+				return runClaim(args[0], intent, stealID, stealReason, task)
 			}
-			return runClaimBatch(args, intent)
+			return runClaimBatch(args, intent, task)
 		},
 	}
 	cmd.Flags().StringVar(&intent, "intent", "", "one-line description of the change you're making (required)")
+	cmd.Flags().StringVar(&task, "task", "", "the task slug this edit belongs to; what puts you on that task and takes you off it when you release")
 	cmd.Flags().StringVar(&stealID, "steal", "", "claim ID to displace; must overlap the claimed scope. --reason is required only when it is still active — a stale claim (idle >=1h) is stolen without one")
 	cmd.Flags().StringVar(&stealReason, "reason", "", "justification for stealing a still-active claim (auto-filled for a stale one); printed in the audit trail")
 	return cmd
 }
 
-func runClaim(scopeRaw, intent, stealID, stealReason string) error {
+func runClaim(scopeRaw, intent, stealID, stealReason, task string) error {
 	if intent == "" {
 		Fatalf(2, "claim: --intent is required")
 	}
@@ -94,7 +96,16 @@ func runClaim(scopeRaw, intent, stealID, stealReason string) error {
 			Fatalf(2, "claim: --steal %s targets %s, which does not overlap the scope you are claiming (%s) — steal the claim blocking THIS scope",
 				short(target.ID), target.Scope.String(), scope.String())
 		}
-		idle := time.Since(target.TS)
+		// Idle means "the agent holding this has gone quiet", NOT "this claim is
+		// old". Reading target.TS measured how long ago the claim was FILED, so a
+		// perfectly live agent that had held a file for an hour was declared stale
+		// and its work taken from under it. Every event an actor emits is a passive
+		// heartbeat, so its session LastSeen is the real liveness signal.
+		idleFrom := target.TS
+		if sess := rt.State.Sessions[target.Actor]; sess != nil && sess.LastSeen.After(idleFrom) {
+			idleFrom = sess.LastSeen
+		}
+		idle := time.Since(idleFrom)
 		stale := idle >= staleClaimAfter
 		if stealReason == "" {
 			if stale {
@@ -121,12 +132,16 @@ func runClaim(scopeRaw, intent, stealID, stealReason string) error {
 			Holders:         conflicts,
 			StaleAfter:      staleClaimAfter,
 		})
+		recordBlocked(rt, scope.String(), intent, conflicts)
 		os.Exit(1)
 	}
 
 	// Build the claim event.
 	now := time.Now().UTC()
 	data := map[string]interface{}{"intent": intent}
+	if task != "" {
+		data["task"] = task
+	}
 	stampActiveCommsSession(rt, data)
 	if displaceID != "" {
 		data["steals"] = displaceID
@@ -169,7 +184,7 @@ func runClaim(scopeRaw, intent, stealID, stealReason string) error {
 // runClaimBatch claims several scopes in one locked pass. It validates policy
 // and conflicts for ALL scopes first and only appends events if every scope is
 // clear, so a multi-file task boundary is claimed atomically (or not at all).
-func runClaimBatch(scopeRaws []string, intent string) error {
+func runClaimBatch(scopeRaws []string, intent, task string) error {
 	if intent == "" {
 		Fatalf(2, "claim: --intent is required")
 	}
@@ -211,6 +226,7 @@ func runClaimBatch(scopeRaws []string, intent string) error {
 			Holders:         holders,
 			StaleAfter:      staleClaimAfter,
 		})
+		recordBlocked(rt, joinScopeStrings(scopes), intent, holders)
 		os.Exit(1)
 	}
 
@@ -226,6 +242,9 @@ func runClaimBatch(scopeRaws []string, intent string) error {
 	evs := make([]event.Event, 0, len(scopes))
 	for _, sc := range scopes {
 		data := map[string]interface{}{"intent": intent}
+		if task != "" {
+			data["task"] = task
+		}
 		stampActiveCommsSession(rt, data)
 		ev := event.Event{
 			TS:    now,
@@ -356,4 +375,35 @@ func findingMatchesAnyScope(f *state.Finding, scopes []overlap.Scope) bool {
 		}
 	}
 	return false
+}
+
+// recordBlocked writes the refusal to the log before the process exits.
+//
+// This is the only event in comms that is evidence the tool did its job: a
+// collision that did not happen. Until it existed, a refused claim printed a
+// conflict report to stderr and vanished, which is why a store holding 4,356
+// claims could report exactly zero collisions ever prevented.
+//
+// Best effort by design. The refusal has already been decided by the time we get
+// here and the caller is about to exit non-zero either way; failing to record it
+// must never turn a correct block into a crash.
+func recordBlocked(rt *Runtime, scope, intent string, holders []*state.Claim) {
+	if rt == nil || len(holders) == 0 {
+		return
+	}
+	h := holders[0]
+	data := map[string]interface{}{
+		"scope":        scope,
+		"holder":       h.Actor,
+		"holder_scope": h.Scope.String(),
+	}
+	if intent != "" {
+		data["intent"] = intent
+	}
+	stampActiveCommsSession(rt, data)
+	now := time.Now().UTC()
+	_ = rt.Append(event.Event{
+		TS: now, ID: event.NewID(now), Actor: rt.Actor,
+		Type: event.TypeBlocked, Scope: []string{scope}, Data: data,
+	})
 }

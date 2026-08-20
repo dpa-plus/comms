@@ -494,10 +494,13 @@ func TestUIHTMLUsesOneContinuousPersistentHistory(t *testing.T) {
 	if !strings.Contains(uiHTML, `function renderHistory(data)`) {
 		t.Fatal("dashboard must render the canonical continuous history array")
 	}
-	for _, obsolete := range []string{`id="sessionSelect"`, `selectedSessionID`, `renderSelectedSessionLog`} {
+	for _, obsolete := range []string{`id="sessionSelect"`, `let selectedSessionID`, `selectedSessionID =`, `renderSelectedSessionLog`} {
 		if strings.Contains(uiHTML, obsolete) {
 			t.Fatalf("session-partitioned history state must be removed; found %q", obsolete)
 		}
+	}
+	if !strings.Contains(uiHTML, `localStorage.removeItem('selectedSessionID')`) {
+		t.Fatal("the retired session-selector key must be cleaned out of existing browsers")
 	}
 	if !strings.Contains(uiHTML, `Persistent append-only history`) {
 		t.Fatal("history panel must explain that rows persist independently of session activity")
@@ -1577,13 +1580,13 @@ func TestSessionSwitchReleasesPriorActorClaimsAndHidesDormantSession(t *testing.
 	if err := runSessionStart("old session", "Claude Dev"); err != nil {
 		t.Fatalf("start old session: %v", err)
 	}
-	if err := runClaim("src/old.ts", "old work", "", ""); err != nil {
+	if err := runClaim("src/old.ts", "old work", "", "", ""); err != nil {
 		t.Fatalf("claim old work: %v", err)
 	}
 	if err := runSessionStart("new session", "Claude Dev"); err != nil {
 		t.Fatalf("start new session: %v", err)
 	}
-	if err := runClaim("src/new.ts", "new work", "", ""); err != nil {
+	if err := runClaim("src/new.ts", "new work", "", "", ""); err != nil {
 		t.Fatalf("claim new work: %v", err)
 	}
 
@@ -1726,5 +1729,147 @@ func TestGuardMutationCSRF(t *testing.T) {
 				t.Fatalf("guardMutation blocked=%v, want %v (status %d)", got, c.blocked, rec.Code)
 			}
 		})
+	}
+}
+
+// TestSnapshotFramesTrimsHistoryForConnectedClients verifies the two wire forms a
+// publish produces: the FULL frame carries every history row (it primes new tabs
+// and answers /api/status), the DELTA frame carries only rows at or after the
+// watermark, and both report the same events_total so a client that missed a
+// coalesced push can tell it is short and refetch.
+func TestSnapshotFramesTrimsHistoryForConnectedClients(t *testing.T) {
+	srv := uiServer{demo: true, staleAfter: 90 * time.Minute, hub: newHub()}
+
+	full, delta, newest, err := srv.snapshotFrames(time.Time{})
+	if err != nil {
+		t.Fatalf("snapshotFrames(zero): %v", err)
+	}
+	if delta != nil {
+		t.Fatal("a zero watermark means no client has history yet; only the full frame is needed")
+	}
+	var fullSnap uiSnapshot
+	if err := json.Unmarshal(full, &fullSnap); err != nil {
+		t.Fatalf("decode full frame: %v", err)
+	}
+	if fullSnap.EventsDelta {
+		t.Fatal("the full frame must never be marked as a delta")
+	}
+	if fullSnap.EventsTotal != len(fullSnap.Events) {
+		t.Fatalf("events_total = %d, want %d (the rows it carries)", fullSnap.EventsTotal, len(fullSnap.Events))
+	}
+	if len(fullSnap.Events) < 4 {
+		t.Fatalf("demo history too small to exercise trimming: %d rows", len(fullSnap.Events))
+	}
+	if want := fullSnap.Events[0].TS; !newest.Equal(want) {
+		t.Fatalf("newest = %v, want the latest history row %v", newest, want)
+	}
+
+	cutoff := fullSnap.Events[2].TS
+	_, delta, _, err = srv.snapshotFrames(cutoff)
+	if err != nil {
+		t.Fatalf("snapshotFrames(cutoff): %v", err)
+	}
+	var deltaSnap uiSnapshot
+	if err := json.Unmarshal(delta, &deltaSnap); err != nil {
+		t.Fatalf("decode delta frame: %v", err)
+	}
+	if !deltaSnap.EventsDelta {
+		t.Fatal("a trimmed frame must announce itself so the page merges instead of replacing")
+	}
+	if deltaSnap.EventsTotal != fullSnap.EventsTotal {
+		t.Fatalf("delta events_total = %d, want the full history size %d", deltaSnap.EventsTotal, fullSnap.EventsTotal)
+	}
+	want := 0
+	for _, ev := range fullSnap.Events {
+		if !ev.TS.Before(cutoff) {
+			want++
+		}
+	}
+	if len(deltaSnap.Events) != want {
+		t.Fatalf("delta carried %d rows, want %d at or after the watermark", len(deltaSnap.Events), want)
+	}
+	if len(delta) >= len(full) {
+		t.Fatalf("delta frame (%d bytes) must be smaller than the full frame (%d bytes)", len(delta), len(full))
+	}
+	// Inclusive boundary: rows sharing the watermark timestamp are repeated rather
+	// than risked, because the page merges by event ID and a repeat costs nothing.
+	if got := deltaSnap.Events[len(deltaSnap.Events)-1].ID; got != fullSnap.Events[2].ID {
+		t.Fatalf("oldest delta row = %q, want the watermark row %q repeated", got, fullSnap.Events[2].ID)
+	}
+}
+
+// TestSnapshotWireDropsDuplicatedSessionEvents verifies the session views ship
+// their counts but not a second copy of the events themselves. History became one
+// continuous array the page reads directly; the per-session copies were a fifth of
+// the payload that nothing read.
+func TestSnapshotWireDropsDuplicatedSessionEvents(t *testing.T) {
+	body, err := uiServer{demo: true, staleAfter: 90 * time.Minute}.snapshotJSON()
+	if err != nil {
+		t.Fatalf("snapshotJSON: %v", err)
+	}
+	var snap uiSnapshot
+	if err := json.Unmarshal(body, &snap); err != nil {
+		t.Fatalf("decode snapshot: %v", err)
+	}
+	if len(snap.Events) == 0 {
+		t.Fatal("the canonical history array must still be complete")
+	}
+	if snap.Current == nil {
+		t.Fatal("demo snapshot must expose a current session")
+	}
+	if len(snap.Current.Events) != 0 {
+		t.Fatalf("current_session must not duplicate history; carried %d events", len(snap.Current.Events))
+	}
+	if snap.Current.EventCount == 0 {
+		t.Fatal("current_session.event_count is what the dashboard reads and must survive")
+	}
+	for _, group := range [][]uiCommsSession{snap.Active, snap.CommsSessions} {
+		for _, sess := range group {
+			if len(sess.Events) != 0 {
+				t.Fatalf("session %q must not duplicate history; carried %d events", sess.ID, len(sess.Events))
+			}
+			if sess.EventCount == 0 {
+				t.Fatalf("session %q lost its event_count", sess.ID)
+			}
+		}
+	}
+}
+
+// TestUIHistoryMergesDeltaFramesAndReconcilesAgainstTotal pins the wiring of the
+// incremental history: that the merge exists, runs before anything renders, and is
+// fed a freshness stamp by load(). It can only check that the source says so —
+// TestUIHistoryMergeLogic executes the same code under node and is what proves the
+// behaviour.
+func TestUIHistoryMergesDeltaFramesAndReconcilesAgainstTotal(t *testing.T) {
+	for _, required := range []string{
+		`function mergeHistory(data)`,
+		`if (!data.events_delta && `,
+		`if (historySeen.has(ev.id)) continue;`,
+		`total !== historyEvents.length`,
+		`Date.parse(b.ts) - Date.parse(a.ts)`,
+		`mergeHistory(data);`,
+		// A complete frame may only replace what we hold when it is provably
+		// current: the recovery fetch can lose the race with a delta that lands
+		// while it is in flight.
+		`data.history_authoritative`,
+		`data.history_authoritative = historyMergeSeq === seq;`,
+		// And recovery runs at most once per distinct total, so a server reporting
+		// fewer rows than we hold cannot cause a refetch on every push.
+		`historyResyncedTotal !== total`,
+	} {
+		if !strings.Contains(uiHTML, required) {
+			t.Fatalf("incremental history must merge and self-heal; missing %q", required)
+		}
+	}
+}
+
+// TestUIKeepsProjectSelectionOutsideUnifiedMode verifies only unified mode may
+// clear the stored sidebar selection. project_sessions is empty for every project
+// in single-repo mode, so an unguarded check wipes the operator's choice on any
+// single-repo run.
+func TestUIKeepsProjectSelectionOutsideUnifiedMode(t *testing.T) {
+	const guarded = `if (isUnified(data) && selectedProjectHash && !(data.project_sessions || []).some(`
+	if !strings.Contains(uiHTML, guarded) {
+		t.Fatal("clearing a stale project selection must be gated on unified mode")
 	}
 }

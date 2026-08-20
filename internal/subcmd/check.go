@@ -18,12 +18,27 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// NewCheckCmd builds `comms check`. Used by Claude Code's PreToolUse hook;
-// returns:
+// NewCheckCmd builds `comms check`. Two different consumers read its exit code
+// and they do NOT agree on what the numbers mean, which is worth stating plainly
+// because getting it wrong silently disabled this command for its whole life.
+//
+// Claude Code's PreToolUse contract: 2 blocks the tool call and feeds stderr back
+// to the model; ANY other non-zero code is treated as "the hook itself failed",
+// reported to the user, and the edit proceeds. A git pre-commit hook, by
+// contrast, aborts on any non-zero at all.
+//
+// So:
 //
 //	0 — path clear (or held by same actor)
-//	1 — blocked by another actor's active claim
+//	2 — blocked by another actor's active claim (PreToolUse path — must be 2)
+//	1 — blocked, --staged path (feeds git, where any non-zero aborts)
 //	2 — system error (broken log, unreadable dir)
+//
+// Blocked and system-error share code 2 on the hook path, and that is the safe
+// direction: if comms cannot read the log it cannot prove the path is clear, so
+// it should stop rather than wave the edit through. Note what this used to do —
+// a real conflict exited 1 and Claude Code let the edit through, while a comms
+// bug exited 2 and blocked it. The behaviour was exactly inverted.
 //
 // In --stdin-json mode the path is extracted from the JSON Claude Code sends
 // on the hook stdin. Otherwise the path is the positional argument.
@@ -77,8 +92,10 @@ func runCheck(args []string, stdinJSON, staged bool) error {
 	}
 
 	var path string
+	var hookSession string
 	if stdinJSON {
-		p, err := extractPathFromStdinJSON(os.Stdin)
+		p, sid, err := extractPathFromStdinJSON(os.Stdin)
+		hookSession = sid
 		if err != nil {
 			// In --stdin-json mode, malformed input is exit 2 — the hook will
 			// then "warn, don't block" per the plan's failure-mode policy.
@@ -122,6 +139,12 @@ func runCheck(args []string, stdinJSON, staged bool) error {
 	// enabled COMMS_ALLOW_GENERIC_ACTOR. Use a sentinel that matches no real actor
 	// when identity is absent or unauthorized.
 	checkActor := rt.Actor
+	// A hook has no COMMS_ACTOR of its own, so fall back to the actor that said
+	// hello from this same agent session. Without this the hook cannot recognise
+	// the caller's OWN claims, and blocks it from editing what it just claimed.
+	if checkActor == "" && hookSession != "" {
+		checkActor = resolveHookActor(rt.State, hookSession)
+	}
 	if checkActor == "" || (actor.IsGeneric(checkActor) && !actor.GenericAllowed()) {
 		checkActor = "\x00not-a-real-actor"
 	}
@@ -136,7 +159,21 @@ func runCheck(args []string, stdinJSON, staged bool) error {
 		Holders:         conflicts,
 		StaleAfter:      staleClaimAfter,
 	})
-	os.Exit(1)
+	// The hook refusing an edit is the same evidence as a refused claim, and it
+	// is the one that fires most often. check runs read-only and unlocked on
+	// every edit, so take a writable handle only here, on the rare path where
+	// something was actually blocked.
+	if w, err := Open(OpenOpts{Mutating: true}); err == nil {
+		recordBlocked(w, scope.String(), "", conflicts)
+		_ = w.Close()
+	}
+	// EXIT 2, NOT 1. Claude Code's PreToolUse contract treats 2 as "block this
+	// tool call and show stderr to the model", and every other non-zero code as
+	// "the hook itself failed" — which is reported to the user and lets the edit
+	// through. This exited 1 from the day it shipped, so the pre-edit hook has
+	// never once blocked an edit in any session. The conflict report was written
+	// to stderr and thrown away.
+	os.Exit(2)
 	return nil
 }
 
@@ -243,6 +280,9 @@ func checkStagedPaths(rt *Runtime, paths []string) error {
 				recoveryPrefix, shellQuote(literalPathspec))
 		}
 	}
+	// NOT 2. This gate feeds a git pre-commit hook, where any non-zero aborts the
+	// commit, and 1 is what the contract and the test say. Only the PreToolUse
+	// path above needs 2, because only Claude Code distinguishes the codes.
 	os.Exit(1)
 	return nil
 }
@@ -347,21 +387,51 @@ func resolveExistingAncestor(abs string) string {
 //
 // We extract tool_input.file_path. Missing → return "" (no file context,
 // allow). Malformed → return error.
-func extractPathFromStdinJSON(r io.Reader) (string, error) {
+func extractPathFromStdinJSON(r io.Reader) (string, string, error) {
 	raw, err := io.ReadAll(r)
 	if err != nil {
-		return "", fmt.Errorf("read stdin: %w", err)
+		return "", "", fmt.Errorf("read stdin: %w", err)
 	}
 	if len(raw) == 0 {
-		return "", nil
+		return "", "", nil
 	}
 	var payload struct {
+		SessionID string `json:"session_id"`
 		ToolInput struct {
 			FilePath string `json:"file_path"`
 		} `json:"tool_input"`
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
-		return "", fmt.Errorf("parse stdin JSON: %w", err)
+		return "", "", fmt.Errorf("parse stdin JSON: %w", err)
 	}
-	return payload.ToolInput.FilePath, nil
+	return payload.ToolInput.FilePath, payload.SessionID, nil
+}
+
+// resolveHookActor works out which actor is behind a hook invocation.
+//
+// A hook process inherits the environment, and COMMS_ACTOR is set per command by
+// agents rather than exported into the session, so the hook almost never has one.
+// Without an actor every claim looks like somebody else's — including your own —
+// so an agent that claimed a file was then blocked from editing it, which is the
+// fastest possible way to get the hook switched off.
+//
+// The payload's session id is the same id the agent's environment carried when it
+// ran `comms hello`, so the log can answer the question the environment cannot.
+func resolveHookActor(st *state.State, agentSession string) string {
+	if agentSession == "" || st == nil {
+		return ""
+	}
+	var newest *state.Session
+	for _, sess := range st.Sessions {
+		if sess.AgentSession != agentSession {
+			continue
+		}
+		if newest == nil || sess.TS.After(newest.TS) {
+			newest = sess
+		}
+	}
+	if newest == nil {
+		return ""
+	}
+	return newest.Actor
 }
