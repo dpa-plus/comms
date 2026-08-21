@@ -185,3 +185,28 @@ def test_staged_prints_a_recovery_command_that_actually_runs(repo, monkeypatch, 
                             cwd=repo, capture_output=True, text=True).stdout.split()
     assert "src/b.ts" in staged, "the recovery command unstaged a file it was not given"
     assert not any("odd" in s for s in staged), "the blocked file is still staged"
+
+
+def test_a_passing_staged_check_says_which_kind_of_pass_it_was(repo, monkeypatch, capsys):
+    """IF THIS FAILS: exit 0 is ambiguous and gets misread as a false negative.
+
+    There are three ways to pass and they mean different things: nothing staged,
+    no coordination log in this repo, or paths checked and clear. Silence made
+    them identical. An agent testing the guard against a peer-held path got exit
+    0 because the peer had already committed (so `git add` produced no index
+    entry), and nearly filed correct behaviour as a bug.
+    """
+    _as(monkeypatch, "alice")
+
+    assert cli.main(["check", "--staged"]) == 0
+    assert "nothing is staged" in capsys.readouterr().out
+
+    _stage(repo, "src/a.ts")
+    assert cli.main(["check", "--staged"]) == 0
+    assert "no coordination log" in capsys.readouterr().out
+
+    cli.main(["claim", "src/b.ts", "--intent", "mine"])
+    capsys.readouterr()
+    assert cli.main(["check", "--staged"]) == 0
+    out = capsys.readouterr().out
+    assert "checked" in out and "none held by anybody else" in out

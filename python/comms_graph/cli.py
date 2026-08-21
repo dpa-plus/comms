@@ -1473,12 +1473,23 @@ def _cmd_check_staged(flags: dict) -> int:
 
     staged = [p for p in out.stdout.decode("utf-8", "replace").split("\0") if p]
     if not staged:
+        # Say WHY it passed. Silence on exit 0 cannot distinguish "checked them,
+        # all clear" from "there was nothing to check", and an agent testing the
+        # guard against a peer-held path read the second as a false negative and
+        # nearly filed it as a bug. The commonest cause is the honest one: the
+        # peer already committed, so `git add` produced no index entry.
+        print("check --staged: nothing is staged, so there was nothing to check.")
         return EXIT_OK
 
     log_file, _lock_file = _store(root, create=False)
     try:
         log_file.stat()
     except FileNotFoundError:
+        # Third way to exit 0 without checking anything, and the quietest.
+        # Nobody has ever coordinated in this repo, so there is nothing to
+        # collide with — but a silent pass here looks identical to a real one.
+        print("check --staged: no coordination log in this repo yet, "
+              "so there are no claims to collide with.")
         return EXIT_OK
     except OSError as exc:
         _err(f"check --staged: cannot reach the coordination log: {exc.strerror or exc}")
@@ -1505,6 +1516,9 @@ def _cmd_check_staged(flags: dict) -> int:
             blocked.append((canon, conflicts[0]))
 
     if not blocked:
+        n = len(staged)
+        print(f"check --staged: {n} staged path{'s' if n != 1 else ''} checked, "
+              f"none held by anybody else.")
         return EXIT_OK
 
     # Before the first commit there is no HEAD to restore FROM, so `git restore
