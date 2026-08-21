@@ -61,7 +61,7 @@ type Task struct {
 	Size   string   // S, M or L
 	Slots  int      // how many agents may work it at once; at least 1
 	Checks []string // check names that must pass before it can be marked done
-	Ref    string   // opaque external reference, e.g. "omni:AUF-2291"
+	Ref    string   // opaque external reference, e.g. "tracker:PROJ-1234"
 
 	TS        time.Time
 	UpdatedAt time.Time

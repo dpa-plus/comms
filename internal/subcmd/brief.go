@@ -124,19 +124,14 @@ func runBrief(slug string) error {
 	return nil
 }
 
-// refHint turns an opaque reference into the command that resolves it. comms
-// stores the reference and nothing else: it has no business shelling out to
-// another team's tooling, and an agent that owns that reference already knows
-// how to read it.
+// refHint prints an opaque reference and nothing else.
+//
+// It used to special-case one scheme and print the command that resolves it,
+// which contradicted both this comment and docs/PROTOCOL.md ("comms stores it
+// and never resolves it") — and hard-wired one team's internal tool into a
+// public repository. An agent that owns a reference already knows how to read
+// it; where a scheme maps to a command belongs in that team's own skill, not
+// in here.
 func refHint(ref string) string {
-	scheme, id, ok := strings.Cut(ref, ":")
-	if !ok || id == "" {
-		return ref
-	}
-	switch scheme {
-	case "omni":
-		return ref + "   ->   omni context " + id
-	default:
-		return ref
-	}
+	return ref
 }
