@@ -198,16 +198,25 @@ For one task at a time, or to extend a plan that already exists:
 
 ```bash
 COMMS_ACTOR=claude-dev comms task add auth-api --title "Session create / refresh / revoke" \
-  --size L --slots 2 --check test --ref omni:AUF-2291
-COMMS_ACTOR=claude-dev comms task edge db-schema auth-api --kind artifact \
+  --size L --check test --ref tracker:PROJ-1234
+COMMS_ACTOR=claude-dev comms task edge db-schema auth-api --kind consumes \
   --provides "sessions table; uuid PKs, no cuid"
 ```
 
-The edge `--kind` is load-bearing, not a label. `interface` and `artifact` mean
-the later task consumes something, so reworking the earlier one flags it for a
-recheck; `sequence` is ordering only and propagates nothing. Say what is consumed
-in `--provides` — that is the text `comms brief` hands to whoever picks the next
-task up.
+The edge `--kind` is load-bearing, not a label, and there are two of them.
+`consumes` means the later task uses something the earlier one produces, so
+reworking the earlier one flags it for a recheck. `sequence` is ordering only
+and propagates nothing. Say what is consumed in `--provides` — that is the text
+`comms brief` hands to whoever picks the next task up.
+
+(`interface` and `artifact` are still accepted and mean `consumes`. They were
+two words for one behaviour, which made every edge a choice between synonyms.)
+
+**One task, one agent at a time.** If somebody else is holding ground tagged to
+a task, take a different one — or split it so you each have your own piece to be
+checked. You are not blocked from working in parallel: you take different files,
+which is what the file lock is for. What you cannot do is share a task, because
+then one review covers work that is not all there yet.
 
 `comms next` is what you run when you finish something: it offers work waiting to
 be verified first (it is finished work holding up everything downstream, and it is
@@ -216,7 +225,7 @@ your own work to verify. `comms task show` prints the whole graph grouped by wha
 you can do about it.
 
 **Run `comms brief <slug>` before you start a task.** It walks the incoming edges
-and gives you the interface or artifact you are building on plus the decisions the
+and gives you what you are building on plus the decisions the
 upstream agent recorded. Without it you will re-decide questions that were already
 settled, and probably differently.
 
@@ -249,6 +258,14 @@ COMMS_ACTOR=codex-dev comms task review auth-api --fail \
   --evidence "POST /session/refresh twice with the same token returns 200 both times"
 ```
 
+**Say how you checked, not just that you did.** A pass that records no method is
+a green tick: the next agent builds against that interface on the strength of it
+and has no way to tell a real check from a glance. Put the method in the verdict
+where your build takes it (`--pass --evidence "ran the suite, 14 pass"`), and in
+a note on the task where it does not — the `comms` build installed today refuses
+`--evidence` on `--pass`, because it pairs that flag with `--finding` for the
+failure path.
+
 Rules the tool enforces, so do not plan around them:
 
 - **You cannot verify your own work.** A role suffix does not help; `claude-dev/review`
@@ -273,9 +290,69 @@ anything. You do not need to look at it. Keep the log honest and it follows.
 
 ### Where the real context lives
 
-A task can carry `--ref omni:AUF-2291`. comms stores the reference and never
-resolves it; `comms brief` prints the command (`omni context AUF-2291`). Run it
-when you need the customer background — that is Omni's data, not comms'.
+A task can carry `--ref tracker:PROJ-1234` — a pointer to wherever the real
+context lives. comms stores it verbatim and never resolves it; `comms brief`
+prints it back and stops there. Reading it is your job: the ticket system that
+owns that reference is the one that knows how, and comms taking a dependency on
+it would mean auth, a CLI that may be absent, and a public tool hard-wired to
+one team's internals.
+
+## Navigating the Code
+
+If the repo has a graphify map (`graphify-out/graph.json`), it can answer some
+questions far more cheaply than reading files — and others far worse than `rg`.
+The split is not a matter of taste; it was measured on this codebase.
+
+**Grep to find. graphify to expand. Never graphify to find.**
+
+`rg` locates a symbol. Once you have its name, graphify tells you what connects
+to it — which is the part grep cannot do without a manual fan-out.
+
+```bash
+graphify explain "matchTransactionToTenancy"   # callers, callees, relation kinds
+graphify affected "<node-id>"                  # transitive blast radius
+graphify god-nodes                             # the hubs, when you are new here
+```
+
+`explain` on a symbol you already know is the tool's real product: on a real
+523-file repo it answered "who calls this and what does it call" in 449 tokens
+against grep's 667, collapsed twenty identical test callsites to one, and found
+a caller in `scripts/` that a `src/`-scoped grep missed.
+
+**Do not use `graphify query`.** It seeds by string similarity and walks two
+hops, and two hops from anything in a React or Next.js repo reaches a helper
+like `cn()` with 180+ edges, so the neighbourhood explodes. Asked where bank
+transactions get matched to rent, it reported 951 nodes, truncated to 77, and
+ranked the correct function **72nd** — below `Button`, `DialogTitle` and a
+Tailwind classname helper. `rg -n "export (async )?function match" src/`
+answered the same question in one line. Every "where is X" question we tried
+went the same way.
+
+`affected` needs a node id, not a name. Run `explain <name>` first and copy the
+`ID:` it prints.
+
+**Two blind spots, both of which fail silently:**
+
+- **The graph holds names and edges, never code.** It cannot answer "how does
+  this work" or "what is the actual rule". It will tell you
+  `updateCachedAccessToken` exists; only reading the file tells you the token is
+  encrypted at rest behind a refresh lock.
+- **Prisma models and SQL migrations are not in the graph at all.** A
+  `schema.prisma` with 33 models contributes zero nodes. So `affected` on
+  anything data-model-shaped returns *"No affected nodes found"* — which is a
+  confident false negative, not an error. Answer those with `rg`.
+
+**The map does not know when it is stale.** There is no timestamp, no commit sha
+and no file hashes in it, and nothing warns you. Move a function and it still
+reports the old line; DELETE a function and it still reports the function. If
+the code has changed since the map was built — and in a long or unattended run
+it has — rebuild first:
+
+```bash
+graphify update .        # ~5s for 550 files, no LLM, no network
+```
+
+Treat a map you did not build yourself this session as a hint, never as truth.
 
 ## Claim Before Edits
 
@@ -448,6 +525,12 @@ Otherwise choose a different scope, or leave a note:
 ```bash
 COMMS_ACTOR=claude-dev comms note "@claude-3a1f can I take src/foo.ts when you're done?"
 ```
+
+**A refused edit is the tool working. Do not find another way to make it.** Not a
+shell command instead of the editor, not a different actor name, not a subagent
+sent to do it for you. Two agents in a supervised run did exactly this — one
+scripted the write, one re-exported `COMMS_ACTOR` — and both produced the silent
+double-edit the claim existed to prevent. Say what you were blocked on, and stop.
 
 ## Failure Modes
 

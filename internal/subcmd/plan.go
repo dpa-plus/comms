@@ -47,7 +47,7 @@ plan that does not say what its author meant.
   {
     "tasks": [
       {"id": "db-schema", "title": "Add session tables", "size": "S",
-       "checks": ["test"], "ref": "omni:AUF-2291"},
+       "checks": ["test"], "ref": "tracker:PROJ-1234"},
       {"id": "auth-api",  "title": "Build session create / refresh / revoke",
        "size": "L", "slots": 2, "after": ["db-schema"]}
     ],

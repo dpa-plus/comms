@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "comms-graph"
+version = "0.1.0"
+description = "comms rebuilt on graphify: claims, a task graph with a review gate, and a board for the person watching"
+requires-python = ">=3.10"
+# graphify is used for FOUR things and nothing else: loading a code map,
+# rendering it to HTML, and the output-directory convention. Everything about
+# coordination — the log, the fold, the lock, the review gate, the hook — is in
+# this package. Pinned to a floor rather than an exact version because those
+# four are stable surface; if that stops being true, pin it hard.
+dependencies = ["graphifyy>=0.9.47"]
+
+[project.scripts]
+# NOT `comms` — that name belongs to the Go binary in this same repo, which is
+# what the installed PreToolUse hook still runs. The two coexist deliberately:
+# they share one store and read each other's events, so switching is a one-line
+# edit and is reversible.
+comms-graph = "comms_graph.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["comms_graph*"]
+
+[tool.setuptools.package-data]
+comms_graph = ["instructions.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

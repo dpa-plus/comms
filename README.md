@@ -214,7 +214,7 @@ comms release [<id> ...|--latest|--all-mine] [--result "<text>"]  # selected IDs
 comms session retire <actor> [--reason "..."] # remove actor from active roster; releases its claims
 comms session lead [<actor>] [--reason "..."] # make exactly one active actor the leader
 comms plan --from plan.json                   # a whole decomposition in one write, or nothing
-comms task add <slug> --title "<instruction>" [--size S|M|L] [--slots N] [--check test] [--ref omni:AUF-2291]
+comms task add <slug> --title "<instruction>" [--size S|M|L] [--slots N] [--check test] [--ref tracker:PROJ-1234]
 comms task edge <from> <to> --kind interface|artifact|sequence --provides "<what the later one consumes>"
 comms task done <slug> --check test=pass --note "<a decision you made>"   # finished, NOT closed
 comms task review <slug> --pass | --fail --finding "<what>" --evidence "<how to check>"

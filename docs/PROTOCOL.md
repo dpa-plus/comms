@@ -173,7 +173,7 @@ edits the description only — re-titling verified work does not reopen it.
 
 ```json
 {"data": {"task": "auth-api", "title": "Build session create / refresh / revoke",
-          "size": "L", "slots": 2, "checks": ["test", "types"], "ref": "omni:AUF-2291"}}
+          "size": "L", "slots": 2, "checks": ["test", "types"], "ref": "tracker:PROJ-1234"}}
 ```
 
 | Field    | Notes |
@@ -183,7 +183,7 @@ edits the description only — re-titling verified work does not reopen it.
 | `size`   | `S`, `M` or `L`. |
 | `slots`  | How many agents may work it at once. Default 1. |
 | `checks` | Names that must be reported passing before the task can be marked done. |
-| `ref`    | Opaque reference to wherever the real context lives, e.g. `omni:AUF-2291`. comms stores it and never resolves it. |
+| `ref`    | Opaque reference to wherever the real context lives, e.g. `tracker:PROJ-1234`. comms stores it and never resolves it. |
 
 ### `task_edge`
 
