@@ -39,6 +39,7 @@ import json
 import os
 import re
 import socket
+import shlex
 import shutil
 import subprocess
 import unicodedata
@@ -1498,11 +1499,23 @@ def _cmd_check_staged(flags: dict) -> int:
     if not blocked:
         return EXIT_OK
 
+    # Before the first commit there is no HEAD to restore FROM, so `git restore
+    # --staged` fails there and `git rm --cached` is the one that works. Getting
+    # this wrong hands somebody a command that errors at the exact moment they
+    # are trying to unpick a blocked commit.
+    head = subprocess.run([git, "rev-parse", "--verify", "-q", "HEAD"],
+                          cwd=root, capture_output=True)
+    unstage = "git restore --staged" if head.returncode == 0 else "git rm --cached -f"
+
     _err(f"BLOCKED: {len(blocked)} staged file(s) are claimed by somebody else.")
     for rel_text, holder in blocked:
         intent = f'  "{holder.intent}"' if holder.intent else ""
         _err(f"  {rel_text} — @{holder.actor}{intent}")
-    _err("  Unstage them, or agree with the holder before committing their work.")
+    _err("  Unstage them, or agree with the holder before committing their work:")
+    for rel_text, _holder in blocked:
+        # :(literal) so a path containing *, ? or [ ] is treated as the name it
+        # is rather than as a glob that could unstage somebody else's files too.
+        _err(f"    {unstage} -- {shlex.quote(':(literal)' + rel_text)}")
     return EXIT_CONFLICT
 
 

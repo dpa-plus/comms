@@ -152,3 +152,36 @@ def test_staged_lets_the_holder_commit_their_own_work(repo, monkeypatch):
     cli.main(["claim", "src/a.ts", "--intent", "mine"])
     _stage(repo, "src/a.ts")
     assert cli.main(["check", "--staged"]) == 0
+
+
+def test_staged_prints_a_recovery_command_that_actually_runs(repo, monkeypatch, capsys):
+    """IF THIS FAILS: the guard tells you that you are stuck without telling you
+    how to get out, or worse, hands you a command that errors.
+
+    Two details carry it. Before the first commit there is no HEAD to restore
+    FROM, so `git restore --staged` fails and `git rm --cached` is the one that
+    works — and being blocked on an initial commit is not rare. And the pathspec
+    is `:(literal)`, so a filename containing a glob character names itself
+    instead of matching other people's staged files.
+    """
+    _as(monkeypatch, "bob")
+    odd = repo / "src" / "odd [name].ts"
+    odd.write_text("x = 1\n")
+    cli.main(["claim", "src/odd [name].ts", "--intent", "bob's"])
+    capsys.readouterr()
+
+    _as(monkeypatch, "alice")
+    _stage(repo, "src/odd [name].ts", "src/b.ts")
+    assert cli.main(["check", "--staged"]) == 1
+    err = capsys.readouterr().err
+
+    line = next(l.strip() for l in err.splitlines() if "git rm --cached" in l)
+    assert ":(literal)" in line
+    subprocess.run(line, cwd=repo, shell=True, check=True,
+                   capture_output=True)
+
+    git = shutil.which("git")
+    staged = subprocess.run([git, "diff", "--cached", "--name-only"],
+                            cwd=repo, capture_output=True, text=True).stdout.split()
+    assert "src/b.ts" in staged, "the recovery command unstaged a file it was not given"
+    assert not any("odd" in s for s in staged), "the blocked file is still staged"
