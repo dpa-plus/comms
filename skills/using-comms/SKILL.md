@@ -198,7 +198,7 @@ For one task at a time, or to extend a plan that already exists:
 
 ```bash
 COMMS_ACTOR=claude-dev comms task add auth-api --title "Session create / refresh / revoke" \
-  --size L --check test --ref omni:AUF-2291
+  --size L --check test --ref tracker:PROJ-1234
 COMMS_ACTOR=claude-dev comms task edge db-schema auth-api --kind artifact \
   --provides "sessions table; uuid PKs, no cuid"
 ```
@@ -287,9 +287,12 @@ anything. You do not need to look at it. Keep the log honest and it follows.
 
 ### Where the real context lives
 
-A task can carry `--ref omni:AUF-2291`. comms stores the reference and never
-resolves it; `comms brief` prints the command (`omni context AUF-2291`). Run it
-when you need the customer background — that is Omni's data, not comms'.
+A task can carry `--ref tracker:PROJ-1234` — a pointer to wherever the real
+context lives. comms stores it verbatim and never resolves it; `comms brief`
+prints it back and stops there. Reading it is your job: the ticket system that
+owns that reference is the one that knows how, and comms taking a dependency on
+it would mean auth, a CLI that may be absent, and a public tool hard-wired to
+one team's internals.
 
 ## Navigating the Code
 

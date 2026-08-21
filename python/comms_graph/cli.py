@@ -2059,7 +2059,7 @@ def _cmd_plan(argv: list[str]) -> int:
 TASK_USAGE = """Usage: comms-graph task <command>
 
   add <id> --as <actor> [--title "..."] [--size S|M|L]
-                        [--check <name>]... [--ref "omni:AUF-2291"]
+                        [--check <name>]... [--ref "tracker:PROJ-1234"]
   edge <from> <to> --as <actor> [--kind interface|artifact|sequence]
                                 [--provides "..."]      <to> comes AFTER <from>
   done <id> --as <actor> [--check name=pass]... [--note "..."]

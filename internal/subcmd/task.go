@@ -70,7 +70,7 @@ use", not "Token rotation". It is what another agent reads before picking it up.
 	cmd.Flags().StringVar(&size, "size", "", "S, M or L — S is one agent and a few tool calls, L must be broken down before it can be claimed")
 	cmd.Flags().IntVar(&slots, "slots", 0, "how many agents may work it at once (default 1)")
 	cmd.Flags().StringArrayVar(&checks, "check", nil, "a check that must pass before this can be marked done (repeatable, e.g. --check test)")
-	cmd.Flags().StringVar(&ref, "ref", "", "opaque reference to wherever the real context lives, e.g. omni:AUF-2291")
+	cmd.Flags().StringVar(&ref, "ref", "", "opaque reference to wherever the real context lives, e.g. tracker:PROJ-1234")
 	return cmd
 }
 
