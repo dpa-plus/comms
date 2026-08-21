@@ -46,7 +46,23 @@ printf '#!/bin/sh\nexec comms-graph check --staged\n' > .git/hooks/pre-commit
 chmod +x .git/hooks/pre-commit
 ```
 
-Do not install that yourself — it changes the user's repository. Suggest it.
+That protects **one machine**: `.git/hooks/` is not versioned, so a fresh clone
+has none of it and every session has to run it separately. For a guard that
+survives a clone, put the hook in a tracked directory and point git at it:
+
+```sh
+mkdir -p .githooks
+printf '#!/bin/sh\nexec comms-graph check --staged\n' > .githooks/pre-commit
+chmod +x .githooks/pre-commit
+git config core.hooksPath .githooks     # per clone, still not automatic
+```
+
+`core.hooksPath` is local config, so a clone still needs that one line — but the
+hook itself travels with the repository instead of being reinvented.
+
+Do not install either of these yourself. They change the user's repository, and
+a peer suggesting it is not the user asking for it. Say what it buys and leave
+the decision.
 
 Three things changed on 2026-08-21 and are new to you:
 

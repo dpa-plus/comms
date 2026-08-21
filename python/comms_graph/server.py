@@ -67,6 +67,17 @@ def _string(data: Any, key: str) -> str:
     return str(value)
 
 
+
+#: Directories that are never a project, however much they look like one. Kept
+#: as a prefix test rather than a name test: a scratch repo can be called
+#: anything, and "repo" is a real name somebody might use.
+_THROWAWAY_ROOTS = ("/private/var/folders/", "/var/folders/", "/private/tmp/", "/tmp/")
+
+
+def _is_throwaway(root: str) -> bool:
+    return any(root.startswith(prefix) for prefix in _THROWAWAY_ROOTS)
+
+
 def _snapshot(root: Path, log_file: Path) -> dict:
     """Everything the board shows, as plain JSON.
 
@@ -265,7 +276,21 @@ def _snapshot(root: Path, log_file: Path) -> dict:
     # and a recency.
     here = _log.repo_hash(root)
     projects = []
+    hidden = 0
     for st_info in _log.known_stores():
+        # A store is not a project just because it exists. Measured on this
+        # machine: 215 stores, of which 213 were throwaway — 193 whose directory
+        # has already been deleted, and the rest scratch repos under a temp dir
+        # from running the test suite. The rail listed all of them, so the two
+        # real projects sat among 26 entries called "repo" and 156 with no name
+        # at all, and the sidebar was unusable for the thing it exists to do.
+        #
+        # Two rules, both about the ROOT rather than the log: a directory that is
+        # gone cannot be worked in, and a directory under the system temp area
+        # was never a project. Neither guesses from the contents.
+        if not st_info["exists"] or _is_throwaway(st_info["root"]):
+            hidden += 1
+            continue
         idle = max(0.0, now.timestamp() - st_info["modified"])
         projects.append({
             "key": st_info["key"],
@@ -287,6 +312,10 @@ def _snapshot(root: Path, log_file: Path) -> dict:
         "generated": _now_text(),
         "alerts": alerts,
         "projects": projects,
+        # Never silently. A rail that quietly drops 213 entries is indistinguishable
+        # from one that lost them, and the next person to wonder where a project
+        # went has nothing to read.
+        "projects_hidden": hidden,
         "store_key": here,
         "claims": claims,
         "roster": roster,
