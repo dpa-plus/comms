@@ -204,16 +204,29 @@ the append-only audit log.
 
 ## Working the Task Graph
 
-**Work with more than one step gets a task before it gets a claim.** Declare it
-first — `comms-graph plan --from` for a whole decomposition, `comms-graph task add` for a
-single one — then claim files with `--task <slug>`. A one-file, one-step fix does
-not need a task; anything you would describe to a colleague in more than one
-sentence does.
+**Every request that will change files gets a task, created before the first
+claim, and every claim for it carries `--task <slug>`.** Not "when the work is
+big enough" — when you are asked to change something. Declare it with
+`comms-graph task add <slug> --title "..."`, or `comms-graph plan --from` for a
+whole decomposition, then claim with `--task <slug>`.
+
+A question you answer by reading is not a task. Anything you are going to edit
+is.
 
 This is a rule, not a suggestion, and it is stated as one deliberately. When it
 was phrased as "put it in the graph when work is big enough", agents skipped it:
 across 4,356 real claims exactly one carried a task. Nothing was broken — the
 instruction was soft, and soft instructions lose to hard ones every time.
+
+**What the tag buys, concretely.** The board lists every task and opens one on a
+click, and what it shows there is built from your claims: the files the task
+touches, who holds each, and which are already released. That list exists only
+because the claims were tagged. Untagged, the task shows "No files are tagged to
+this task" and the person watching has to ask you where the work is — which is
+the question the tool is supposed to have already answered.
+
+It costs one flag on a command you were running anyway, and it is the only
+bookkeeping here that is not derived for you.
 
 A task is what should happen; an edge says one task comes after another and what
 the later one consumes from the earlier.
