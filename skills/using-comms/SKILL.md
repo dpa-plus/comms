@@ -12,6 +12,57 @@ Bare references to `comms` are not enough.
 short notes/findings, and a repo-local docs wiki backed by a per-machine JSONL
 event log.
 
+## What you are running
+
+The command is **`comms-graph`** (`~/.local/bin/comms-graph`). The older `comms`
+binary is still on this machine and reads the same log, but `comms-graph` is the
+one to use: it is where the task graph, the board and `--staged` live.
+
+**Claims are enforced, not advised.** A `PreToolUse` hook runs
+`comms-graph check --stdin-json` before every Edit and Write. If you touch a file
+somebody else holds, the edit is refused and you are told who holds it. You do
+not run that hook yourself; it runs whether or not you remember it.
+
+**Spellings that reach one file are one claim.** `src/a.py` and `src/A.py` are
+the same file on this disk, and the guard treats them as one, so you cannot get
+round a claim by changing the case of a letter.
+
+**The hook only sees Edit and Write.** If you change a file with `sed -i`, a
+heredoc, `tee`, or a Python one-liner inside Bash, nothing checks it — and in
+auto mode Bash is the documented default, so this is the normal case, not a
+corner. Measured on a real session: ~35 edits, every one through Bash, the hook
+fired zero times, and two agents' changes were swept into each other's commits.
+
+So the hook is a safety net for one route in, not proof you are clear. **Claim
+before you edit, whichever tool you use**, and run `comms-graph check <path>`
+yourself before a Bash edit on anything you have not claimed. Shell commands
+cannot be intercepted reliably, so this part is on you.
+
+The backstop that does hold is a git pre-commit hook, because a commit cannot be
+argued with by a heredoc:
+
+```sh
+printf '#!/bin/sh\nexec comms-graph check --staged\n' > .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
+```
+
+Do not install that yourself — it changes the user's repository. Suggest it.
+
+Three things changed on 2026-08-21 and are new to you:
+
+- `claim a b c --intent "..."` takes several scopes **atomically** — all of them
+  or none, so you never end up holding half a task boundary.
+- `check --staged` refuses a commit whose index touches somebody else's claimed
+  files, and prints the exact `git restore --staged` / `git rm --cached` line to
+  undo it.
+- `--repo <path>` and `COMMS_REPO` name the repository from outside it, which is
+  the recovery when macOS withdraws access to the working directory.
+
+If something here is wrong, refuses when it should not, or lets something
+through that it should have caught, say so in your reply to the user with the
+exact command and its output. This build is new and that report is worth more
+than a workaround.
+
 ## Actor Identity
 
 In desktop app sessions, prefix every command with a concrete actor. Prefer
@@ -230,7 +281,7 @@ COMMS_ACTOR=codex-dev comms-graph task review auth-api --fail \
 a green tick: the next agent builds against that interface on the strength of it
 and has no way to tell a real check from a glance. Put the method in the verdict
 where your build takes it (`--pass --evidence "ran the suite, 14 pass"`), and in
-a note on the task where it does not — the `comms` build installed today refuses
+a note on the task where it does not — the build installed today refuses
 `--evidence` on `--pass`, because it pairs that flag with `--finding` for the
 failure path.
 

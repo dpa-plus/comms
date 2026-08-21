@@ -89,3 +89,44 @@ def test_a_typo_is_refused_rather_than_opening_a_private_ledger(repo, monkeypatc
 def test_the_flag_needs_a_path(repo, capsys):
     assert cli.main(["--repo"]) != 0
     assert "needs a path" in capsys.readouterr().err
+
+
+def test_an_at_prefixed_name_is_the_same_agent(repo, monkeypatch, capsys):
+    """IF THIS FAILS: an agent is locked out of its own files and told nothing.
+
+    Every surface PRINTS an actor as "@name", so an agent copying its own name
+    off the board and passing it back arrives as "@name" — and a stored "@name"
+    was a DIFFERENT agent from "name". Found on a real store: one agent held 24
+    events under "@claude-karte-fachebenen" while everyone else was plain.
+
+    The `release --all-mine` half is the dangerous one. It did not error. It said
+    "nothing to release", which reads exactly like success, so the agent believes
+    it has let go of ground it is still holding.
+    """
+    monkeypatch.setenv("COMMS_ACTOR", "@bob")
+    assert cli.main(["claim", "src/a.py", "--intent", "mine"]) == 0
+    capsys.readouterr()
+
+    monkeypatch.setenv("COMMS_ACTOR", "bob")
+    assert cli.main(["check", "src/a.py"]) == 0, "blocked from its own file"
+    assert cli.main(["release", "--all-mine", "--result", "done"]) == 0
+    assert "RELEASED" in capsys.readouterr().out, "could not release its own claim"
+
+
+def test_an_at_prefixed_name_already_on_disk_heals(repo, monkeypatch, capsys):
+    """The log is append-only, so events written before the writer refused "@"
+    are still there. Both spellings must fold to one agent or that agent stays
+    locked out forever — folding on READ is the only repair the format allows."""
+    from datetime import datetime, timezone
+
+    from comms_graph import log as clog
+
+    log_file = clog.log_path(repo)
+    clog.append(log_file, clog.Event(
+        ts=datetime.now(timezone.utc), id=clog.new_id(), actor="@carol",
+        type=clog.TYPE_CLAIM, scope=["src/b.py"], data={"intent": "written the old way"},
+    ))
+    monkeypatch.setenv("COMMS_ACTOR", "carol")
+    assert cli.main(["check", "src/b.py"]) == 0, "still locked out of its own claim"
+    cli.main(["board"])
+    assert "@@" not in capsys.readouterr().out
