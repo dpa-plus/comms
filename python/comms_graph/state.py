@@ -147,7 +147,6 @@ class Finding:
     actor: str
     category: str = ""
     summary: str = ""
-    priority: bool = False
     refs: list[Ref] = field(default_factory=list)
     session_id: str = ""
     session_name: str = ""
@@ -159,7 +158,6 @@ class Note:
     ts: datetime
     actor: str
     body: str = ""
-    priority: bool = False
     session_id: str = ""
     session_name: str = ""
 
@@ -647,7 +645,6 @@ def fold(events: Iterable[Any]) -> State:
                     actor=ev.actor,
                     category=_string_of(ev.data, "category"),
                     summary=_string_of(ev.data, "summary"),
-                    priority=_bool_of(ev.data, "priority"),
                     refs=_parse_refs(ev.data),
                     session_id=session_id,
                     session_name=_string_of(ev.data, "comms_session_name"),
@@ -661,7 +658,6 @@ def fold(events: Iterable[Any]) -> State:
                     ts=ev.ts,
                     actor=ev.actor,
                     body=_string_of(ev.data, "body"),
-                    priority=_bool_of(ev.data, "priority"),
                     session_id=session_id,
                     session_name=_string_of(ev.data, "comms_session_name"),
                 )

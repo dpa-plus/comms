@@ -1,4 +1,4 @@
-"""``comms-graph`` — the surface an agent actually types.
+"""``graphify comms`` — the surface an agent actually types.
 
 This module is the discoverability half of comms. The always-on instruction
 block (``graphify/always_on/*.md``) tells an agent to claim before editing; this
@@ -1689,7 +1689,21 @@ def _task_review(argv: list[str]) -> int:
         print("  Recorded as signed off by its own author, not as a review. That is")
         print("  permanent and your name is on it.")
     elif passed:
-        print(f"VERIFIED {slug} by @{actor} (work by @{t.did})")
+        # Say what the check COUNTED AS, to the person who just made it. The
+        # fold decides this from the two hellos' vendors, and until now it was
+        # only visible later, in `brief`, to somebody else. A verifier who
+        # learns their review recorded as same-family can go and find a
+        # genuinely different agent; one who never sees it cannot.
+        landed = _read_state(log_file).tasks.get(slug)
+        indep = getattr(landed, "independence", "") if landed else ""
+        print(f"VERIFIED {slug} by @{actor} (work by @{t.did})"
+              + (f" — {indep}" if indep else ""))
+        if indep == "same-family":
+            print("  Same model family as the author, so it shares their blind spots.")
+            print("  A different family checking this would be worth more.")
+        elif indep == "unknown":
+            print("  Recorded as unknown: no vendor on one of the two hellos, so")
+            print("  comms cannot tell whether this was an independent check.")
         print("  Anything waiting on it is now unblocked.")
     else:
         print(f"REJECTED {slug} by @{actor} (work by @{t.did})")
@@ -2059,7 +2073,7 @@ def _cmd_plan(argv: list[str]) -> int:
 TASK_USAGE = """Usage: comms-graph task <command>
 
   add <id> --as <actor> [--title "..."] [--size S|M|L]
-                        [--check <name>]... [--ref "tracker:PROJ-1234"]
+                        [--check <name>]... [--ref "omni:AUF-2291"]
   edge <from> <to> --as <actor> [--kind interface|artifact|sequence]
                                 [--provides "..."]      <to> comes AFTER <from>
   done <id> --as <actor> [--check name=pass]... [--note "..."]
@@ -2134,7 +2148,7 @@ def _cmd_board(argv: list[str]) -> int:
 
 
 def main(argv: list[str]) -> int:
-    """``argv`` is everything after ``comms-graph``."""
+    """``argv`` is everything after ``graphify comms``."""
     sub = argv[0] if argv else ""
     rest = argv[1:]
     if sub in ("", "-h", "--help", "help"):

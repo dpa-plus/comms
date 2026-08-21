@@ -303,7 +303,6 @@ def _snapshot(root: Path, log_file: Path) -> dict:
         "findings": [
             {"actor": f.actor, "category": getattr(f, "category", ""),
              "body": getattr(f, "summary", ""),
-             "priority": bool(getattr(f, "priority", False)),
              # kind AND value: a bare "src/auth.ts" and a bare "#321" are both
              # just strings, and which one it is is the useful half.
              "refs": [f"{getattr(r, 'kind', '')}:{getattr(r, 'value', '')}".strip(":")
@@ -313,7 +312,6 @@ def _snapshot(root: Path, log_file: Path) -> dict:
         ],
         "notes": [
             {"actor": n.actor, "body": getattr(n, "body", ""),
-             "priority": bool(getattr(n, "priority", False)),
              "ts": n.ts.isoformat().replace("+00:00", "Z")}
             for n in list(getattr(st, "notes", []) or [])[-12:][::-1]
         ],
