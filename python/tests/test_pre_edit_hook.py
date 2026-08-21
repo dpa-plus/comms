@@ -221,10 +221,24 @@ def test_either_unicode_spelling_of_one_filename_is_blocked(tmp_path, monkeypatc
     macOS stores filenames decomposed (NFD) while a claim is usually typed
     composed (NFC). They are different strings for one file, so comparing them
     raw let a second agent through.
+
+    "For one file" is the load-bearing half, and it is a property of the
+    FILESYSTEM, not of Unicode. APFS normalises, so both spellings open the same
+    inode and both must be blocked. ext4 does not: there the two spellings are
+    two different files, and blocking the second would refuse an edit to a file
+    nobody has claimed. So this asks the filesystem rather than assuming, the
+    same way the case-folding test above does — that check existed and this one
+    did not, which is why this passed on macOS and failed on Linux from the
+    first run CI ever gave it.
     """
     import unicodedata
     repo = _claimed_repo(tmp_path, monkeypatch)
     name = "src/" + unicodedata.normalize(form, "café.py")
+    if not (repo / name).exists():
+        pytest.skip(
+            "normalisation-sensitive filesystem: the two spellings are two "
+            "files here, so there is no bypass to block"
+        )
     code, out = _run(repo, ["check", "--stdin-json"],
                      stdin_text=_payload(repo, name, session="other"))
     assert code == 2, f"the {form} spelling must be blocked: {out}"
