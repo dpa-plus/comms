@@ -616,7 +616,12 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
   font-size: 11px; color: var(--ink-4);
   padding: 1px 5px; border-radius: 3px; background: var(--surface-2);
 }
-.card-bd { flex: 1 1 auto; min-height: 0; }
+/* overflow-y is not decoration. min-height:0 alone lets a flex child be
+   SHORTER than its content, and with the default overflow:visible the surplus
+   is painted outside the card rather than clipped: a 24-name roster spilled
+   246px past its own border and rendered on top of the two panels beneath it.
+   The card must scroll its own body or it is not a box. */
+.card-bd { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .card-ft {
   flex: none; border-top: 1px solid var(--line-hair);
   padding: var(--sp-1) var(--sp-2);
