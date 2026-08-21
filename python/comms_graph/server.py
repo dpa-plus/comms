@@ -195,7 +195,14 @@ def _snapshot(root: Path, log_file: Path) -> dict:
             "intent": _string(ev.data, "intent"),
             "reason": _string(ev.data, "reason"),
             "result": _string(ev.data, "result"),
-            "body": _string(ev.data, "body"),
+            # A note's text is `body`; a FINDING's is `summary` — that is what
+            # `find` has always written (cli.py, and the Go build before it) and
+            # what the findings panel below already reads. The feed looked only
+            # at `body`, so every finding in it rendered as an empty quote line:
+            # 1532 of them in the real store, the whole reason findings exist,
+            # silently blank. Both spellings are read here, and neither writer
+            # has to change.
+            "body": _string(ev.data, "body") or _string(ev.data, "summary"),
             "category": _string(ev.data, "category"),
             "steals": _string(ev.data, "steals"),
             # What the doer SAID ran, on the event that said it. The task
@@ -1136,7 +1143,7 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 
 /* this repo */
 .sroot { padding: var(--sp-2) var(--sp-2) var(--sp-1); color: var(--ink-3); font-size: 11px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .stats { display: flex; padding: 0 var(--sp-2) var(--sp-1); gap: var(--sp-1); }
 .scell { flex: 1 1 0; min-width: 0; }
 .sn { font-size: 15px; color: var(--ink); }
@@ -1545,7 +1552,15 @@ function renderTasks() {
 
 function renderSession() {
   var c = D.counts || {};
-  var h = '<div class="sroot mono" title="' + esc(D.root || "") + '">' + esc(D.root || "") + "</div>";
+  // Truncated HERE rather than by CSS. The obvious trick -- direction:rtl
+  // plus text-overflow -- clips at the correct end, but bidi then reorders
+  // the neutral characters at the edges: a leading "/" is placed at the far
+  // right, so "/Users/me/Projects/comms" displayed as ".../Projects/comms/",
+  // a path that does not exist. A wrong path is worse than a long one.
+  var root = D.root || "";
+  var parts = root.split("/").filter(Boolean);
+  var shortRoot = parts.length > 2 ? "\u2026/" + parts.slice(-2).join("/") : root;
+  var h = '<div class="sroot mono" title="' + esc(root) + '">' + esc(shortRoot) + "</div>";
   h += '<div class="stats">';
   [["events", (D.feed || []).length], ["claims", c.claims || 0],
    ["findings", (D.findings || []).length], ["notes", (D.notes || []).length]].forEach(function (kv) {
