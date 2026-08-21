@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import html
 import json
+import os
 import threading
 import time
 from datetime import datetime, timezone
@@ -32,6 +33,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from . import lock as _lock
 from . import log as _log
 from . import state as _state
 from . import task as _task
@@ -1130,6 +1132,8 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
   font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase;
   color: var(--ink-4); padding: var(--sp-2) var(--sp-1) var(--sp-h); }
 .pmore { color: var(--ink-4); font-size: 11.5px; padding: var(--sp-h) var(--sp-1) var(--sp-1); }
+.pmore.rtoggle { cursor: pointer; padding-left: var(--sp-2); }
+.pmore.rtoggle:hover { color: var(--accent); }
 .prow { display: flex; align-items: center; gap: var(--sp-1); text-decoration: none;
   padding: 5px var(--sp-1); border-radius: 6px; color: var(--ink-2); }
 .prow:hover { background: var(--surface-2); color: var(--ink); }
@@ -1165,6 +1169,15 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 .hintent { color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .htask { color: var(--ink-4); flex: none; }
 .hid { color: var(--ink-4); font-size: 10.5px; flex: none; opacity: .75; }
+/* Visible without hovering. Hover-to-reveal was the first version and it fails
+   the actual complaint — "I don't see where I can release their claims" — since
+   an affordance you have to find by accident is one you do not know exists.
+   Understated instead of hidden: quiet until you look at it, red when you mean
+   it. */
+.hrow .rel { flex: none; font-size: 10.5px; padding: 0 6px; color: var(--ink-4);
+  border-color: var(--line-hair); transition: color .12s, border-color .12s; }
+.hrow:hover .rel { color: var(--ink-3); border-color: var(--line-2); }
+.hrow .rel:hover { color: var(--red); border-color: var(--red-line); background: var(--red-wash); }
 
 /* stream buckets */
 .bhd { display: flex; align-items: center; gap: var(--sp-1);
@@ -1422,11 +1435,56 @@ function renderNow() {
       h += '<span class="grow"></span>';
       if (c.quiet) { h += '<span class="tag amber">quiet ' + ago(c.idle_seconds) + "</span>"; }
       h += '<span class="hid mono" title="claim id — the handle for release --force">' + esc(c.id) + "</span>";
+      h += '<button class="ghost rel" data-id="' + esc(c.id) + '" data-scope="' +
+           esc(c.scope) + '" data-actor="' + esc(c.actor) + '">Release</button>';
       h += "</div>";
     });
   }
   h += "</div>";
   el("nowBand").innerHTML = h;
+  Array.prototype.forEach.call(el("nowBand").querySelectorAll(".rel"), function (b) {
+    b.onclick = function () { releaseClaim(b); };
+  });
+}
+
+/* Freeing somebody else's ground, from the board.
+
+   It asks for a reason and does not proceed without one. That is not ceremony:
+   the release is appended to the log under the operator's name and stays there,
+   and "who freed this and why" is the only question anybody asks afterwards.
+   The prompt is also the last moment to reconsider — the holder may simply be
+   thinking. */
+function releaseClaim(btn) {
+  var id = btn.getAttribute("data-id");
+  var who = btn.getAttribute("data-actor");
+  var scope = btn.getAttribute("data-scope");
+  var reason = window.prompt(
+    "Free " + scope + " from @" + who + "?" +
+    "\\n\\n" +
+    "This is recorded in the log under your name, permanently. Say why:", "");
+  if (reason === null) { return; }
+  reason = reason.trim();
+  if (!reason) { alert("A reason is required — it is what the log will show."); return; }
+  btn.disabled = true; btn.textContent = "…";
+  fetch("/api/release", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({id: id, reason: reason})
+  }).then(function (r) { return r.json().then(function (b) { return {ok: r.ok, body: b}; }); })
+    .then(function (res) {
+      if (!res.ok) {
+        alert("Not released: " + (res.body.error || "unknown error"));
+        btn.disabled = false; btn.textContent = "Release";
+        return;
+      }
+      // The watcher notices the append and pushes a new snapshot, so the row
+      // goes on its own. Nothing is patched by hand here — the board stays a
+      // view of the log rather than a thing that edits its own copy.
+      btn.textContent = "released";
+    })
+    .catch(function (e) {
+      alert("Not released: " + e);
+      btn.disabled = false; btn.textContent = "Release";
+    });
 }
 
 /* ---------- the stream ------------------------------------------------- */
@@ -1584,25 +1642,53 @@ function initials(name) {
   var s = String(name || "?").replace(/[^a-zA-Z0-9]+/g, " ").trim().split(" ");
   return ((s[0] || "?")[0] + (s.length > 1 ? s[1][0] : "")).toLowerCase();
 }
+var rosterAll = false;
+
 function renderRoster() {
   var r = D.roster || [];
-  el("rosterCount").textContent = r.length;
-  if (!r.length) { el("roster").innerHTML = '<div class="empty">Nobody has done anything here yet.</div>'; return; }
+  if (!r.length) {
+    el("rosterCount").textContent = 0;
+    el("roster").innerHTML = '<div class="empty">Nobody has done anything here yet.</div>';
+    return;
+  }
+  // WHO IS HERE, not everyone who has ever been. Agents take a fresh name each
+  // session — claude-karte, claude-kartenansicht, claude-karte-fachebenen are
+  // one person on three days — so the list only grows and the three who are
+  // actually working sit among twenty who are not. Measured on the real store:
+  // 24 names, 3 seen in the last hour, 16 older than a week.
+  //
+  // Anyone HOLDING a claim stays visible whatever their age. A stale claim is
+  // the one thing on this board that needs a human, and hiding its holder would
+  // hide the only name that can free it.
+  function idleOf(a) { return a.last_seen ? (Date.now() - Date.parse(a.last_seen)) / 1000 : 1e9; }
+  var here = r.filter(function (a) { return idleOf(a) < 3600 || a.holding; });
+  var rest = r.filter(function (a) { return here.indexOf(a) === -1; });
+  var shown = rosterAll ? here.concat(rest) : here;
+
+  el("rosterCount").textContent = here.length;
   var h = "";
-  r.slice(0, 24).forEach(function (a) {
-    var idle = a.last_seen ? (Date.now() - Date.parse(a.last_seen)) / 1000 : 1e9;
-    var silent = idle >= 3600;
+  if (!shown.length) {
+    h += '<div class="held-empty">Nobody has been active in the last hour.</div>';
+  }
+  shown.forEach(function (a) {
+    var silent = idleOf(a) >= 3600;
     h += '<div class="rrow">';
     h += '<span class="av">' + esc(initials(a.actor)) + "</span>";
     h += '<span class="rname">@' + esc(a.actor) + "</span>";
     if (!a.identified) { h += '<span class="tag">unidentified</span>'; }
-    if (a.holding) { h += '<span class="tag">holding ' + a.holding + "</span>"; }
+    if (a.holding) { h += '<span class="tag amber">holding ' + a.holding + "</span>"; }
     h += '<span class="grow"></span>';
     h += '<span class="rage mono' + (silent ? " amber" : "") + '">' + esc(agoIso(a.last_seen)) + "</span>";
     h += "</div>";
   });
-  if (r.length > 24) { h += '<div class="pmore">and ' + (r.length - 24) + " more</div>"; }
+  if (rest.length) {
+    h += '<div class="pmore rtoggle">' + (rosterAll
+          ? "show only who is here"
+          : rest.length + " more from earlier days") + "</div>";
+  }
   el("roster").innerHTML = h;
+  var t = el("roster").querySelector(".rtoggle");
+  if (t) { t.onclick = function () { rosterAll = !rosterAll; renderRoster(); }; }
 }
 
 /* ---------- work -------------------------------------------------------- */
@@ -1911,6 +1997,23 @@ class _Handler(BaseHTTPRequestHandler):
             # The reader navigated away mid-response. Not an error worth noise.
             pass
 
+    def do_POST(self) -> None:  # noqa: N802
+        """The only write this server does. Everything else is GET."""
+        path = self.path.split("?", 1)[0]
+        board = self.server.board  # type: ignore[attr-defined]
+        if path != "/api/release":
+            self._send(b'{"error":"not found"}', "application/json", 404)
+            return
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+            payload = json.loads(self.rfile.read(n) or b"{}")
+        except (ValueError, json.JSONDecodeError):
+            self._send(b'{"error":"bad request body"}', "application/json", 400)
+            return
+        code, body = board.release(str(payload.get("id") or ""),
+                                   str(payload.get("reason") or ""))
+        self._send(json.dumps(body).encode("utf-8"), "application/json", code)
+
     def do_GET(self) -> None:  # noqa: N802
         path = self.path.split("?", 1)[0]
         board = self.server.board  # type: ignore[attr-defined]
@@ -1994,6 +2097,62 @@ class Board:
             except OSError:
                 parts.append("absent")
         return "|".join(parts)
+
+    def release(self, claim_id: str, reason: str) -> tuple[int, dict]:
+        """Free somebody else's claim, from the board, under the operator's name.
+
+        THE BOARD IS OTHERWISE READ-ONLY AND THAT IS DELIBERATE — the log is
+        written under a lock through a fold that enforces the rules, and a
+        dashboard that wrote around either would be a second writer with none of
+        those guarantees. So this does not write around them: it takes the same
+        per-repo lock, re-reads and re-folds inside it, and appends the same
+        release event the CLI's `release --force` appends. The only thing that is
+        new here is the button.
+
+        Two refusals it keeps from the CLI, for the same reasons:
+
+        * An exact claim id, never a path. A path can match more ground than the
+          person meant, and this verb exists precisely for making a judgement
+          about somebody else's work — that judgement should be about one named
+          thing.
+        * A reason, always. It goes in the log under the operator's name,
+          permanently, and "who freed this and why" is the only question anybody
+          asks afterwards.
+
+        It refuses entirely without an actor on the server process. A release
+        with no author is worse than no release: the claim is gone and the log
+        cannot say who did it.
+        """
+        actor = os.environ.get("COMMS_ACTOR", "").strip().lstrip("@").strip()
+        if not actor:
+            return 403, {"error": "this board has no actor, so a release would have "
+                                  "no author. Start it with COMMS_ACTOR set."}
+        claim_id = (claim_id or "").strip()
+        if not claim_id:
+            return 400, {"error": "release needs the exact claim id"}
+        reason = (reason or "").strip()
+        if not reason:
+            return 400, {"error": "release needs a reason; it is recorded under "
+                                  "your name permanently"}
+
+        # Same store, same lock file the CLI takes: store dir + .lock.
+        lock_file = _log.store_dir(self.root) / ".lock"
+        with _lock.file_lock(lock_file):
+            st = _state.fold(_log.read(self.log_file))
+            held = st.claim_by_id(claim_id)
+            if held is None:
+                return 404, {"error": f"no active claim with id {claim_id}"}
+            if held.actor == actor:
+                return 400, {"error": "that is your own claim; release it from the CLI"}
+            ev = _log.Event(
+                ts=datetime.now(timezone.utc), id=_log.new_id(), actor=actor,
+                type=_log.TYPE_RELEASE, scope=None,
+                data={"refs": [held.id], "result": reason,
+                      "freed_from": held.actor, "via": "board"},
+            )
+            _log.append(self.log_file, ev)
+        return 200, {"ok": True, "released": held.id, "was": held.actor,
+                     "scope": str(held.scope)}
 
     def _graph_path(self) -> Path:
         if self.graph_file:

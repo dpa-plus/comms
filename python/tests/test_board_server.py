@@ -460,3 +460,94 @@ def test_a_findings_text_reaches_the_feed(board):
 def _now():
     from datetime import datetime, timezone
     return datetime.now(timezone.utc)
+
+
+def _claim_as(repo, log_file, actor, scope, intent="held"):
+    clog.append(log_file, clog.Event(
+        ts=_now(), id=clog.new_id(), actor=actor, type=clog.TYPE_CLAIM,
+        scope=[scope], data={"intent": intent},
+    ))
+    return clog.read(log_file)[-1].id
+
+
+def test_the_board_can_free_a_claim_and_records_who_did_it(board, monkeypatch):
+    """The one write this server does.
+
+    The board is otherwise read-only ON PURPOSE — the log is written under a lock
+    through a fold that enforces the rules, and a dashboard writing around either
+    would be a second writer with none of those guarantees. So this does not
+    write around them: same lock, re-read and re-fold inside it, same release
+    event the CLI's `release --force` appends.
+    """
+    import urllib.request
+
+    repo, log_file, base = board
+    monkeypatch.setenv("COMMS_ACTOR", "human-eli")
+    cid = _claim_as(repo, log_file, "alice", "src/a.py")
+
+    req = urllib.request.Request(
+        base + "/api/release", method="POST",
+        headers={"Content-Type": "application/json"},
+        data=json.dumps({"id": cid, "reason": "session ended"}).encode())
+    with urllib.request.urlopen(req, timeout=20) as r:
+        body = json.loads(r.read())
+    assert body["ok"] and body["was"] == "alice"
+
+    from comms_graph import state as cstate
+    st = cstate.fold(clog.read(log_file))
+    assert cid not in {c.id for c in st.claims.values()}, "the claim is still held"
+    rel = [e for e in clog.read(log_file) if e.type == clog.TYPE_RELEASE][-1]
+    assert rel.actor == "human-eli", "the release has the wrong author"
+    assert rel.data.get("result") == "session ended"
+
+
+def test_the_board_refuses_a_release_with_no_reason(board, monkeypatch):
+    """IF THIS FAILS: ground is freed and the log cannot say why.
+
+    "Who freed this and why" is the only question anybody asks afterwards, and
+    the answer has to be in the event because there is nowhere else to put it.
+    """
+    import urllib.error
+    import urllib.request
+
+    repo, log_file, base = board
+    monkeypatch.setenv("COMMS_ACTOR", "human-eli")
+    cid = _claim_as(repo, log_file, "alice", "src/a.py")
+    req = urllib.request.Request(
+        base + "/api/release", method="POST",
+        headers={"Content-Type": "application/json"},
+        data=json.dumps({"id": cid, "reason": "   "}).encode())
+    with pytest.raises(urllib.error.HTTPError) as e:
+        urllib.request.urlopen(req, timeout=20)
+    assert e.value.code == 400
+
+
+def test_a_board_with_no_actor_cannot_release_at_all(board, monkeypatch):
+    """A release with no author is worse than no release: the ground is gone and
+    the log cannot say who took it."""
+    import urllib.error
+    import urllib.request
+
+    repo, log_file, base = board
+    monkeypatch.delenv("COMMS_ACTOR", raising=False)
+    cid = _claim_as(repo, log_file, "alice", "src/a.py")
+    req = urllib.request.Request(
+        base + "/api/release", method="POST",
+        headers={"Content-Type": "application/json"},
+        data=json.dumps({"id": cid, "reason": "why not"}).encode())
+    with pytest.raises(urllib.error.HTTPError) as e:
+        urllib.request.urlopen(req, timeout=20)
+    assert e.value.code == 403
+
+
+def test_the_board_serves_no_other_write(board):
+    """One POST route and no others. A dashboard that grows write endpoints
+    quietly becomes the second writer this design exists to avoid."""
+    import urllib.error
+    import urllib.request
+
+    repo, log_file, base = board
+    req = urllib.request.Request(base + "/api/anything", method="POST", data=b"{}")
+    with pytest.raises(urllib.error.HTTPError) as e:
+        urllib.request.urlopen(req, timeout=20)
+    assert e.value.code == 404
