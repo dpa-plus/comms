@@ -210,3 +210,116 @@ def test_a_passing_staged_check_says_which_kind_of_pass_it_was(repo, monkeypatch
     assert cli.main(["check", "--staged"]) == 0
     out = capsys.readouterr().out
     assert "checked" in out and "none held by anybody else" in out
+
+
+def test_the_recovery_command_never_touches_the_working_tree(repo, monkeypatch, capsys):
+    """IF THIS FAILS: the guard destroys the work it exists to protect.
+
+    The blocked file is, by definition, one somebody else is in the middle of,
+    so this line is handed to a person and run against a peer's live work.
+
+    `git restore --staged` touches the index only. The neighbouring spellings do
+    not: plain `git restore <path>` rewrites the WORKING TREE and does not
+    unstage at all, and `git restore --source=HEAD` overwrites the file outright.
+    One dropped word turns a recovery into either a no-op that looks like a fix
+    or a silent loss of somebody's uncommitted edit, so the property is pinned by
+    running the emitted command rather than by reading it.
+
+    Verified by running the emitted command and asserting the content survives,
+    not by reading it.
+    """
+    git = shutil.which("git")
+    subprocess.run([git, "add", "-A"], cwd=repo, check=True)
+    subprocess.run([git, "commit", "-qm", "base"], cwd=repo, check=True)
+
+    _as(monkeypatch, "alice")
+    cli.main(["claim", "src/a.ts", "--intent", "alice is mid-edit"])
+    capsys.readouterr()
+    (repo / "src" / "a.ts").write_text("alice work in progress\n")
+    _stage(repo, "src/a.ts")
+
+    _as(monkeypatch, "bob")
+    assert cli.main(["check", "--staged"]) == 1
+    line = next(l.strip() for l in capsys.readouterr().err.splitlines()
+                if "git restore" in l)
+    subprocess.run(line, cwd=repo, shell=True, check=True, capture_output=True)
+
+    assert (repo / "src" / "a.ts").read_text() == "alice work in progress\n", (
+        "the recovery command discarded somebody's uncommitted work"
+    )
+    staged = subprocess.run([git, "diff", "--cached", "--name-only"],
+                            cwd=repo, capture_output=True, text=True).stdout.split()
+    assert not staged, "it did not actually unstage"
+
+
+def test_staged_does_not_block_you_with_your_own_claims(repo, monkeypatch, capsys):
+    """IF THIS FAILS: the guard punishes the agent that did the right thing.
+
+    A pre-commit hook runs with no COMMS_ACTOR and cannot know which agent is
+    committing, so `--as` is not available to it. Without resolving identity the
+    caller is a stranger to its own claims: an agent that claimed its files,
+    wrote them and staged them was told "3 staged file(s) are claimed by somebody
+    else" and handed a command to unstage its own work.
+
+    The incentive that creates is exactly backwards — claim nothing and commit
+    freely, claim properly and you cannot commit at all — so this is worse than
+    no guard.
+    """
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-alice")
+    _as(monkeypatch, "alice")
+    cli.main(["hello", "--label", "Alice"])
+    cli.main(["claim", "src/a.ts", "--intent", "alice's own"])
+    capsys.readouterr()
+    _stage(repo, "src/a.ts")
+
+    monkeypatch.delenv("COMMS_ACTOR")          # what a git hook actually sees
+    assert cli.main(["check", "--staged"]) == 0, "blocked by its own claim"
+    assert "none held by anybody else" in capsys.readouterr().out
+
+
+def test_staged_still_blocks_a_peer_when_identity_comes_from_the_session(repo, monkeypatch, capsys):
+    """The fix must not turn the guard off: resolving identity has to keep
+    somebody else's claim blocking."""
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-alice")
+    _as(monkeypatch, "alice")
+    cli.main(["hello", "--label", "Alice"])
+    cli.main(["claim", "src/a.ts", "--intent", "alice's own"])
+    capsys.readouterr()
+
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-bob")
+    _as(monkeypatch, "bob")
+    cli.main(["hello", "--label", "Bob"])
+    capsys.readouterr()
+    _stage(repo, "src/a.ts")
+    monkeypatch.delenv("COMMS_ACTOR")
+    assert cli.main(["check", "--staged"]) == 1
+    assert "alice" in capsys.readouterr().err
+
+
+def test_staged_says_so_when_it_cannot_tell_who_is_committing(repo, monkeypatch, capsys):
+    """IF THIS FAILS: a guess is stated as a fact, and the guess is wrong for the
+    agent that claimed properly.
+
+    With no actor and no session there is no way to know whose claims those are.
+    "Claimed by somebody else" would be an assertion we cannot support, so this
+    reports the identity problem and uses 2 — this command's code for "could not
+    find out" — rather than 1, which means conflict.
+    """
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-alice")
+    _as(monkeypatch, "alice")
+    cli.main(["hello", "--label", "Alice"])
+    cli.main(["claim", "src/a.ts", "--intent", "alice's own"])
+    capsys.readouterr()
+    _stage(repo, "src/a.ts")
+
+    monkeypatch.delenv("COMMS_ACTOR")
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    assert cli.main(["check", "--staged"]) == 2
+    err = capsys.readouterr().err
+    assert "cannot establish who is committing" in err
+    # It may SAY it cannot tell yours from somebody else's. What it must not do
+    # is assert the conflict as fact, which is the BLOCKED wording.
+    assert "are claimed by somebody else" not in err, (
+        "asserted a conflict it could not establish"
+    )
+    assert "BLOCKED" not in err
