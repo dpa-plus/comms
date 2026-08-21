@@ -522,11 +522,9 @@ def test_every_comms_data_file_is_declared_for_the_wheel():
 
     setuptools_cfg = cfg["tool"]["setuptools"]
     declared = setuptools_cfg.get("packages")
-    if isinstance(declared, dict):
-        covered = any(fnmatch.fnmatch("comms_graph", g)
-                      for g in declared.get("find", {}).get("include", []))
-    else:
-        covered = "comms_graph" in (declared or [])
+    covered = (any(fnmatch.fnmatch("comms_graph", g)
+                   for g in declared.get("find", {}).get("include", []))
+               if isinstance(declared, dict) else "comms_graph" in (declared or []))
     assert covered, f"comms_graph is not covered by packages (declared: {declared})"
     globs = setuptools_cfg.get("package-data", {}).get("comms_graph", [])
 

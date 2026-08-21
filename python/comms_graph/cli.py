@@ -1,4 +1,4 @@
-"""``graphify comms`` — the surface an agent actually types.
+"""``comms-graph`` — the surface an agent actually types.
 
 This module is the discoverability half of comms. The always-on instruction
 block (``graphify/always_on/*.md``) tells an agent to claim before editing; this
@@ -72,6 +72,15 @@ USAGE = """Usage: comms-graph <command>
   brief <task-id>                               what it is, and what came before
   find <category> "..." [--ref kind:value]      something worth keeping
   note "..."                                    a short FYI
+  doc [--list | <slug> [--edit]]                the repo's own wiki
+  lesson [--list | <slug> [--edit]]             knowledge across every repo
+
+  session start|join|end|retire|lead ...        named coordination windows
+  status [--since 24h]                          who is here, what is held
+  log [--type ...] [--since ...]                the history, filtered
+  hello [--label "..."]                         announce yourself
+  mcp                                           serve these as MCP tools
+  version
   tasks [--out <file.html>]                     draw the task graph
   ui [--port 7878]                              live board: both graphs, live claims
 
@@ -280,6 +289,22 @@ def _read_state(log_file: Path) -> _state.State:
     except FileNotFoundError:
         events = []
     return _state.fold(events)
+
+
+def _tagged(st, actor: str, etype: str, scope: list[str] | None, data: dict) -> _log.Event:
+    """An event stamped with the actor's named session, if it is in one.
+
+    Every append goes through here rather than through `_event` directly. An
+    event that skips the stamp is invisible to its session: `session end` will
+    not release the claim, the archive's counts come up short, and a reader
+    asking what that window produced gets an answer that is quietly wrong. On
+    the real store 8,698 events carry the pair, so an untagged one is the
+    visible difference against the Go build.
+    """
+    from . import session as _session
+
+    _session.stamp(st, actor, data)
+    return _event(actor, etype, scope, data)
 
 
 def _event(actor: str, etype: str, scope: list[str] | None, data: dict) -> _log.Event:
@@ -625,7 +650,11 @@ def _hello_if_unknown(st, actor: str) -> "object | None":
         data["hostname"] = socket.gethostname()
     except Exception:
         pass
-    return _event(actor, _log.TYPE_HELLO, None, data)
+    # Stamped like any other event. Without this an automatic greeting wiped
+    # the actor's own session out of the fold: a hello replaces the session
+    # record, so an unstamped one silently removed the actor from the window it
+    # had just joined, and everything it wrote afterwards was invisible to it.
+    return _tagged(st, actor, _log.TYPE_HELLO, None, data)
 
 
 def _parse_scope_or_exit(raw: str) -> _scope.Scope:
@@ -815,7 +844,7 @@ def _cmd_claim(argv: list[str]) -> int:
         # that needed the session (independence, the session half of the
         # self-review gate) saw an actor with no hello on record yet.
         greeting = _hello_if_unknown(st, actor)
-        event = _event(actor, _log.TYPE_CLAIM, [str(scope)], claim_data)
+        event = _tagged(st, actor, _log.TYPE_CLAIM, [str(scope)], claim_data)
         # Re-claiming ground you already hold REPLACES your claim on it; it does
         # not add a second. Two rows for one file made the board's claim count
         # wrong, left it ambiguous which intent was current, and — since a claim
@@ -829,7 +858,7 @@ def _cmd_claim(argv: list[str]) -> int:
                       if c.actor == actor and str(c.scope) == str(scope)]
         batch = ([greeting] if greeting is not None else [])
         if superseded:
-            batch.append(_event(actor, _log.TYPE_RELEASE, None, {
+            batch.append(_tagged(st, actor, _log.TYPE_RELEASE, None, {
                 "refs": [c.id for c in superseded],
                 "result": "superseded by a new claim on the same ground",
             }))
@@ -1034,7 +1063,7 @@ def _cmd_release(argv: list[str]) -> int:
         data: dict = {"refs": [c.id for c in chosen]}
         if flags.get("result"):
             data["result"] = flags["result"]
-        _log.append(log_file, _event(actor, _log.TYPE_RELEASE, None, data))
+        _log.append(log_file, _tagged(st, actor, _log.TYPE_RELEASE, None, data))
 
     for claim in chosen:
         print(f"RELEASED {claim.scope}  (was @{actor}, id {claim.id})")
@@ -1397,8 +1426,9 @@ def _task_add(argv: list[str]) -> int:
         if broken:
             _err(f"error: the coordination lock is no longer exclusive: {broken}")
             return EXIT_ERROR
-        greeting = _hello_if_unknown(_read_state(log_file), actor)
-        events = [_event(actor, _log.TYPE_TASK, None, data)]
+        st = _read_state(log_file)
+        greeting = _hello_if_unknown(st, actor)
+        events = [_tagged(st, actor, _log.TYPE_TASK, None, data)]
         if greeting is not None:
             events.insert(0, greeting)
         _log.append_batch(log_file, events)
@@ -1471,7 +1501,7 @@ def _task_edge(argv: list[str]) -> int:
         data = {"from": from_, "to": to, "kind": effective}
         if flags.get("provides"):
             data["provides"] = flags["provides"]
-        _log.append(log_file, _event(actor, _log.TYPE_TASK_EDGE, None, data))
+        _log.append(log_file, _tagged(st, actor, _log.TYPE_TASK_EDGE, None, data))
     kind = effective
     print(f"EDGE {from_} -> {to}  ({kind})")
     if flags.get("provides"):
@@ -1519,7 +1549,7 @@ def _task_done(argv: list[str]) -> int:
             # without a record the gate fired in complete silence — and a rule
             # that leaves no trace when it works looks like a rule nobody wrote.
             try:
-                _log.append(log_file, _event(actor, _log.TYPE_BLOCKED, None, {
+                _log.append(log_file, _tagged(st, actor, _log.TYPE_BLOCKED, None, {
                     "task": slug, "attempted": "done",
                     "reason": "checks did not pass: " + ", ".join(missing),
                 }))
@@ -1536,7 +1566,7 @@ def _task_done(argv: list[str]) -> int:
         if notes:
             data["notes"] = notes
         greeting = _hello_if_unknown(st, actor)
-        events = [_event(actor, _log.TYPE_TASK_STATE, None, data)]
+        events = [_tagged(st, actor, _log.TYPE_TASK_STATE, None, data)]
         if greeting is not None:
             events.insert(0, greeting)
         _log.append_batch(log_file, events)
@@ -1597,7 +1627,7 @@ def _task_review(argv: list[str]) -> int:
         ):
             whom = author or t.did
             try:
-                _log.append(log_file, _event(actor, _log.TYPE_BLOCKED, None, {
+                _log.append(log_file, _tagged(st, actor, _log.TYPE_BLOCKED, None, {
                     "task": slug, "attempted": "verified" if passed else "rejected",
                     "holder": whom, "reason": "self-review",
                 }))
@@ -1663,7 +1693,7 @@ def _task_review(argv: list[str]) -> int:
         # has nothing to compare and falls back to the name alone — which is
         # exactly the hole a homoglyph walks through.
         greeting = _hello_if_unknown(st, actor)
-        events = [_event(actor, _log.TYPE_TASK_STATE, None, data)]
+        events = [_tagged(st, actor, _log.TYPE_TASK_STATE, None, data)]
         if greeting is not None:
             events.insert(0, greeting)
         _log.append_batch(log_file, events)
@@ -1772,7 +1802,7 @@ def _cmd_find(argv: list[str]) -> int:
     with _lock.file_lock(lock_file):
         st = _read_state(log_file)
         greeting = _hello_if_unknown(st, actor)
-        event = _event(actor, _log.TYPE_FINDING, None, data)
+        event = _tagged(st, actor, _log.TYPE_FINDING, None, data)
         if greeting is None:
             _log.append(log_file, event)
         else:
@@ -1800,7 +1830,7 @@ def _cmd_note(argv: list[str]) -> int:
     with _lock.file_lock(lock_file):
         st = _read_state(log_file)
         greeting = _hello_if_unknown(st, actor)
-        event = _event(actor, _log.TYPE_NOTE, None, {"body": body})
+        event = _tagged(st, actor, _log.TYPE_NOTE, None, {"body": body})
         if greeting is None:
             _log.append(log_file, event)
         else:
@@ -1976,7 +2006,8 @@ def _cmd_plan(argv: list[str]) -> int:
              f"{type(raw).__name__}")
         _err('  Expected {"tasks": [...], "edges": [...]}.')
         return EXIT_USAGE
-    _plan_greeting_holder = [_hello_if_unknown(_read_state(log_file), actor)]
+    _plan_state = _read_state(log_file)
+    _plan_greeting_holder = [_hello_if_unknown(_plan_state, actor)]
     tasks = raw.get("tasks") or []
     edges = raw.get("edges") or []
     if not isinstance(tasks, list) or not isinstance(edges, list):
@@ -2017,7 +2048,7 @@ def _cmd_plan(argv: list[str]) -> int:
                      f"{type(checks).__name__}; it must be a list")
                 return EXIT_USAGE
             data["checks"] = [str(c) for c in checks]
-        events.append(_event(actor, _log.TYPE_TASK, None, data))
+        events.append(_tagged(_plan_state, actor, _log.TYPE_TASK, None, data))
 
     pending: list = []
     for item in edges:
@@ -2045,7 +2076,7 @@ def _cmd_plan(argv: list[str]) -> int:
         data = {"from": from_, "to": to, "kind": kind}
         if item.get("provides"):
             data["provides"] = str(item["provides"])
-        events.append(_event(actor, _log.TYPE_TASK_EDGE, None, data))
+        events.append(_tagged(_plan_state, actor, _log.TYPE_TASK_EDGE, None, data))
 
     if not events:
         print("nothing to do: the plan declares no tasks and no edges")
@@ -2114,7 +2145,7 @@ def _release_somebody_elses(st, log_file, actor: str, target: str, reason: str) 
     if held.actor == actor:
         _err(f"error: {target} is your own claim — release it without --force")
         return EXIT_USAGE
-    _log.append(log_file, _event(actor, _log.TYPE_RELEASE, None, {
+    _log.append(log_file, _tagged(st, actor, _log.TYPE_RELEASE, None, {
         "refs": [held.id],
         "result": reason,
         "original_actor": held.actor,
@@ -2152,7 +2183,7 @@ def _cmd_board(argv: list[str]) -> int:
 
 
 def main(argv: list[str]) -> int:
-    """``argv`` is everything after ``graphify comms``."""
+    """``argv`` is everything after ``comms-graph``."""
     sub = argv[0] if argv else ""
     rest = argv[1:]
     if sub in ("", "-h", "--help", "help"):
@@ -2192,6 +2223,33 @@ def main(argv: list[str]) -> int:
             return _cmd_find(rest)
         if sub == "note":
             return _cmd_note(rest)
+        # Ported from the Go build, each in its own module. Imported lazily so
+        # a broken or missing one cannot stop `claim` and `check` from working
+        # — those two are on the pre-edit path and must survive anything.
+        if sub == "session":
+            from . import session as _session
+            return _session.main(rest)
+        if sub == "doc":
+            from . import doc as _doc
+            return _doc.main(rest)
+        if sub == "status":
+            from . import status as _status
+            return _status.status_main(rest)
+        if sub == "log":
+            from . import status as _status
+            return _status.log_main(rest)
+        if sub == "hello":
+            from . import hello as _hello
+            return _hello.cmd_hello(rest)
+        if sub == "version":
+            from . import hello as _hello
+            return _hello.cmd_version(rest)
+        if sub == "lesson":
+            from . import lesson as _lesson
+            return _lesson.main(rest)
+        if sub == "mcp":
+            from . import mcp as _mcp
+            return _mcp.main(rest)
     except _lock.LockError as exc:
         _err(f"error: could not take the comms lock: {exc}")
         return EXIT_USAGE
