@@ -334,33 +334,91 @@ def test_the_page_draws_every_array_the_snapshot_carries(board):
     """
     repo, log_file, base = board
     _, body = _get(base + "/")
-    for name in ("alerts", "claims", "roster", "tasks", "feed", "findings", "notes"):
-        assert "d." + name in body, f"the page never reads d.{name}"
-    for token in ("outstanding", "verification", "check_results", "quiet", "identified", "x.id"):
+    for name in ("alerts", "claims", "roster", "tasks", "feed", "findings", "notes", "projects"):
+        assert "D." + name in body or "d." + name in body, f"the page never reads {name}"
+    # the reported checks reach the page on the EVENT that reported them
+    for token in ("outstanding", "quiet", "identified", "e.checks", "c.id", "band"):
         assert token in body, f"the page never reads {token}"
 
 
-def test_only_one_graph_shows_at_a_time_and_both_stay_mounted(board):
-    """IF THIS FAILS: the graphs are back to half a screen each.
+def test_the_graphs_cost_nothing_until_somebody_asks_for_them(board):
+    """IF THIS FAILS: every page load pays for two vis-network layouts.
 
-    Two stacked panes gave each about half a window, which is not enough for
-    either — a task graph shrinks to unreadable labels and a code map of a few
-    hundred nodes becomes a smudge. They answer different questions and nobody
-    asks both at once.
-
-    Both iframes must stay in the document: unmounting one, or display:none,
-    makes vis-network re-measure into a zero box on the way back, and
-    remounting throws away the pan and zoom the reader had set.
+    The board used to mount both graphs permanently, side by side, so each got
+    half a window and the activity — the one thing with content all day — got
+    whatever was left. Now the stream is the page and both graphs live behind
+    one overlay, loaded on first open.
     """
     repo, log_file, base = board
     _, body = _get(base + "/")
-    assert 'id="frame-tasks"' in body and 'id="frame-map"' in body
-    assert 'role="tablist"' in body, "no way to switch between them"
-    # exactly one hidden at first paint, and it is the code map
-    assert 'id="frame-map" hidden' in body, body[body.find("frames"):][:300]
-    assert 'id="frame-tasks" hidden' not in body
-    # hidden via visibility, so the box keeps its size
-    assert ".frame[hidden] { visibility: hidden" in body
-    assert "display: none" not in body.split(".frame[hidden]")[1][:120]
-    # and the choice survives a reload
-    assert "localStorage" in body and "comms.pane" in body
+    assert 'id="dagWrap"' in body
+    assert body.count('id="dagFrame"') == 1
+    frame = body[body.index('id="dagFrame"'):][:140]
+    assert "src=" not in frame, ("a graph loads on every page view: " + frame)
+    assert "/tasks.html" in body and "/map.html" in body
+    assert 'id="gTasks"' in body and 'id="gMap"' in body
+
+
+
+def test_an_agent_with_no_hello_is_not_declared_abandoned_while_it_works(board):
+    """IF THIS FAILS: the board tells you to take ground off a working agent.
+
+    A hello only exists when the host reports a session id, which in practice
+    means Claude Code. `quiet` was computed from hellos, so an agent on any
+    other harness went quiet an hour after taking ground no matter how hard it
+    was working — and the board contradicted itself on one screen: "last seen
+    10 seconds ago" in the roster beside "idle 3 hours" on the claim, with an
+    alert recommending the reader free it.
+    """
+    from comms_graph import server as cserver
+
+    repo, log_file, base = board
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    events = [
+        # amy runs under a harness that reports a session; zoe does not
+        _at(0, "hello", "amy", 200, {"agent_session": "sess-amy"}),
+        _at(0, "claim", "amy", 190, {"intent": "b"}, scope=["src/b.py"]),
+        _at(0, "claim", "zoe", 190, {"intent": "a"}, scope=["src/a.py"]),
+        # both are working RIGHT NOW
+        _at(0, "note", "amy", 0, {"body": "still going"}),
+        _at(0, "note", "zoe", 0, {"body": "still going, 40 files to go"}),
+    ]
+    events.sort(key=lambda e: e.ts)
+    with open(log_file, "wb") as fh:
+        for e in events:
+            fh.write(e.encode())
+
+    snap = cserver._snapshot(repo, log_file)
+    by_actor = {c["actor"]: c for c in snap["claims"]}
+    assert by_actor["amy"]["quiet"] is False
+    assert by_actor["zoe"]["quiet"] is False, (
+        "an agent that acted seconds ago was declared abandoned: " + repr(by_actor["zoe"])
+    )
+    assert "quiet" not in {a["kind"] for a in snap["alerts"]}, snap["alerts"]
+
+    # and the two surfaces cannot disagree: roster recency matches claim idle
+    roster = {r["actor"]: r for r in snap["roster"]}
+    assert roster["zoe"]["last_seen"], roster["zoe"]
+
+
+def test_the_working_now_band_is_actually_visible(board):
+    """IF THIS FAILS: the claims strip renders and measures zero pixels tall.
+
+    The card is a flex column whose body takes the remaining height, so a
+    sibling between the header and the body collapses unless it opts out. The
+    band had five rows of content in the DOM and no height on screen — the one
+    failure mode a markup assertion cannot catch, so this pins the CSS rule.
+    """
+    repo, log_file, base = board
+    _, body = _get(base + "/")
+    assert 'id="nowBand"' in body
+    assert "#nowBand { flex: none; }" in body, (
+        "nowBand has no flex-basis rule; it will collapse inside the card"
+    )
+    # and it must not reuse a class the inherited sheet already owns. `.held`
+    # there is a fade-in badge — absolute, opacity 0 — so the band rendered
+    # with height and no visible content until it was given its own name.
+    assert 'class="nowband"' in body, "the band lost its own class"
+    assert 'class="held"' not in body, (
+        "the band is using .held again, which the inherited sheet hides"
+    )

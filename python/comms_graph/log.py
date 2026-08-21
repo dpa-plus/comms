@@ -895,6 +895,74 @@ def log_path(repo_root: str | os.PathLike[str]) -> Path:
     return store_dir(repo_root) / LOG_FILENAME
 
 
+#: Written beside the log so a store can name the repo it belongs to. The Go
+#: build has always written this; the directory name is a hash and carries no
+#: name of its own.
+REPO_PATH_FILENAME = "repo-path.txt"
+
+
+def write_repo_path(store: Path, repo_root: str | os.PathLike[str]) -> None:
+    """Record which repo this store serves. Best effort, never fatal.
+
+    Failing to write a label must never stop a claim from being recorded —
+    coordination is the job, the label is a convenience for whoever reads the
+    board later.
+    """
+    try:
+        target = store / REPO_PATH_FILENAME
+        want = coordination_root(repo_root)
+        # Only write when it would change, so a busy repo does not rewrite the
+        # same bytes on every single command.
+        if target.exists() and target.read_text(encoding="utf-8").strip() == want:
+            return
+        target.write_text(want + "\n", encoding="utf-8")
+    except OSError:
+        pass
+
+
+def known_stores(data_home: Path | None = None) -> list[dict]:
+    """Every comms store on this machine, newest activity first.
+
+    A store is one repository's log. They are keyed by a hash of the repo path,
+    so the only way to name one is the label written beside it — a store with
+    no label is reported with an empty ``root`` rather than being hidden, since
+    an unnamed project that is busy is exactly the one somebody wants to find.
+
+    Reads only the filesystem: size and mtime, never the log itself. A board
+    lists every project on the machine and folding 188 logs to draw a sidebar
+    would cost seconds.
+    """
+    home = data_home or (user_data_home() / "comms")
+    out: list[dict] = []
+    try:
+        entries = sorted(home.iterdir())
+    except OSError:
+        return out
+    for d in entries:
+        log = d / LOG_FILENAME
+        try:
+            if not log.is_file():
+                continue
+            st = log.stat()
+        except OSError:
+            continue
+        root = ""
+        try:
+            root = (d / REPO_PATH_FILENAME).read_text(encoding="utf-8").strip()
+        except OSError:
+            pass
+        out.append({
+            "key": d.name,
+            "root": root,
+            "name": os.path.basename(root) if root else "",
+            "bytes": st.st_size,
+            "modified": st.st_mtime,
+            "exists": bool(root) and os.path.isdir(root),
+        })
+    out.sort(key=lambda s: s["modified"], reverse=True)
+    return out
+
+
 _EPHEMERAL_ROOTS = ("/tmp/", "/private/tmp/", "/var/folders/", "/private/var/folders/")
 
 

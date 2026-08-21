@@ -614,11 +614,9 @@ def test_the_hook_path_is_the_one_the_cli_dispatches():
     assert not re.search(r"^\s*from \. import commands", cli_src, re.M), \
         "cli.py must not import the superseded command layer"
 
-    # commands.py and tools.py were a complete, plausible, well-commented
-    # second implementation that nothing dispatched. They used to carry a
-    # SUPERSEDED banner so a reader would not mistake them for live code; the
-    # move to this repo deleted them outright, which is strictly better. Assert
-    # they stay gone — a reappearance means somebody restored the wrong file.
+    # commands.py and tools.py were a complete, plausible, well-commented second
+    # implementation that nothing dispatched. The move to this repo deleted them
+    # outright, which is strictly better than a banner. Assert they stay gone.
     for name in ("commands", "tools"):
         assert not (root / "comms_graph" / f"{name}.py").exists(), (
             f"{name}.py is back. It is a second implementation of this CLI that "

@@ -238,6 +238,12 @@ def _store(root: Path, *, create: bool = True) -> tuple[Path, Path]:
     if create:
         try:
             store.mkdir(parents=True, exist_ok=True)
+            # Leave the repo's name next to its log. The store is keyed by a
+            # hash of the path, so without this a store is a 12-hex directory
+            # and nothing on the machine can say which project it belongs to —
+            # the Go build writes it, this one did not, and a board listing
+            # every project on the machine would have shown ours as UNNAMED.
+            _log.write_repo_path(store, root)
         except OSError as exc:
             # A raw traceback here exited 1 — the code the usage text reserves
             # for "somebody else holds this". A wrapper trusting the exit code
