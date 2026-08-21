@@ -402,6 +402,15 @@ class Event:
         actor = raw.get("actor")
         if not isinstance(actor, str) or not actor:
             raise ValueError("event: missing actor")
+        # A leading "@" is display, never identity, and it is stripped on READ so
+        # that events already on disk heal. The log is append-only: events were
+        # written with "@name" before the writer refused it, and leaving them
+        # alone would leave that agent permanently unable to reach its own
+        # claims — `check` blocked it from its own files and `release --all-mine`
+        # said "nothing to release", which reads like success. Folding both
+        # spellings to one is the only repair an append-only log allows.
+        if actor.startswith("@"):
+            actor = actor.lstrip("@").strip() or actor
         ev_type = raw.get("type")
         if not is_known_type(ev_type):
             raise UnknownEventTypeError(f"event: unknown type {ev_type!r}")

@@ -39,6 +39,7 @@ import json
 import os
 import re
 import socket
+import shlex
 import shutil
 import subprocess
 import unicodedata
@@ -251,6 +252,14 @@ def _parse_flags(argv: list[str]) -> tuple[list[str], dict[str, str]]:
 
 def _actor(flags: dict[str, str]) -> str:
     name = (flags.get("as") or os.environ.get("COMMS_ACTOR") or "").strip()
+    # Every surface PRINTS an actor as "@name", so an agent copying its own name
+    # off the board and passing it back arrives here as "@name" — and a stored
+    # "@name" is a different agent from "name". Measured on a real store: one
+    # agent held 24 events under "@claude-karte-fachebenen" while everyone else
+    # was plain, so `check` refused it access to its own files and, worse,
+    # `release --all-mine` answered "nothing to release" — a failure that reads
+    # exactly like success. The @ is display, never identity.
+    name = name.lstrip("@").strip()
     if not name:
         _err(
             "error: no actor. Pass --as <name> or set COMMS_ACTOR.\n"
@@ -1464,12 +1473,23 @@ def _cmd_check_staged(flags: dict) -> int:
 
     staged = [p for p in out.stdout.decode("utf-8", "replace").split("\0") if p]
     if not staged:
+        # Say WHY it passed. Silence on exit 0 cannot distinguish "checked them,
+        # all clear" from "there was nothing to check", and an agent testing the
+        # guard against a peer-held path read the second as a false negative and
+        # nearly filed it as a bug. The commonest cause is the honest one: the
+        # peer already committed, so `git add` produced no index entry.
+        print("check --staged: nothing is staged, so there was nothing to check.")
         return EXIT_OK
 
     log_file, _lock_file = _store(root, create=False)
     try:
         log_file.stat()
     except FileNotFoundError:
+        # Third way to exit 0 without checking anything, and the quietest.
+        # Nobody has ever coordinated in this repo, so there is nothing to
+        # collide with — but a silent pass here looks identical to a real one.
+        print("check --staged: no coordination log in this repo yet, "
+              "so there are no claims to collide with.")
         return EXIT_OK
     except OSError as exc:
         _err(f"check --staged: cannot reach the coordination log: {exc.strerror or exc}")
@@ -1496,13 +1516,28 @@ def _cmd_check_staged(flags: dict) -> int:
             blocked.append((canon, conflicts[0]))
 
     if not blocked:
+        n = len(staged)
+        print(f"check --staged: {n} staged path{'s' if n != 1 else ''} checked, "
+              f"none held by anybody else.")
         return EXIT_OK
+
+    # Before the first commit there is no HEAD to restore FROM, so `git restore
+    # --staged` fails there and `git rm --cached` is the one that works. Getting
+    # this wrong hands somebody a command that errors at the exact moment they
+    # are trying to unpick a blocked commit.
+    head = subprocess.run([git, "rev-parse", "--verify", "-q", "HEAD"],
+                          cwd=root, capture_output=True)
+    unstage = "git restore --staged" if head.returncode == 0 else "git rm --cached -f"
 
     _err(f"BLOCKED: {len(blocked)} staged file(s) are claimed by somebody else.")
     for rel_text, holder in blocked:
         intent = f'  "{holder.intent}"' if holder.intent else ""
         _err(f"  {rel_text} — @{holder.actor}{intent}")
-    _err("  Unstage them, or agree with the holder before committing their work.")
+    _err("  Unstage them, or agree with the holder before committing their work:")
+    for rel_text, _holder in blocked:
+        # :(literal) so a path containing *, ? or [ ] is treated as the name it
+        # is rather than as a glob that could unstage somebody else's files too.
+        _err(f"    {unstage} -- {shlex.quote(':(literal)' + rel_text)}")
     return EXIT_CONFLICT
 
 
