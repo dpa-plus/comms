@@ -6,13 +6,23 @@ build-backend = "setuptools.build_meta"
 name = "comms-graph"
 version = "0.1.0"
 description = "comms rebuilt on graphify: claims, a task graph with a review gate, and a board for the person watching"
-requires-python = ">=3.10"
-# graphify is used for FOUR things and nothing else: loading a code map,
+# 3.11, not 3.10: the packaging test reads pyproject with `tomllib`, which is
+# 3.11+. Claiming a floor no job ever exercises is how a version claim quietly
+# stops being true.
+requires-python = ">=3.11"
+# graphify is used for three things and nothing else: loading a code map,
 # rendering it to HTML, and the output-directory convention. Everything about
 # coordination — the log, the fold, the lock, the review gate, the hook — is in
 # this package. Pinned to a floor rather than an exact version because those
-# four are stable surface; if that stops being true, pin it hard.
-dependencies = ["graphifyy>=0.9.47"]
+# three are stable surface; if that stops being true, pin it hard.
+#
+# networkx is declared even though graphify already pulls it in: contact.py
+# imports it directly, and a direct import resting on somebody else's transitive
+# dependency breaks the day they drop it.
+dependencies = ["graphifyy>=0.9.47", "networkx>=3.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "build>=1.0"]
 
 [project.scripts]
 # NOT `comms` — that name belongs to the Go binary in this same repo, which is

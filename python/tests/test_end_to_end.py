@@ -610,3 +610,55 @@ def test_the_hook_path_is_the_one_the_cli_dispatches():
     for name in ("commands", "tools"):
         assert not (root / "comms_graph" / f"{name}.py").exists(), (
             f"{name}.py is back. It is a second implementation that nothing dispatches.")
+
+
+def _package_docs():
+    """Every prose file that ships with or documents this package."""
+    root = Path(__file__).resolve().parents[1]
+    return [root / "README.md", *sorted((root / "docs").glob("*.md"))]
+
+
+def test_no_document_teaches_a_command_from_the_tree_this_was_split_out_of():
+    """This package was developed for a while inside a graphify checkout, where
+    it was reached as `graphify comms <verb>`. Here the console script is
+    `comms-graph`, and `graphify comms` is not a command at all.
+
+    README.md carried the old spelling for twelve commands, because it sat
+    outside the directory the copy step rewrote. Nothing failed: the tests
+    imported the package directly, and the only reader who would have hit it was
+    somebody following the README. That is the failure mode worth a test — a
+    document is wrong in a way the suite cannot feel.
+    """
+    for doc in _package_docs():
+        assert "graphify comms" not in doc.read_text(encoding="utf-8"), (
+            f"{doc.name} teaches `graphify comms`, which is not a command in "
+            f"this package — the console script is `comms-graph`"
+        )
+
+
+def test_every_command_the_documents_show_is_one_the_cli_dispatches():
+    """Same rule the briefing is held to, applied to the README and docs/.
+    A command in a README is a promise to whoever types it."""
+    import re
+
+    root = Path(__file__).resolve().parents[1]
+    cli_src = (root / "comms_graph" / "cli.py").read_text(encoding="utf-8")
+    dispatched = set(re.findall(r'sub == "([a-z-]+)"', cli_src))
+    dispatched |= set(re.findall(r'verb == "([a-z-]+)"', cli_src))
+
+    for doc in _package_docs():
+        shown = set(re.findall(r"comms-graph ([a-z-]+)", doc.read_text(encoding="utf-8")))
+        missing = {v for v in shown if v not in dispatched}
+        assert not missing, f"{doc.name} shows {sorted(missing)}, which the CLI does not dispatch"
+
+
+def test_the_synced_copy_step_is_gone_and_stays_gone():
+    """There is one tree now. While there were two, this directory was generated
+    from a graphify checkout by sync-from-graphify.py, and 'edit the other tree'
+    was a rule a reader could only learn by reading that script. Its return would
+    mean the split is back."""
+    root = Path(__file__).resolve().parents[1]
+    assert not (root / "sync-from-graphify.py").exists(), (
+        "sync-from-graphify.py is back, which means this directory is generated "
+        "from somewhere else again — edit it here instead"
+    )
