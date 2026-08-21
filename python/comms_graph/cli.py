@@ -252,6 +252,14 @@ def _parse_flags(argv: list[str]) -> tuple[list[str], dict[str, str]]:
 
 def _actor(flags: dict[str, str]) -> str:
     name = (flags.get("as") or os.environ.get("COMMS_ACTOR") or "").strip()
+    # Every surface PRINTS an actor as "@name", so an agent copying its own name
+    # off the board and passing it back arrives here as "@name" — and a stored
+    # "@name" is a different agent from "name". Measured on a real store: one
+    # agent held 24 events under "@claude-karte-fachebenen" while everyone else
+    # was plain, so `check` refused it access to its own files and, worse,
+    # `release --all-mine` answered "nothing to release" — a failure that reads
+    # exactly like success. The @ is display, never identity.
+    name = name.lstrip("@").strip()
     if not name:
         _err(
             "error: no actor. Pass --as <name> or set COMMS_ACTOR.\n"

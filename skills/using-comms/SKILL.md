@@ -27,6 +27,27 @@ not run that hook yourself; it runs whether or not you remember it.
 the same file on this disk, and the guard treats them as one, so you cannot get
 round a claim by changing the case of a letter.
 
+**The hook only sees Edit and Write.** If you change a file with `sed -i`, a
+heredoc, `tee`, or a Python one-liner inside Bash, nothing checks it — and in
+auto mode Bash is the documented default, so this is the normal case, not a
+corner. Measured on a real session: ~35 edits, every one through Bash, the hook
+fired zero times, and two agents' changes were swept into each other's commits.
+
+So the hook is a safety net for one route in, not proof you are clear. **Claim
+before you edit, whichever tool you use**, and run `comms-graph check <path>`
+yourself before a Bash edit on anything you have not claimed. Shell commands
+cannot be intercepted reliably, so this part is on you.
+
+The backstop that does hold is a git pre-commit hook, because a commit cannot be
+argued with by a heredoc:
+
+```sh
+printf '#!/bin/sh\nexec comms-graph check --staged\n' > .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
+```
+
+Do not install that yourself — it changes the user's repository. Suggest it.
+
 Three things changed on 2026-08-21 and are new to you:
 
 - `claim a b c --intent "..."` takes several scopes **atomically** — all of them
