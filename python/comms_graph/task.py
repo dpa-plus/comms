@@ -94,7 +94,7 @@ class Task:
     size: str = ""
     #: Check names that must all pass before it can be marked done.
     checks: list[str] = field(default_factory=list)
-    #: Opaque external reference, e.g. "omni:AUF-2291". comms stores it and
+    #: Opaque external reference, e.g. "tracker:PROJ-1234". comms stores it and
     #: never executes anything with it.
     ref: str = ""
 
