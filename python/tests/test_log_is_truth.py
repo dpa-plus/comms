@@ -415,3 +415,18 @@ def test_a_store_under_a_temp_root_is_flagged_as_private(tmp_path):
     assert clog.is_ephemeral_store("/tmp/whatever/comms/abc") is True
     assert clog.is_ephemeral_store("/private/var/folders/9x/T/comms/abc") is True
     assert clog.is_ephemeral_store("/Users/someone/Library/Application Support/comms/abc") is False
+
+
+def test_the_year_is_four_digits_on_every_platform():
+    """strftime("%Y") is not portable: glibc renders year 1 as "1", BSD as "0001".
+
+    This is the invariant behind test_the_zero_instant_is_never_written, pinned
+    directly so it fails on the machine that has the bug rather than only on the
+    one platform where the symptom shows. RFC3339 requires four digits, and the
+    zero-instant guard compares the rendered string, so an unpadded year both
+    breaks the format and slips past the guard.
+    """
+    from comms_graph.log import _format_ts
+
+    assert _format_ts(datetime(1, 1, 1, tzinfo=UTC)) == "0001-01-01T00:00:00Z"
+    assert _format_ts(datetime(999, 12, 31, 23, 59, 59, tzinfo=UTC)) == "0999-12-31T23:59:59Z"
