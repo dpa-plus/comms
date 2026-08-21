@@ -67,6 +67,8 @@ USAGE = """Usage: comms-graph <command>
                                                  abandoned
   board [--as <actor>]                          who holds what right now
   check <path> | check --stdin-json             would an edit here collide?
+  check --staged [--as <actor>]                 would this COMMIT take
+                                                somebody else's claimed work?
 
   task add|edge|done|review ...                 declare and move work
   plan --from <file.json>                       a whole plan, atomically
@@ -247,6 +249,18 @@ def _parse_flags(argv: list[str]) -> tuple[list[str], dict[str, str]]:
         else:
             positional.append(arg)
             i += 1
+    # ONE place, for every verb. Every surface PRINTS an actor as "@name", so
+    # "@name" is exactly the spelling an agent copies back out of `status` and
+    # passes to --as — the tool trains you into the broken form. Stripping it in
+    # `_actor` alone was not enough: `check --staged` and the hook path read the
+    # flag directly, so `--as @me` compared "@me" against a stored "me" and
+    # reported an agent's own eleven files as "claimed by somebody else", while
+    # naming that somebody as itself in the same breath.
+    #
+    # The @ is display. It never reaches identity, whichever verb is asking.
+    for key in ("as", "actor"):
+        if key in flags:
+            flags[key] = flags[key].strip().lstrip("@").strip()
     return positional, flags
 
 
@@ -263,6 +277,8 @@ def _actor(flags: dict[str, str]) -> str:
     if not name:
         _err(
             "error: no actor. Pass --as <name> or set COMMS_ACTOR.\n"
+            "  e.g.  comms-graph hello --as claude-dev --label \"Claude Dev\"\n"
+            "        export COMMS_ACTOR=claude-dev\n"
             "  Two agents sharing one name cannot detect a conflict between them,\n"
             "  so this refuses to guess."
         )
@@ -1500,7 +1516,20 @@ def _cmd_check_staged(flags: dict) -> int:
         _err(f"check --staged: cannot read the coordination log: {exc}")
         return EXIT_BLOCK
 
-    actor = (flags.get("as") or os.environ.get("COMMS_ACTOR", "")).strip()
+    # Identity, resolved the way the EDIT hook resolves it, because a git hook
+    # has no environment of its own either. Without this the caller is a stranger
+    # to its own claims: an agent that claimed its files, wrote them and staged
+    # them was told "3 staged file(s) are claimed by somebody else" and handed a
+    # command to unstage its own work. That is not a small bug — it rewards not
+    # claiming, which is the one behaviour the tool exists to encourage.
+    #
+    # `--as` cannot be the answer on its own: a pre-commit hook does not know
+    # which agent is committing, so it has nothing to pass.
+    explicit = (flags.get("as") or os.environ.get("COMMS_ACTOR", "")).strip()
+    session = os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
+    actor = _hook_actor(st, session, explicit)
+    unidentified = actor == "\x00not-a-real-actor"
+
     blocked: list[tuple[str, object]] = []
     for rel_text in staged:
         # Spelled the way the filesystem spells it, exactly as the hook path
@@ -1516,10 +1545,26 @@ def _cmd_check_staged(flags: dict) -> int:
             blocked.append((canon, conflicts[0]))
 
     if not blocked:
+        # Safe even when we could not identify the caller: nothing staged is
+        # claimed by ANYBODY, so there is no question of whose it is.
         n = len(staged)
         print(f"check --staged: {n} staged path{'s' if n != 1 else ''} checked, "
               f"none held by anybody else.")
         return EXIT_OK
+
+    if unidentified:
+        # Something staged is claimed, and we do not know whether it is yours.
+        # Saying "claimed by somebody else" here would be a guess stated as a
+        # fact, and the guess is wrong exactly for the agent that did the right
+        # thing. Report the identity problem instead, and use 2 — this command's
+        # code for "could not find out" — rather than 1, which means conflict.
+        _err("check --staged: cannot establish who is committing, so it cannot "
+             "tell your own claims from somebody else's.")
+        for rel_text, holder in blocked:
+            _err(f"  {rel_text} — claimed by @{holder.actor}")
+        _err("  Run `comms-graph hello` in this session so the log knows you, or "
+             "pass --as <actor>, or set COMMS_ACTOR.")
+        return EXIT_BLOCK
 
     # Before the first commit there is no HEAD to restore FROM, so `git restore
     # --staged` fails there and `git rm --cached` is the one that works. Getting
@@ -2471,6 +2516,11 @@ def main(argv: list[str]) -> int:
     # never colour the next.
     global _GLOBAL_ROOT
     _GLOBAL_ROOT = None
+    # Same rule for the environment, normalised once so every reader downstream
+    # — including the ones that never call _actor — sees the canonical form.
+    env_actor = os.environ.get("COMMS_ACTOR")
+    if env_actor and env_actor.strip() != env_actor.strip().lstrip("@").strip():
+        os.environ["COMMS_ACTOR"] = env_actor.strip().lstrip("@").strip()
     argv = list(argv)
     while argv and argv[0] in ("--repo", "--root"):
         if len(argv) < 2:

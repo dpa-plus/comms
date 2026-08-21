@@ -381,7 +381,8 @@ def _actor_for(actor_arg: str, *, mutating: bool) -> str:
     conflict between them — which is the failure comms exists to prevent.
     """
     if actor_arg:
-        return actor_arg
+        # Same rule as the CLI: a leading "@" is display, never identity.
+        return actor_arg.strip().lstrip("@").strip() or actor_arg
     env = os.environ.get("COMMS_ACTOR", "").strip()
     if env:
         return env

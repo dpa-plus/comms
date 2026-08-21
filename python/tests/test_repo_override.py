@@ -130,3 +130,33 @@ def test_an_at_prefixed_name_already_on_disk_heals(repo, monkeypatch, capsys):
     assert cli.main(["check", "src/b.py"]) == 0, "still locked out of its own claim"
     cli.main(["board"])
     assert "@@" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("verb_args", [
+    ["check", "--staged"],
+    ["board"],
+    ["status"],
+])
+def test_an_at_prefixed_actor_is_normalised_for_every_verb(repo, monkeypatch, capsys, verb_args):
+    """IF THIS FAILS: the tool trains you into a spelling it then rejects.
+
+    Every surface PRINTS an actor as "@name", so "@name" is exactly what an agent
+    copies out of `status` and passes back to `--as`. Stripping it in one helper
+    was not enough — `check --staged` read the flag directly and reported an
+    agent's own eleven staged files as "claimed by somebody else", naming that
+    somebody as itself in the same line.
+
+    Normalised once at the flag parser, so a verb added later cannot miss it.
+    """
+    # This fixture deliberately stands OUTSIDE the repo, which is what it exists
+    # to test. `check --staged` reads the git index, so it needs to be inside one.
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv("COMMS_ACTOR", "karte")
+    cli.main(["claim", "src/a.py", "--intent", "mine"])
+    capsys.readouterr()
+    monkeypatch.delenv("COMMS_ACTOR")
+
+    assert cli.main([*verb_args, "--as", "@karte"]) == 0
+    out = capsys.readouterr()
+    assert "@@" not in (out.out + out.err)
+    assert "claimed by somebody else" not in out.err
