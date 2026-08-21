@@ -521,8 +521,6 @@ def test_every_comms_data_file_is_declared_for_the_wheel():
     cfg = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
 
     setuptools_cfg = cfg["tool"]["setuptools"]
-    # Either spelling is fine — an explicit list, or a find directive that
-    # matches. What must not happen is the package silently not shipping.
     declared = setuptools_cfg.get("packages")
     if isinstance(declared, dict):
         includes = declared.get("find", {}).get("include", [])
@@ -614,9 +612,6 @@ def test_the_hook_path_is_the_one_the_cli_dispatches():
     assert not re.search(r"^\s*from \. import commands", cli_src, re.M), \
         "cli.py must not import the superseded command layer"
 
-    # commands.py and tools.py were a complete, plausible, well-commented second
-    # implementation that nothing dispatched. The move to this repo deleted them
-    # outright, which is strictly better than a banner. Assert they stay gone.
     for name in ("commands", "tools"):
         assert not (root / "comms_graph" / f"{name}.py").exists(), (
             f"{name}.py is back. It is a second implementation of this CLI that "

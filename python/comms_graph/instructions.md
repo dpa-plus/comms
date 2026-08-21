@@ -72,6 +72,10 @@ comes after, it prints what yours CONSUMES from it and the decisions recorded
 while it was built. That is how the reasoning behind the last piece reaches you,
 and there is nowhere else it is written down.
 
+A task is worked by one agent at a time. If somebody else is holding ground on
+it, take a different one or split it — you still work in parallel, on different
+files, which is what claims are for.
+
 Tag your claim with the task so the board knows who is on what — it is derived
 from live claims, so releasing the file clears it for you:
 

@@ -1337,25 +1337,6 @@ def test_next_says_when_the_plan_is_finished(tmp_path, monkeypatch):
     assert "nothing is startable" not in out
 
 
-def test_a_task_with_a_spare_slot_is_still_offered(tmp_path, monkeypatch):
-    """IF THIS FAILS: --slots is decoration.
-
-    Phase becomes DOING as soon as there is ANY doer, and ready_tasks filtered
-    on READY alone — so `next` stopped offering a task the moment the first
-    agent claimed it, the second slot could never be discovered, and the
-    "(1/2 slots taken)" line was unreachable code. Somebody declaring two slots
-    to get two agents onto one task got one.
-    """
-    repo = _repo(tmp_path, monkeypatch)
-    _cli(repo, "task", "add", "big", "--slots", "2", "--as", "p", session="agent-P")
-    _cli(repo, "claim", "a.py", "--as", "carol", "--intent", "z", "--task", "big",
-         session="agent-C")
-
-    code, out = _cli(repo, "next", "--as", "dave", session="agent-D")
-    assert "big" in out, out
-    assert "1/2 slots taken" in out, out
-
-
 def test_a_full_task_is_not_offered(tmp_path, monkeypatch):
     """The slot limit still has to bind, or it is decoration in the other
     direction."""
@@ -1497,80 +1478,30 @@ def test_the_board_tooltip_says_how_a_task_was_checked(tmp_path, monkeypatch):
     assert "ran the suite, 14 pass" in tip, tip
 
 
-def test_a_task_does_not_finish_while_one_of_its_halves_is_still_being_written(
-    tmp_path, monkeypatch
-):
-    """IF THIS FAILS: successors are handed out as startable on unfinished work.
-
-    A task declaring two slots recruits a second agent — `next` offers it while
-    a slot is free. One doer pressing `done` used to put the WHOLE task into
-    review, and a verification then CLOSED it and unblocked everything
-    downstream while the other half was still being typed. `brief` printed
-    "phase: closed" and "doing: @bob" on the same line.
-    """
-    repo = _repo(tmp_path, monkeypatch)
-    for f in ("a.py", "b.py"):
-        (repo / f).write_text("x = 1\n")
-    _cli(repo, "task", "add", "big", "--as", "p", "--title", "Refactor", "--slots", "2", session="sP")
-    _cli(repo, "task", "add", "ship", "--as", "p", "--title", "Ship", session="sP")
-    _cli(repo, "task", "edge", "big", "ship", "--as", "p",
-         "--kind", "artifact", "--provides", "the module", session="sP")
-    _cli(repo, "claim", "a.py", "--as", "alice", "--task", "big", "--intent", "A", session="sA")
-    _cli(repo, "claim", "b.py", "--as", "bob", "--task", "big", "--intent", "B", session="sB")
-    _cli(repo, "task", "done", "big", "--as", "alice", "--note", "half A", session="sA")
-
-    _, out = _cli(repo, "brief", "big", "--as", "x", session="sX")
-    assert "phase: doing" in out, out
-
-    # a verification may still be RECORDED — refusing it would deadlock a task
-    # whose second agent has wandered off — but it must not finish the task
-    _cli(repo, "task", "review", "big", "--as", "carol", "--pass",
-         "--evidence", "looked", session="sC")
-    _, out = _cli(repo, "brief", "big", "--as", "x", session="sX")
-    assert "phase: closed" not in out, out
-    _, out = _cli(repo, "brief", "ship", "--as", "x", session="sX")
-    assert "phase: blocked" in out, ("successor unblocked on unfinished work:\n" + out)
-
-    # once bob submits and it is verified, everything completes normally
-    _cli(repo, "task", "done", "big", "--as", "bob", "--note", "half B", session="sB")
-    _cli(repo, "task", "review", "big", "--as", "carol", "--pass",
-         "--evidence", "ran the suite", session="sC")
-    _, out = _cli(repo, "brief", "ship", "--as", "x", session="sX")
-    assert "phase: ready" in out, out
-
-
-def test_an_agent_working_a_task_cannot_verify_it_without_ever_submitting(
+def test_an_agent_that_touched_a_task_cannot_verify_it_without_ever_submitting(
     tmp_path, monkeypatch
 ):
     """IF THIS FAILS: the review gate is opt-out — just never press `done`.
 
-    The gate read `did` and `submitters`, both written by `task done`. An agent
-    that `next` had routed onto the task, that held ground tagged to it, and
-    that had written half of it was invisible to the check purely because it
-    had not submitted — and its sign-off recorded as a real independent review.
+    The gate reads `did` and `submitters`, both written by `task done`. An
+    agent that took ground on the task, wrote part of it, and let go without
+    submitting is invisible to those two fields. `workers` records it anyway,
+    and releasing the claim does not unwrite what was written.
     """
     repo = _repo(tmp_path, monkeypatch)
     for f in ("a.py", "b.py"):
         (repo / f).write_text("x = 1\n")
-    _cli(repo, "task", "add", "big", "--as", "p", "--title", "Refactor", "--slots", "2", session="sP")
+    _cli(repo, "task", "add", "big", "--as", "p", "--title", "T", session="sP")
     _cli(repo, "claim", "a.py", "--as", "alice", "--task", "big", "--intent", "A", session="sA")
+    _cli(repo, "release", "a.py", "--as", "alice", session="sA")          # never submitted
     _cli(repo, "claim", "b.py", "--as", "bob", "--task", "big", "--intent", "B", session="sB")
-    _cli(repo, "task", "done", "big", "--as", "alice", "--note", "half A", session="sA")
+    _cli(repo, "task", "done", "big", "--as", "bob", "--note", "finished it", session="sB")
 
-    code, out = _cli(repo, "task", "review", "big", "--as", "bob", "--pass",
-                     "--evidence", "lgtm", session="sB")
-    assert code != 0, ("a co-worker signed off the task:\n" + out)
+    code, out = _cli(repo, "task", "review", "big", "--as", "alice", "--pass",
+                     "--evidence", "lgtm", session="sA")
+    assert code != 0, ("somebody who wrote part of it signed it off:\n" + out)
     assert "has worked on this task" in out, out
-    # and it must not read as work bob submitted, because he submitted none
-    assert "work done by @bob" not in out, out
-
-    # releasing the file does not unwrite what he wrote
-    _cli(repo, "release", "b.py", "--as", "bob", session="sB")
-    code, out = _cli(repo, "task", "review", "big", "--as", "bob", "--pass",
-                     "--evidence", "lgtm", session="sB")
-    assert code != 0, ("releasing the claim reopened the self-review hole:\n" + out)
-
-
+    assert "work done by @alice" not in out, out
 def test_a_rejection_withdraws_the_self_signed_label_too(tmp_path, monkeypatch):
     """The label was cleared on resubmission but not on rejection, so the same
     bug survived by the other route: a successor's brief asserted a sign-off
@@ -1591,100 +1522,47 @@ def test_a_rejection_withdraws_the_self_signed_label_too(tmp_path, monkeypatch):
     assert "@ themselves" not in out, out
 
 
-def test_over_subscribing_a_task_is_said_out_loud(tmp_path, monkeypatch):
-    """`slots` gated only who `next` OFFERS the task to. Four agents could tag
-    themselves onto a task declaring two and nothing anywhere said so."""
-    repo = _repo(tmp_path, monkeypatch)
-    for i in range(1, 4):
-        (repo / f"p{i}.py").write_text("x = 1\n")
-    _cli(repo, "task", "add", "pair", "--as", "p", "--title", "Two", "--slots", "2", session="sP")
-
-    _, out = _cli(repo, "claim", "p1.py", "--as", "b1", "--task", "pair", "--intent", "w", session="s1")
-    assert "NOTE" not in out, out
-    _, out = _cli(repo, "claim", "p2.py", "--as", "b2", "--task", "pair", "--intent", "w", session="s2")
-    assert "NOTE" not in out, ("warned at capacity rather than over it:\n" + out)
-
-    code, out = _cli(repo, "claim", "p3.py", "--as", "b3", "--task", "pair", "--intent", "w", session="s3")
-    assert code == 0, ("over-subscribing must not REFUSE the claim:\n" + out)
-    assert "declared 2 slot(s) and now has 3 agent(s)" in out, out
-    assert "Not a conflict" in out, out
-
-
 def test_a_task_everyone_has_touched_is_not_a_dead_end(tmp_path, monkeypatch):
     """IF THIS FAILS: a two-agent project can stop forever.
 
-    Holding ground on a task bars you from verifying it, permanently. That put
-    tasks out of reach with a SINGLE submitter — bob claimed in, dropped off
-    without submitting, and was still barred — and the escape hatch was only
-    mentioned when more than one agent had SUBMITTED. So bob was refused, told
-    to "let somebody who did not write it check the whole thing", and never
-    told --acknowledge-self-review exists. On a two-agent run that advice
-    cannot be followed and the task stops, along with everything after it.
+    Touching a task bars you from verifying it, permanently. On a project with
+    only two agents that can leave nobody able to sign it off — so the refusal
+    has to name the escape, and the escape has to record what it is.
     """
     repo = _repo(tmp_path, monkeypatch)
     for f in ("a.py", "b.py"):
         (repo / f).write_text("x = 1\n")
-    _cli(repo, "task", "add", "big", "--as", "p", "--title", "T", "--slots", "2", session="sP")
+    _cli(repo, "task", "add", "big", "--as", "p", "--title", "T", session="sP")
     _cli(repo, "claim", "a.py", "--as", "alice", "--task", "big", "--intent", "A", session="sA")
+    _cli(repo, "release", "a.py", "--as", "alice", session="sA")
     _cli(repo, "claim", "b.py", "--as", "bob", "--task", "big", "--intent", "B", session="sB")
-    # bob drops off without submitting. He is no longer holding the task up,
-    # but he wrote part of it, so he is still barred from signing it off.
-    _cli(repo, "release", "b.py", "--as", "bob", session="sB")
-    _cli(repo, "task", "done", "big", "--as", "alice", "--note", "A", session="sA")
+    _cli(repo, "task", "done", "big", "--as", "bob", "--note", "B", session="sB")
 
-    _, out = _cli(repo, "brief", "big", "--as", "x", session="sX")
-    assert "phase: review" in out, ("bob dropped off, so it should be reviewable:\n" + out)
-
-    code, out = _cli(repo, "task", "review", "big", "--as", "bob", "--pass",
-                     "--evidence", "x", session="sB")
-    assert code != 0, ("a co-worker signed it off:\n" + out)
-    # submitters is just [alice] here — the old guard counted submitters alone
+    code, out = _cli(repo, "task", "review", "big", "--as", "alice", "--pass",
+                     "--evidence", "x", session="sA")
+    assert code != 0
     assert "--acknowledge-self-review" in out, (
         "barred with no way out and no mention of the escape:\n" + out
     )
 
-    # and the escape works, and records what it is rather than a clean bill
-    code, out = _cli(repo, "task", "review", "big", "--as", "bob", "--pass",
-                     "--acknowledge-self-review", session="sB")
-    assert code == 0, out
-    _, brief = _cli(repo, "brief", "big", "--as", "x", session="sX")
-    assert "phase: closed" in brief, brief
-    assert "self-acknowledged" in brief, (
-        "a self-signed task must never read as independently verified:\n" + brief
-    )
-
-
-def test_a_blocked_task_names_who_it_is_waiting_on(tmp_path, monkeypatch):
-    """IF THIS FAILS: a stuck project reports a fact with no action attached.
-
-    A predecessor with an unsubmitted doer now blocks its successors, which is
-    the safe direction — but "waiting on something unverified" gives the reader
-    nowhere to go. There is no claim-staleness rule here, so a crashed agent
-    holds the downstream graph until somebody releases the claim; the one thing
-    that makes that recoverable is saying whose claim it is.
-    """
+def test_a_blocked_task_says_what_it_is_waiting_on(tmp_path, monkeypatch):
+    """A stuck project must report a next step, not just a state. `brief` names
+    the predecessor and who is on it; `next` names the predecessor."""
     repo = _repo(tmp_path, monkeypatch)
-    for f in ("a.py", "b.py"):
-        (repo / f).write_text("x = 1\n")
-    _cli(repo, "task", "add", "big", "--as", "p", "--title", "T", "--slots", "2", session="sP")
+    (repo / "a.py").write_text("x = 1\n")
+    _cli(repo, "task", "add", "big", "--as", "p", "--title", "T", session="sP")
     _cli(repo, "task", "add", "ship", "--as", "p", "--title", "Ship", session="sP")
     _cli(repo, "task", "edge", "big", "ship", "--as", "p",
          "--kind", "artifact", "--provides", "mod", session="sP")
     _cli(repo, "claim", "a.py", "--as", "alice", "--task", "big", "--intent", "A", session="sA")
-    _cli(repo, "claim", "b.py", "--as", "bob", "--task", "big", "--intent", "B", session="sB")
-    _cli(repo, "task", "done", "big", "--as", "alice", "--note", "A", session="sA")
 
     _, out = _cli(repo, "brief", "ship", "--as", "x", session="sX")
     assert "phase: blocked" in out, out
-    assert "@bob" in out, ("nothing says whose claim is holding it:\n" + out)
-    assert "not submitted" in out, out
-    # alice submitted, so she is not who anyone is waiting on
-    assert "@alice" not in out.split("comes after")[0], out
+    assert "big" in out, out
+    assert "@alice" in out, ("nothing says who is on the blocker:\n" + out)
 
     _, out = _cli(repo, "next", "--as", "newcomer", session="sZ")
-    assert "@bob" in out, ("next leaves a newcomer with nowhere to go:\n" + out)
-
-
+    assert "big" in out, out
 def test_reclaiming_ground_you_hold_replaces_it_rather_than_stacking(tmp_path, monkeypatch):
     """IF THIS FAILS: the board's claim count is wrong and one agent reads as two.
 
@@ -1728,48 +1606,6 @@ def test_reclaiming_moves_you_between_tasks_instead_of_onto_both(tmp_path, monke
     assert "@bob" not in out, ("bob moved to t2 but still counts as doing t1:\n" + out)
     _, out = _cli(repo, "brief", "t2", "--as", "x", session="sX")
     assert "@bob" in out, out
-
-
-def test_one_rejection_does_not_put_back_closed_while_somebody_is_working(
-    tmp_path, monkeypatch
-):
-    """IF THIS FAILS: the outstanding rule survives exactly one rejection.
-
-    `outstanding` subtracted `submitters`, which is permanent — it answers "did
-    you write this", for the review gate. So the instant a doer had pressed
-    `done` once they could never count as still working again, and one
-    rejection put back the "phase: closed · doing: @bob" that rule exists to
-    prevent. A rejection returns EVERYONE to working; their old submissions
-    stop meaning "finished" and keep meaning "you wrote it".
-    """
-    repo = _repo(tmp_path, monkeypatch)
-    for f in ("a.py", "b.py"):
-        (repo / f).write_text("x = 1\n")
-    _cli(repo, "task", "add", "t1", "--as", "p", "--title", "T1", "--slots", "2", session="sP")
-    _cli(repo, "task", "add", "t2", "--as", "p", "--title", "T2", session="sP")
-    _cli(repo, "task", "edge", "t1", "t2", "--as", "p", "--kind", "interface", session="sP")
-    _cli(repo, "claim", "a.py", "--as", "alice", "--task", "t1", "--intent", "A", session="sA")
-    _cli(repo, "claim", "b.py", "--as", "bob", "--task", "t1", "--intent", "B", session="sB")
-    _cli(repo, "task", "done", "t1", "--as", "alice", "--note", "A", session="sA")
-    _cli(repo, "task", "done", "t1", "--as", "bob", "--note", "B", session="sB")
-    _cli(repo, "task", "review", "t1", "--as", "carol", "--fail",
-         "--evidence", "not ready", session="sC")
-
-    # only alice reworks
-    _cli(repo, "task", "done", "t1", "--as", "alice", "--note", "A2", session="sA")
-    _cli(repo, "task", "review", "t1", "--as", "carol", "--pass",
-         "--evidence", "looked", session="sC")
-    _, out = _cli(repo, "brief", "t1", "--as", "x", session="sX")
-    assert "phase: closed" not in out, ("closed with bob mid-rework:\n" + out)
-    _, out = _cli(repo, "brief", "t2", "--as", "x", session="sX")
-    assert "phase: blocked" in out, out
-
-    # bob finishes his rework and it completes
-    _cli(repo, "task", "done", "t1", "--as", "bob", "--note", "B2", session="sB")
-    _cli(repo, "task", "review", "t1", "--as", "carol", "--pass",
-         "--evidence", "good", session="sC")
-    _, out = _cli(repo, "brief", "t2", "--as", "x", session="sX")
-    assert "phase: ready" in out, out
 
 
 def test_a_claim_taken_after_a_sign_off_does_not_unsign_it(tmp_path, monkeypatch):
@@ -1847,63 +1683,61 @@ def test_a_claim_that_folds_before_its_task_still_records_the_worker(tmp_path, m
 
 
 def test_an_abandoned_claim_can_be_taken_over(tmp_path, monkeypatch):
-    """IF THIS FAILS: one crashed agent stalls the whole downstream graph forever.
+    """IF THIS FAILS: clearing up after a crashed agent means impersonating it.
 
-    The fold has always understood a steal — a claim carrying `steals`
-    displaces the named one atomically — and nothing wrote one, so an abandoned
-    claim could only be ended by the agent that left. Once a task-tagged claim
-    began holding successors blocked, that became a permanent stall with no
-    command anybody else could run.
+    `release` only ever touched claims held by `--as`, so freeing somebody
+    else's ground meant stealing it and handing it back, or passing their name
+    — which the CLI accepts and which writes a lie into an append-only log.
+
+    Note what is NOT here any more: this used to have to check that the
+    takeover did not close the task on a stale sign-off. With one agent per
+    task that cannot happen — the task simply has no submission, so it cannot
+    be verified, and it waits.
     """
+    from comms_graph import state as cstate
+    from comms_graph import cli as ccli
+    from comms_graph import log as clog2
+
     repo = _repo(tmp_path, monkeypatch)
     for f in ("h.py", "i.py"):
         (repo / f).write_text("x = 1\n")
-    _cli(repo, "task", "add", "t6", "--as", "ken", "--title", "Six", "--slots", "2", session="sK")
-    _cli(repo, "task", "add", "t6b", "--as", "ken", "--title", "SixB", session="sK")
-    _cli(repo, "task", "edge", "t6", "t6b", "--as", "ken", "--kind", "interface", session="sK")
+    _cli(repo, "task", "add", "t6", "--as", "p", "--title", "Six", session="sP")
+    _cli(repo, "task", "add", "t6b", "--as", "p", "--title", "SixB", session="sP")
+    _cli(repo, "task", "edge", "t6", "t6b", "--as", "p", "--kind", "interface", session="sP")
     _cli(repo, "claim", "h.py", "--as", "ken", "--task", "t6", "--intent", "k", session="sK")
-    _cli(repo, "claim", "i.py", "--as", "leo", "--task", "t6", "--intent", "l", session="sL")
-    _cli(repo, "task", "done", "t6", "--as", "leo", "--note", "d", session="sL")
-    _cli(repo, "release", "i.py", "--as", "leo", session="sL")
-    _cli(repo, "task", "review", "t6", "--as", "mia", "--pass", "--evidence", "read", session="sM")
 
+    # ken never comes back. t6b waits, because t6 was never submitted.
     _, out = _cli(repo, "brief", "t6b", "--as", "x", session="sX")
     assert "phase: blocked" in out, out
 
     _, board = _cli(repo, "board", "--as", "x", session="sX")
-    kid = [ln.split("[")[1].split("]")[0] for ln in board.splitlines() if "h.py" in ln][0]
+    kid = board.split("[")[1].split("]")[0]
 
-    # it refuses without a reason, and refuses an id it was not pointed at
-    code, out = _cli(repo, "claim", "h.py", "--as", "nate", "--task", "t6",
-                     "--intent", "f", "--steal", kid, session="sN")
+    code, out = _cli(repo, "release", kid, "--as", "nate", "--force", session="sN")
     assert code != 0 and "--reason" in out, out
-    code, out = _cli(repo, "claim", "h.py", "--as", "nate", "--task", "t6",
-                     "--intent", "f", "--steal", "01NOTAREALCLAIMID0000000000",
-                     "--reason", "r", session="sN")
-    assert code != 0, out
+    code, out = _cli(repo, "release", "h.py", "--as", "nate", "--force",
+                     "--reason", "gone", session="sN")
+    assert code != 0, ("a path was accepted; it can match more than was meant:\n" + out)
 
-    code, out = _cli(repo, "claim", "h.py", "--as", "nate", "--task", "t6", "--intent", "f",
-                     "--steal", kid, "--reason", "ken's session died 3h ago", session="sN")
+    code, out = _cli(repo, "release", kid, "--as", "nate", "--force",
+                     "--reason", "ken's session died 3h ago", session="sN")
     assert code == 0, out
-    assert "TAKEN FROM @ken" in out, out
+    assert "was @ken" in out and "@nate" in out, out
 
-    # ken's claim is gone, and only one claim stands on the file
-    _, board = _cli(repo, "board", "--as", "x", session="sX")
-    assert board.count("h.py") == 1, board
-    assert "@ken" not in board, board
+    # the log says who took it off whom, not that ken let go himself
+    log_file, _ = ccli._store(ccli._repo_root(str(repo)), create=False)
+    rel = cstate.fold(clog2.read(log_file)).releases[-1]
+    assert rel.actor == "nate" and rel.original_actor == "ken", rel
 
-    # taking ground OFF somebody continues their turn: the successor must not
-    # go ready on the old sign-off before nate has written anything
-    _, out = _cli(repo, "brief", "t6b", "--as", "x", session="sX")
-    assert "phase: blocked" in out, ("a takeover closed the task on the old review:\n" + out)
-
-    _cli(repo, "task", "done", "t6", "--as", "nate", "--note", "finished", session="sN")
+    # and the task is now free for somebody to pick up and finish properly
+    code, out = _cli(repo, "claim", "h.py", "--as", "nate", "--task", "t6",
+                     "--intent", "finishing it", session="sN")
+    assert code == 0, ("the freed task could not be picked up:\n" + out)
+    _cli(repo, "task", "done", "t6", "--as", "nate", "--note", "done", session="sN")
     _cli(repo, "task", "review", "t6", "--as", "mia", "--pass",
-         "--evidence", "re-read after the takeover", session="sM")
+         "--evidence", "read it", session="sM")
     _, out = _cli(repo, "brief", "t6b", "--as", "x", session="sX")
     assert "phase: ready" in out, out
-
-
 def test_a_homoglyph_name_does_not_launder_a_sign_off(tmp_path, monkeypatch):
     """IF THIS FAILS: a Cyrillic letter buys an independent review.
 
@@ -1978,41 +1812,35 @@ def test_a_finding_needs_a_category_that_means_something(tmp_path, monkeypatch):
 
 
 def test_the_board_carries_what_a_person_needs_to_see(tmp_path, monkeypatch):
-    """IF THIS FAILS: the board can show activity but not whether it is stuck.
+    """IF THIS FAILS: the board shows activity but not whether it is stuck.
 
-    Every one of these is in the fold and none of them reached the page:
-    who a task is waiting on, what the verifier says they ran, and what just
-    happened at all.
+    Each of these is in the fold and none of them reached the page: who is on a
+    task, what the verifier says they ran, and what just happened at all.
     """
     from comms_graph import server as cserver
+    from comms_graph import cli as ccli
 
     repo = _repo(tmp_path, monkeypatch)
-    for f in ("a.py", "b.py"):
-        (repo / f).write_text("x = 1\n")
-    _cli(repo, "task", "add", "t1", "--as", "p", "--title", "T1", "--slots", "2", session="sP")
+    (repo / "a.py").write_text("x = 1\n")
+    _cli(repo, "task", "add", "t1", "--as", "p", "--title", "T1", "--check", "test", session="sP")
     _cli(repo, "claim", "a.py", "--as", "alice", "--task", "t1", "--intent", "A", session="sA")
-    _cli(repo, "claim", "b.py", "--as", "bob", "--task", "t1", "--intent", "B", session="sB")
-    _cli(repo, "task", "done", "t1", "--as", "alice", "--note", "A", session="sA")
+    _cli(repo, "task", "done", "t1", "--as", "alice", "--check", "test=pass",
+         "--note", "A", session="sA")
 
-    from comms_graph import cli as ccli
     log_file, _ = ccli._store(ccli._repo_root(str(repo)), create=False)
     snap = cserver._snapshot(repo, log_file)
     t1 = next(t for t in snap["tasks"] if t["id"] == "t1")
-    assert t1["outstanding"] == ["bob"], ("the board cannot say who it waits on: " + repr(t1))
-    assert t1["slots"] == 2
+    assert t1["doers"] == ["alice"], t1
+    assert t1["check_results"] == {"test": "pass"}, t1
 
     assert snap["feed"], "the board has no answer to 'what just happened'"
-    assert snap["feed"][0]["type"] == "task_state", snap["feed"][0]
     assert {"claim", "task", "task_state"} <= {e["type"] for e in snap["feed"]}
 
-    _cli(repo, "task", "done", "t1", "--as", "bob", "--note", "B", session="sB")
     _cli(repo, "task", "review", "t1", "--as", "carol", "--pass",
          "--evidence", "ran the suite, 14 pass", session="sC")
     snap = cserver._snapshot(repo, log_file)
     t1 = next(t for t in snap["tasks"] if t["id"] == "t1")
     assert t1["verification"] == "ran the suite, 14 pass", t1
-
-
 def test_a_person_can_free_ground_an_agent_abandoned(tmp_path, monkeypatch):
     """IF THIS FAILS: clearing up after a crashed agent means impersonating it.
 
@@ -2067,3 +1895,67 @@ def test_releasing_your_own_claim_does_not_need_force(tmp_path, monkeypatch):
     assert code != 0 and "your own claim" in out, out
     code, out = _cli(repo, "release", "a.py", "--as", "alice", session="sA")
     assert code == 0, out
+
+
+def test_a_task_belongs_to_one_agent_at_a_time(tmp_path, monkeypatch):
+    """IF THIS FAILS: every severity-1 this task graph ever had comes back.
+
+    Two agents sharing one task produced all of them — a review covering half
+    the work, a gate you could opt out of by never submitting, a rejection that
+    un-did the bookkeeping, and a plain file release that silently closed a
+    task somebody else was still writing. They were not separately fixable;
+    they were one fact wearing different clothes.
+
+    Nothing is lost by refusing. Two agents on one task still take DIFFERENT
+    files, so the file lock already provides the parallelism. Sharing a task
+    label only ever added one review over work that was not all there yet.
+    """
+    repo = _repo(tmp_path, monkeypatch)
+    for f in ("a.py", "b.py"):
+        (repo / f).write_text("x = 1\n")
+    _cli(repo, "task", "add", "big", "--as", "p", "--title", "Refactor", session="sP")
+    code, out = _cli(repo, "claim", "a.py", "--as", "alice", "--task", "big",
+                     "--intent", "A", session="sA")
+    assert code == 0, out
+
+    code, out = _cli(repo, "claim", "b.py", "--as", "bob", "--task", "big",
+                     "--intent", "B", session="sB")
+    assert code != 0, ("a second agent joined the task:\n" + out)
+    assert "already being worked by" in out and "@alice" in out, out
+    # and it says what to do instead
+    assert "split this one" in out or "different task" in out, out
+
+    # the same agent may hold several files for one task — that is normal
+    code, out = _cli(repo, "claim", "b.py", "--as", "alice", "--task", "big",
+                     "--intent", "also A", session="sA")
+    assert code == 0, out
+
+
+def test_a_task_is_handed_over_sequentially_not_shared(tmp_path, monkeypatch):
+    """One agent at a time is not one agent ever. When the holder lets go, the
+    task is free — that is a handoff, and it must keep working."""
+    repo = _repo(tmp_path, monkeypatch)
+    for f in ("a.py", "b.py"):
+        (repo / f).write_text("x = 1\n")
+    _cli(repo, "task", "add", "big", "--as", "p", "--title", "T", session="sP")
+    _cli(repo, "claim", "a.py", "--as", "alice", "--task", "big", "--intent", "A", session="sA")
+    code, _ = _cli(repo, "claim", "b.py", "--as", "bob", "--task", "big", "--intent", "B", session="sB")
+    assert code != 0
+
+    _cli(repo, "release", "a.py", "--as", "alice", "--result", "handing over", session="sA")
+    code, out = _cli(repo, "claim", "b.py", "--as", "bob", "--task", "big",
+                     "--intent", "B", session="sB")
+    assert code == 0, ("the handoff was refused after alice let go:\n" + out)
+
+    # bob finishes it and somebody else checks it — the ordinary path
+    _cli(repo, "task", "done", "big", "--as", "bob", "--note", "did it", session="sB")
+    code, out = _cli(repo, "task", "review", "big", "--as", "carol", "--pass",
+                     "--evidence", "ran the suite", session="sC")
+    assert code == 0, out
+    _, brief = _cli(repo, "brief", "big", "--as", "x", session="sX")
+    assert "phase: closed" in brief, brief
+    # and alice, who touched it earlier, still cannot sign it off
+    _cli(repo, "task", "done", "big", "--as", "bob", "--note", "again", session="sB")
+    code, out = _cli(repo, "task", "review", "big", "--as", "alice", "--pass",
+                     "--evidence", "x", session="sA")
+    assert code != 0, ("an earlier holder signed off work they had touched:\n" + out)

@@ -688,6 +688,37 @@ def _cmd_claim(argv: list[str]) -> int:
                 else:
                     _err("  Declare one first with `comms-graph task add <id>`.")
                 return EXIT_USAGE
+            # ONE TASK, ONE AGENT — enforced here rather than counted.
+            #
+            # Two agents sharing a task produced every severity-1 the task
+            # graph ever had: a review that covered half the work, a gate you
+            # could opt out of by never submitting, a rejection that un-did the
+            # bookkeeping, and a plain file release that silently closed a task
+            # somebody else was still writing. None of them were separately
+            # fixable — they were the same fact wearing different clothes.
+            #
+            # Nothing is lost. Two agents on one task still take DIFFERENT
+            # files, so the file lock already gives the parallelism; sharing a
+            # task label only added one review covering work that was not all
+            # there yet. Two tasks and an edge say the same thing and cannot
+            # go wrong this way.
+            #
+            # Sequential handoff is still fine: this only refuses while
+            # somebody else is HOLDING ground. When they release — or you free
+            # an abandoned claim with `release --force` — the task is yours.
+            on_it = sorted({c.actor for c in st.claims.values()
+                            if (getattr(c, "task", "") or "") == task_tag
+                            and c.actor != actor})
+            if on_it:
+                _err(f"error: {task_tag} is already being worked by "
+                     + ", ".join("@" + a for a in on_it))
+                _err("  A task belongs to one agent at a time. Take a different task,")
+                _err("  or split this one so you each have your own to be checked.")
+                holders = [c for c in st.claims.values()
+                           if (getattr(c, "task", "") or "") == task_tag and c.actor != actor]
+                for c in holders[:3]:
+                    _err(f"    @{c.actor} holds {c.scope}  [{c.id}]")
+                return EXIT_CONFLICT
         conflicts = st.conflicts_for(scope, actor)
         # Taking ground off somebody who is not coming back. The fold has always
         # understood this — a claim carrying `steals` displaces the named one
@@ -772,7 +803,7 @@ def _cmd_claim(argv: list[str]) -> int:
         # tagged this way, so releasing the file empties them for free. It was
         # accepted and then dropped on the floor — _parse_flags takes any flag,
         # so `--task auth-api` exited 0 having recorded nothing, which left
-        # PHASE_DOING unreachable and the per-task slots limit never binding.
+        # PHASE_DOING unreachable and the task never showing a doer.
         claim_data: dict = dict(claim_data_steal)
         if intent:
             claim_data["intent"] = intent
@@ -821,22 +852,6 @@ def _cmd_claim(argv: list[str]) -> int:
         print(f"  TAKEN FROM @{stolen_from_actor} — their claim {claim_data['steals']} is ended.")
         print("  Recorded as a steal under your name, with your reason. If they come")
         print("  back and re-claim it, they will be told the same way you were.")
-    if task_tag:
-        # `slots` gates who `next` OFFERS a task to; nothing consults it here,
-        # so four agents could tag themselves onto a task declaring two and
-        # only the board ever showed it. Said rather than refused: the hard
-        # lock is per-file and already held, over-subscribing is often a
-        # correct call somebody made deliberately, and refusing work at the
-        # moment an agent is ready to do it is the wrong place to argue.
-        _t = st.tasks.get(task_tag)
-        if _t is not None:
-            on_it = {d for d in _t.doers} | {actor}
-            if len(on_it) > _t.slots:
-                print(f"  NOTE {task_tag} declared {_t.slots} slot(s) and now has "
-                      f"{len(on_it)} agent(s) on it: "
-                      + ", ".join("@" + a for a in sorted(on_it)))
-                print("  Not a conflict — the file lock is what stops two agents "
-                      "editing one thing. Worth a look if that was not deliberate.")
     print(_advice(root, flags.get("graph"), scope, others))
     return EXIT_OK
 
@@ -1373,12 +1388,6 @@ def _task_add(argv: list[str]) -> int:
     for key in ("title", "size", "ref"):
         if flags.get(key):
             data[key] = flags[key]
-    if flags.get("slots"):
-        try:
-            data["slots"] = int(flags["slots"])
-        except ValueError:
-            _err(f"error: --slots {flags['slots']!r} is not a number")
-            return EXIT_USAGE
     checks = [c.strip() for c in _repeated(argv, "check") if c.strip()]
     if checks:
         data["checks"] = checks
@@ -1807,11 +1816,7 @@ def _cmd_next(argv: list[str]) -> int:
         if blocked:
             print(f"  {len(blocked)} task(s) waiting on something unverified:")
             for t in sorted(blocked, key=lambda x: x.id)[:5]:
-                who = sorted({a for dep in t.blocked_by
-                              for a in getattr(st.tasks.get(dep), "outstanding", []) or []})
-                print(f"    {t.id} <- {', '.join(t.blocked_by)}"
-                      + (" (being worked by " + ", ".join("@" + a for a in who) + ")"
-                         if who else ""))
+                print(f"    {t.id} <- {', '.join(t.blocked_by)}")
         if cycles:
             print(f"  {len(cycles)} task(s) in a dependency loop and unreachable: "
                   + ", ".join(sorted(t.id for t in cycles)))
@@ -1829,7 +1834,7 @@ def _cmd_next(argv: list[str]) -> int:
     if ready:
         print("READY — nothing upstream is outstanding:")
         for t in ready:
-            held = f"  ({len(t.doers)}/{t.slots} slots taken)" if t.doers else ""
+            held = ""
             print(f"  {t.id}  {t.title}{held}".rstrip())
             # "nothing outstanding" is true and can still be misleading: a
             # predecessor may have been signed off by its own author. The agent
@@ -1888,10 +1893,9 @@ def _cmd_brief(argv: list[str]) -> int:
         # submitted is something the reader can actually do something about.
         for dep in t.blocked_by:
             up = st.tasks.get(dep)
-            if up is not None and getattr(up, "outstanding", []):
-                print(f"    {dep} is still being worked by "
-                      + ", ".join("@" + a for a in up.outstanding)
-                      + " — they have not submitted it yet")
+            if up is not None and up.doers:
+                print(f"    {dep} is being worked by "
+                      + ", ".join("@" + a for a in up.doers))
 
     # The point of this verb: what the upstream work decided, delivered to
     # whoever picks this up. Without it, a doer's decisions sit on their own
@@ -1982,13 +1986,6 @@ def _cmd_plan(argv: list[str]) -> int:
         for key in ("title", "size", "ref"):
             if item.get(key):
                 data[key] = str(item[key])
-        if item.get("slots"):
-            try:
-                data["slots"] = int(item["slots"])
-            except (TypeError, ValueError):
-                _err(f"error: task {slug!r} has slots={item['slots']!r}, "
-                     "which is not a number")
-                return EXIT_USAGE
         if item.get("checks"):
             checks = item["checks"]
             if isinstance(checks, str):
@@ -2061,7 +2058,7 @@ def _cmd_plan(argv: list[str]) -> int:
 
 TASK_USAGE = """Usage: comms-graph task <command>
 
-  add <id> --as <actor> [--title "..."] [--size S|M|L] [--slots N]
+  add <id> --as <actor> [--title "..."] [--size S|M|L]
                         [--check <name>]... [--ref "omni:AUF-2291"]
   edge <from> <to> --as <actor> [--kind interface|artifact|sequence]
                                 [--provides "..."]      <to> comes AFTER <from>

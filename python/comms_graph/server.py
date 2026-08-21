@@ -168,15 +168,12 @@ def _snapshot(root: Path, log_file: Path) -> dict:
             "blocked_by": t.blocked_by, "rejections": t.rejections,
             # The facts a person needs to answer "is this stuck, and was it
             # really checked". Every one of these is already in the fold and
-            # none of them reached the page: `outstanding` is WHO the task is
-            # waiting on, which is the difference between a blocked board and
-            # an actionable one, and `verification` is what the reviewer says
-            # they ran, which is the difference between a sign-off and a tick.
-            "outstanding": list(getattr(t, "outstanding", []) or []),
+            # none of them reached the page. `verification` is what the
+            # reviewer says they ran, which is the difference between a
+            # sign-off and a tick.
             "verification": getattr(t, "verification", ""),
             "checks": list(getattr(t, "checks", []) or []),
             "check_results": dict(getattr(t, "check_results", {}) or {}),
-            "slots": getattr(t, "slots", 1),
             "ever_verified": bool(getattr(t, "ever_verified", False)),
             "findings": [
                 {"what": getattr(f, "what", ""), "where": getattr(f, "where", "")}
@@ -253,15 +250,6 @@ def _snapshot(root: Path, log_file: Path) -> dict:
                     + ", ".join(c["scope"] + " (@" + c["actor"] + ")" for c in quiet_claims[:4]),
             "hint": "This is the one thing worth doing by hand. Free it with the "
                     "command on the claim, or leave it if they are still working.",
-        })
-    waiting = [t for t in tasks if t["outstanding"] and t["phase"] != _task.PHASE_CLOSED]
-    if waiting:
-        who = sorted({a for t in waiting for a in t["outstanding"]})
-        alerts.append({
-            "kind": "outstanding",
-            "text": "held up by " + ", ".join("@" + a for a in who[:6])
-                    + " on " + ", ".join(t["id"] for t in waiting[:4]),
-            "hint": "They hold ground tagged to it and have not submitted.",
         })
 
     # Every project on this machine, so the board can be a place you watch
@@ -1535,16 +1523,14 @@ function renderTasks() {
   var stuck = ts.filter(function (t) {
     return t.phase === "review" || t.phase === "cycle" ||
            (t.phase === "blocked" && t.blocked_by && t.blocked_by.length) ||
-           (t.outstanding && t.outstanding.length);
+           (t.phase === "blocked" && t.blocked_by && t.blocked_by.length);
   });
   if (stuck.length) {
     h += '<div class="stuck">';
     stuck.slice(0, 6).forEach(function (t) {
       var why = t.phase === "review" ? "needs review"
               : t.phase === "cycle" ? "in a dependency loop"
-              : (t.outstanding && t.outstanding.length)
-                  ? "waiting on " + t.outstanding.map(function (a) { return "@" + a; }).join(", ")
-                  : "waiting on " + (t.blocked_by || []).join(", ");
+              : "waiting on " + (t.blocked_by || []).join(", ");
       h += '<div class="srow"><span class="mono">' + esc(t.id) + "</span>" +
            '<span class="stitle">' + esc(t.title || "") + "</span>" +
            '<span class="swhy">' + esc(why) + "</span></div>";
@@ -1577,7 +1563,7 @@ function renderSession() {
 function renderAlarms() {
   var a = D.alerts || [];
   if (!a.length) { el("alarms").innerHTML = '<span class="calm">nothing needs you</span>'; return; }
-  var tone = { cycle: "r", dangling: "r", quiet: "w", review: "b", outstanding: "" };
+  var tone = { cycle: "r", dangling: "r", quiet: "w", review: "b" };
   var h = "";
   a.forEach(function (x) {
     h += '<span class="alarm ' + (tone[x.kind] || "") + '" title="' + esc(x.hint || "") + '">' +

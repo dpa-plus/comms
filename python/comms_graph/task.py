@@ -92,8 +92,6 @@ class Task:
     title: str = ""
     #: S, M or L. Advisory sizing, not a schedule.
     size: str = ""
-    #: How many agents may work it at once; at least 1.
-    slots: int = 1
     #: Check names that must all pass before it can be marked done.
     checks: list[str] = field(default_factory=list)
     #: Opaque external reference, e.g. "omni:AUF-2291". comms stores it and
@@ -121,25 +119,12 @@ class Task:
     #: half of it and is not a reviewer. Persistent on purpose — releasing the
     #: file ends your turn on the task, it does not unwrite what you wrote.
     workers: list[str] = field(default_factory=list)
-    #: Doers who hold ground tagged to this task and have not submitted — the
-    #: people it is actually waiting on. Derived every fold, like `doers`.
-    outstanding: list[str] = field(default_factory=list)
-    #: Who has submitted in the CURRENT round. `submitters` is permanent — it
-    #: answers "did you write this", which a rejection does not undo. This
-    #: answers "are you finished for now", which a rejection DOES undo: after
-    #: one, everybody is working again. Conflating them let a doer who had
-    #: pressed `done` once never count as outstanding again.
-    round_submitters: list[str] = field(default_factory=list)
     #: What the doer REPORTED for each declared check, name -> result. The fold
     #: has always read these to decide whether `done` is allowed and then thrown
     #: them away, so "was this actually tested" was decidable at the moment of
     #: submission and unanswerable one line later. Replaced whole on each
     #: submission: a new round reports its own results.
     check_results: dict[str, str] = field(default_factory=dict)
-    #: When the standing verification was granted. A doer who took ground
-    #: BEFORE it was moving the thing that got signed off; one who took ground
-    #: after is doing new work and does not retroactively unsign it.
-    verified_at: Any = None
     #: Decisions written while working. What a verifier reads, and what reaches
     #: whoever picks up a successor.
     notes: list[str] = field(default_factory=list)
@@ -331,11 +316,6 @@ def apply_task(tasks: dict[str, Task], ev: Any, string_of, int_of, ref_list) -> 
     size = string_of(ev.data, "size")
     if size:
         t.size = size.upper()
-    slots = int_of(ev.data, "slots")
-    if slots > 0:
-        t.slots = slots
-    if t.slots < 1:
-        t.slots = 1
     checks = ref_list(ev.data, "checks")
     if checks:
         added = [c for c in checks if c not in t.checks]
@@ -472,8 +452,6 @@ def apply_task_state(
         } if isinstance(reported, dict) else {})
         if not any(same_agent(ev.actor, prior) for prior in t.submitters):
             t.submitters.append(ev.actor)
-        if not any(same_agent(ev.actor, prior) for prior in t.round_submitters):
-            t.round_submitters.append(ev.actor)
         t.verified_by = ""
         # Clear the independence with the verification it describes. It used to
         # survive a resubmission, so after a rework `brief` on a successor said
@@ -512,7 +490,6 @@ def apply_task_state(
             return
         t.verified_by = ev.actor
         t.ever_verified = True
-        t.verified_at = getattr(ev, "ts", None)
         if author is not None:
             # An ESCAPE, not a loophole. Once two agents have both submitted a
             # task, neither may verify it and only a third party can move it —
@@ -557,13 +534,6 @@ def apply_task_state(
         # it up reads why it came back.
         t.did = ""
         t.verified_by = ""
-        t.verified_at = None
-        # Everyone is working again. Their previous submissions do not mean
-        # "finished" any more — leaving this standing meant a doer who had
-        # pressed `done` once could never be counted as still working, so one
-        # rejection put back the exact "phase: closed · doing: @bob" the
-        # outstanding rule exists to prevent.
-        t.round_submitters = []
         t.verification = ""
         # And the label describing that sign-off. Clearing this on resubmission
         # but not on rejection left the identical bug reachable by the other
@@ -667,50 +637,6 @@ def derive_phases(
 
     # Who is still writing a task: holds ground tagged to it and has not
     # submitted. Computed for every task up front because the blocked_by pass
-    # below reads it about PREDECESSORS, and a task is not finished while one
-    # of its halves is still being typed — no matter what its sign-off says.
-    # When each doer took ground, so a claim can be placed against the standing
-    # verification. Earliest claim wins: it is when they started, not when they
-    # last touched something.
-    claimed_at: dict[str, dict[str, Any]] = {tid: {} for tid in tasks}
-    # Ground taken OFF somebody continues their turn rather than starting a new
-    # one. Without this, stealing an abandoned claim closed the task on the old
-    # verification — the deadlock was gone and the successor went ready while
-    # the taker had not written a line of the half they had just taken on.
-    took_over: dict[str, dict[str, bool]] = {tid: {} for tid in tasks}
-    for c in claims:
-        tid = getattr(c, "task", "") or ""
-        if tid in claimed_at and c.ts is not None:
-            prev = claimed_at[tid].get(c.actor)
-            if prev is None or c.ts < prev:
-                claimed_at[tid][c.actor] = c.ts
-        if tid in took_over and getattr(c, "stolen_from_id", ""):
-            took_over[tid][c.actor] = True
-
-    outstanding_by_id: dict[str, list[str]] = {}
-    for tid, t in tasks.items():
-        out = []
-        for d in t.doers:
-            # `round_submitters`, not `submitters`: a rejection puts everyone
-            # back to working, and a permanent record of having submitted once
-            # must not read as "finished" forever.
-            if any(same_agent(d, sub, sessions) for sub in t.round_submitters):
-                continue
-            # A verification is evidence about the thing as it stood. Somebody
-            # who took ground BEFORE it was moving that thing, so the sign-off
-            # does not describe what is there now. Somebody who took ground
-            # AFTER is doing new work, and a bare claim must not retroactively
-            # unsign reviewed work — that had a closed task reopening, and the
-            # board printing "BLOCKED until these are VERIFIED: ta" directly
-            # above "verified by @carol: checked ta".
-            if t.verified_at is not None and not took_over.get(tid, {}).get(d):
-                started = claimed_at.get(tid, {}).get(d)
-                if started is not None and started > t.verified_at:
-                    continue
-            out.append(d)
-        outstanding_by_id[tid] = out
-        t.outstanding = out
-
     for t in tasks.values():
         # Compute this FIRST and for every task, not only for ones nobody has
         # touched. Testing verified_by ahead of it let a task that was never
@@ -737,7 +663,7 @@ def derive_phases(
         # edge behaved like an interface edge.
         blocked_by = sorted({
             dep for dep, kind in predecessors[t.id]
-            if (not tasks[dep].verified_by or outstanding_by_id.get(dep))
+            if not tasks[dep].verified_by
             and (
                 # Not finished yet: every predecessor blocks. Ordering is
                 # ordering, whatever the kind.
@@ -763,25 +689,14 @@ def derive_phases(
             # about the finished thing, and reporting it as closed would hide
             # that from everyone downstream.
             t.phase = PHASE_BLOCKED
+        elif t.verified_by:
+            t.phase = PHASE_CLOSED
+        elif t.did:
+            t.phase = PHASE_REVIEW
+        elif t.doers:
+            t.phase = PHASE_DOING
         else:
-            # Somebody who took ground for this task and has not submitted is
-            # still writing it. One doer pressing `done` used to put the WHOLE
-            # task into review — and a verification then closed it and unblocked
-            # its successors while the other half was still being typed. `brief`
-            # printed "phase: closed" and "doing: @bob" on the same line.
-            if outstanding_by_id.get(t.id):
-                # Ahead of verified_by deliberately: a sign-off can land while
-                # somebody is still on the task (they claimed in after it), and
-                # the honest report is the work, not the sign-off.
-                t.phase = PHASE_DOING
-            elif t.verified_by:
-                t.phase = PHASE_CLOSED
-            elif t.did:
-                t.phase = PHASE_REVIEW
-            elif t.doers:
-                t.phase = PHASE_DOING
-            else:
-                t.phase = PHASE_READY
+            t.phase = PHASE_READY
 
 
 # --------------------------------------------------------------------------
@@ -790,22 +705,16 @@ def derive_phases(
 
 
 def ready_tasks(tasks: dict[str, Task]) -> list[Task]:
-    """Tasks that could be started now, most recently touched first.
+    """Tasks nobody has picked up, most recently touched first.
 
-    PHASE_DOING counts too when the task has a spare slot. Phase becomes DOING
-    as soon as there is ANY doer, so filtering on READY alone meant the second
-    slot could never be discovered: `next` stopped offering the task the moment
-    the first agent claimed it, and the "(1/2 slots taken)" line was unreachable
-    code. Somebody declaring slots to get two agents onto one task got one.
+    READY only. A task with a doer belongs to that doer until they submit or
+    let go of it — one task, one agent, which is the rule that removed a whole
+    family of bugs. Every severity-1 the task graph ever had came from two
+    agents sharing one: a review that covered half the work, a gate you could
+    opt out of by never submitting, and a file release that silently closed the
+    task somebody else was still writing.
     """
-    # `verified_by` excluded explicitly. A task can now read DOING while it is
-    # already signed off — somebody took ground on it after the verification —
-    # and without this it was routed to a fresh agent as new work with nothing
-    # in the output saying it was finished.
-    out = [t for t in tasks.values()
-           if t.phase in (PHASE_READY, PHASE_DOING)
-           and not t.verified_by
-           and len(t.doers) < t.slots]
+    out = [t for t in tasks.values() if t.phase == PHASE_READY]
     out.sort(key=lambda t: (t.last_activity or datetime.min.replace(tzinfo=None)), reverse=True)
     return out
 

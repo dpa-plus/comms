@@ -337,7 +337,7 @@ def test_the_page_draws_every_array_the_snapshot_carries(board):
     for name in ("alerts", "claims", "roster", "tasks", "feed", "findings", "notes", "projects"):
         assert "D." + name in body or "d." + name in body, f"the page never reads {name}"
     # the reported checks reach the page on the EVENT that reported them
-    for token in ("outstanding", "quiet", "identified", "e.checks", "c.id", "band"):
+    for token in ("quiet", "identified", "e.checks", "c.id", "band"):
         assert token in body, f"the page never reads {token}"
 
 
