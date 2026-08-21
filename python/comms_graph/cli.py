@@ -39,6 +39,7 @@ import json
 import os
 import re
 import socket
+import shutil
 import subprocess
 import unicodedata
 import sys
@@ -122,6 +123,11 @@ def _err(msg: str) -> None:
     print(msg, file=sys.stderr)
 
 
+#: Repository named by a global --repo/--root, before the verb. Module state
+#: rather than an environment write, and reset on every main() entry.
+_GLOBAL_ROOT: str | None = None
+
+
 def _repo_root(explicit: str | None) -> Path:
     """The key the store is hashed by, so every agent in one checkout agrees.
 
@@ -138,6 +144,26 @@ def _repo_root(explicit: str | None) -> Path:
             # recorded somewhere nobody else looks, and the agent is told it
             # holds ground on a log no peer will ever read.
             _err(f"error: --root {explicit!r} is not a directory")
+            sys.exit(EXIT_USAGE)
+        return chosen
+    # Then a global --repo/--root given before the verb, then COMMS_REPO. Both
+    # exist for the same reason: when the process cannot read its own working
+    # directory — routine for a checkout under Desktop or Documents on macOS,
+    # where privacy access can be withdrawn from a running process — naming the
+    # repository is the only way to keep working. The flag wins over the
+    # variable, so what you typed on this line beats what you exported earlier.
+    #
+    # Both are validated exactly like --root: a path that is not a directory is
+    # refused rather than used. A typo that is silently accepted opens a private
+    # ledger — the command succeeds, the claim records, and the agent is told it
+    # holds ground on a log no peer will ever read.
+    for value, label in ((_GLOBAL_ROOT, "--repo"),
+                         (os.environ.get("COMMS_REPO", "").strip(), "COMMS_REPO")):
+        if not value:
+            continue
+        chosen = Path(value).expanduser().resolve()
+        if not chosen.is_dir():
+            _err(f"error: {label} {value!r} is not a directory")
             sys.exit(EXIT_USAGE)
         return chosen
     here = Path.cwd().resolve()
@@ -687,11 +713,139 @@ def _render_conflicts(conflicts: list, scope_str: str) -> str:
     return "\n".join(lines)
 
 
+def _cmd_claim_many(positional: list[str], flags: dict) -> int:
+    """Claim several scopes atomically: all of them, or none of them.
+
+    A task boundary is usually more than one file — the route, the handler and
+    its test — and taking them one at a time is not the same thing. Half a
+    boundary is the bad state: you hold two of three, somebody else holds the
+    third, and neither of you can finish without giving something back.
+
+    So every scope is validated and conflict-checked BEFORE a single event is
+    written, and the claims land in one append. The single-scope path below is
+    untouched by this and stays the common case.
+
+    Deliberately NOT supported here: `--steal`. Displacing somebody names one
+    claim id, which cannot mean anything across several scopes. The Go build
+    refuses the same combination for the same reason.
+    """
+    if flags.get("steal"):
+        _err("error: --steal takes exactly one scope")
+        _err("  A claim id names one claim, so it cannot say what to displace "
+             "across several. Steal that one, then claim the rest.")
+        return EXIT_USAGE
+    intent = flags.get("intent", "")
+    if not intent:
+        # Required for a batch specifically: one intent has to explain why these
+        # scopes belong together, or the board shows N unrelated rows and the
+        # reason they were taken as a unit is nowhere.
+        _err("error: claiming several scopes at once needs --intent saying what "
+             "they have in common")
+        return EXIT_USAGE
+
+    actor = _actor(flags)
+    root = _repo_root(flags.get("root"))
+    seen: dict[str, str] = {}
+    scopes = []
+    for raw in positional:
+        scope_str = _rooted_scope(raw, root)
+        scope = _parse_scope_or_exit(scope_str)
+        key = str(scope)
+        if key in seen:
+            _err(f"error: {raw!r} and {seen[key]!r} are the same ground")
+            _err("  Claiming one scope twice in a batch would record two rows for "
+                 "one file and make the board's count wrong.")
+            return EXIT_USAGE
+        seen[key] = raw
+        scopes.append((scope_str, scope))
+
+    log_file, lock_file = _store(root)
+    _warn_if_ephemeral(log_file)
+
+    with _lock.file_lock(lock_file) as handle:
+        st = _read_state(log_file)
+        task_tag = ""
+        if flags.get("task"):
+            task_tag = _slug_or_exit(flags["task"])
+            if task_tag not in st.tasks:
+                _err(f"error: no task called {task_tag!r} to tag these claims with")
+                return EXIT_USAGE
+            # Same rule and same wording as the single-scope path: a task
+            # belongs to one agent at a time. Batching must not be a way round it.
+            on_it = sorted({c.actor for c in st.claims.values()
+                            if (getattr(c, "task", "") or "") == task_tag
+                            and c.actor != actor})
+            if on_it:
+                _err(f"error: {task_tag} is already being worked by "
+                     + ", ".join("@" + a for a in on_it))
+                _err("  A task belongs to one agent at a time. Take a different task,")
+                _err("  or split this one so you each have your own to be checked.")
+                return EXIT_CONFLICT
+
+        # EVERY scope first. The whole point is that nothing is written until we
+        # know all of them are free.
+        blocked: list[tuple[str, object]] = []
+        for scope_str, scope in scopes:
+            conflicts = st.conflicts_for(scope, actor)
+            if not conflicts:
+                twin = _uncreated_twin(st, scope_str, root, actor)
+                conflicts = [twin] if twin is not None else []
+            if conflicts:
+                blocked.append((scope_str, conflicts[0]))
+
+        if blocked:
+            for scope_str, holder in blocked:
+                try:
+                    _log.append(log_file, _event(actor, _log.TYPE_BLOCKED, None, {
+                        "scope": scope_str, "intent": intent,
+                        "holder": holder.actor, "holder_scope": str(holder.scope),
+                    }))
+                except Exception:
+                    pass
+            _err(f"CLAIM CONFLICT — nothing was recorded. {len(blocked)} of "
+                 f"{len(scopes)} scopes are held by somebody else:")
+            for scope_str, holder in blocked:
+                extra = f'  "{holder.intent}"' if holder.intent else ""
+                _err(f"  {scope_str} — @{holder.actor}{extra}")
+            _err("  The batch is all-or-nothing, so your other scopes are still "
+                 "free. Narrow the set, or agree with them who takes what.")
+            return EXIT_CONFLICT
+
+        broken = handle.compromised()
+        if broken:
+            _err(f"error: the coordination lock is no longer exclusive: {broken}")
+            _err("  Nothing was recorded.")
+            return EXIT_ERROR
+
+        claim_data: dict = {"intent": intent}
+        if task_tag:
+            claim_data["task"] = task_tag
+        greeting = _hello_if_unknown(st, actor)
+        batch = [greeting] if greeting is not None else []
+        superseded = [c for c in st.claims.values()
+                      if c.actor == actor and str(c.scope) in seen]
+        if superseded:
+            batch.append(_tagged(st, actor, _log.TYPE_RELEASE, None, {
+                "refs": [c.id for c in superseded],
+                "result": "superseded by a new claim on the same ground",
+            }))
+        events = [_tagged(st, actor, _log.TYPE_CLAIM, [str(scope)], dict(claim_data))
+                  for _scope_str, scope in scopes]
+        _log.append_batch(log_file, batch + events)
+
+    for (scope_str, scope), event in zip(scopes, events):
+        print(f"CLAIMED {scope} by @{actor}  (id {event.id})")
+    print(f"  {len(events)} scopes taken together as one boundary: {intent}")
+    return EXIT_OK
+
+
 def _cmd_claim(argv: list[str]) -> int:
     positional, flags = _parse_flags(argv)
     if not positional:
         _err("error: claim needs a scope, e.g. comms-graph claim src/foo.py#parse --as me")
         return EXIT_USAGE
+    if len(positional) > 1:
+        return _cmd_claim_many(positional, flags)
     scope_str = _single_scope_or_exit(positional, "claim")
     actor = _actor(flags)
     intent = flags.get("intent", "")
@@ -1278,8 +1432,84 @@ def _cmd_check(argv: list[str]) -> int:
         return EXIT_BLOCK
 
 
+def _cmd_check_staged(flags: dict) -> int:
+    """Refuse a commit whose git index touches somebody else's claimed files.
+
+    A DIFFERENT exit code on purpose. The hook path must answer 2, because that
+    is the only code Claude Code reads as "block this tool call". Git is the
+    opposite: a pre-commit hook aborts on ANY non-zero, so a conflict answers 1
+    and 2 is kept for "comms could not find out" — which also aborts, and should,
+    because a guard that cannot read its log has not established anything.
+
+    Every blocked path is listed, not just the first. A commit guard that reports
+    one file at a time turns one fix into five commits.
+    """
+    root = _repo_root(flags.get("root"))
+    git = shutil.which("git")
+    if git is None:
+        _err("check --staged: git is not installed, so the index cannot be read")
+        return EXIT_BLOCK
+    try:
+        out = subprocess.run(
+            [git, "diff", "--cached", "--name-only", "-z"],
+            cwd=root, capture_output=True, timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        _err(f"check --staged: cannot read the git index: {exc}")
+        return EXIT_BLOCK
+    if out.returncode != 0:
+        _err(f"check --staged: git exited {out.returncode}: "
+             f"{out.stderr.decode('utf-8', 'replace').strip()}")
+        return EXIT_BLOCK
+
+    staged = [p for p in out.stdout.decode("utf-8", "replace").split("\0") if p]
+    if not staged:
+        return EXIT_OK
+
+    log_file, _lock_file = _store(root, create=False)
+    try:
+        log_file.stat()
+    except FileNotFoundError:
+        return EXIT_OK
+    except OSError as exc:
+        _err(f"check --staged: cannot reach the coordination log: {exc.strerror or exc}")
+        return EXIT_BLOCK
+    try:
+        st = _read_state(log_file)
+    except Exception as exc:
+        _err(f"check --staged: cannot read the coordination log: {exc}")
+        return EXIT_BLOCK
+
+    actor = (flags.get("as") or os.environ.get("COMMS_ACTOR", "")).strip()
+    blocked: list[tuple[str, object]] = []
+    for rel_text in staged:
+        # Spelled the way the filesystem spells it, exactly as the hook path
+        # does: a claim on src/a.py must still catch a staged src/A.py where
+        # those are one file.
+        target = (root / rel_text)
+        try:
+            canon = _canonical_relpath(target.resolve(), root.resolve())
+        except (ValueError, OSError):
+            canon = rel_text
+        conflicts = st.conflicts_for(_scope.parse(canon), actor)
+        if conflicts:
+            blocked.append((canon, conflicts[0]))
+
+    if not blocked:
+        return EXIT_OK
+
+    _err(f"BLOCKED: {len(blocked)} staged file(s) are claimed by somebody else.")
+    for rel_text, holder in blocked:
+        intent = f'  "{holder.intent}"' if holder.intent else ""
+        _err(f"  {rel_text} — @{holder.actor}{intent}")
+    _err("  Unstage them, or agree with the holder before committing their work.")
+    return EXIT_CONFLICT
+
+
 def _cmd_check_inner(argv: list[str]) -> int:
     positional, flags = _parse_flags(argv)
+    if "staged" in flags:
+        return _cmd_check_staged(flags)
     use_stdin = "stdin-json" in flags
 
     agent_session = ""
@@ -2186,6 +2416,34 @@ def _cmd_board(argv: list[str]) -> int:
 
 def main(argv: list[str]) -> int:
     """``argv`` is everything after ``comms-graph``."""
+    # A GLOBAL --repo/--root, before the verb. The Go build takes it there and
+    # the briefing documents `comms --repo /abs/path status` as the recovery
+    # when the working directory cannot be read — which on macOS is not exotic:
+    # a repo under Desktop, Documents or Downloads loses privacy access and
+    # every tool that calls getcwd() starts failing at once. Without this the
+    # recovery path simply does not exist in this build, and the one moment you
+    # need it is the moment you cannot cd anywhere either.
+    #
+    # `--repo` is the spelling to accept even though the per-verb flag is
+    # `--root`, because it is the one already in the briefing and in muscle
+    # memory. Rejecting it would be technically defensible and practically just
+    # a way to fail during an outage.
+    # Held in a module global rather than exported into os.environ. Writing the
+    # environment would have been fewer lines and is a trap: the value outlives
+    # the call, so anything sharing the process afterwards inherits a repository
+    # it never asked for. Caught by 64 unrelated tests failing together while
+    # each passed alone. Reset unconditionally on every entry, so one call can
+    # never colour the next.
+    global _GLOBAL_ROOT
+    _GLOBAL_ROOT = None
+    argv = list(argv)
+    while argv and argv[0] in ("--repo", "--root"):
+        if len(argv) < 2:
+            _err(f"error: {argv[0]} needs a path")
+            return EXIT_USAGE
+        _GLOBAL_ROOT = argv[1]
+        argv = argv[2:]
+
     sub = argv[0] if argv else ""
     rest = argv[1:]
     if sub in ("", "-h", "--help", "help"):
