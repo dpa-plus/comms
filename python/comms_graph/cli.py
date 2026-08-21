@@ -80,7 +80,9 @@ USAGE = """Usage: comms-graph <command>
   log [--type ...] [--since ...]                the history, filtered
   hello [--label "..."]                         announce yourself
   mcp                                           serve these as MCP tools
+  completion bash|zsh                           shell tab-completion
   version
+  help
   tasks [--out <file.html>]                     draw the task graph
   ui [--port 7878]                              live board: both graphs, live claims
 
@@ -2250,6 +2252,9 @@ def main(argv: list[str]) -> int:
         if sub == "mcp":
             from . import mcp as _mcp
             return _mcp.main(rest)
+        if sub == "completion":
+            from . import hello as _hello
+            return _hello.cmd_completion(rest)
     except _lock.LockError as exc:
         _err(f"error: could not take the comms lock: {exc}")
         return EXIT_USAGE
