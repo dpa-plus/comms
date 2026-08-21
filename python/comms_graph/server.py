@@ -170,9 +170,36 @@ def _snapshot(root: Path, log_file: Path) -> dict:
             "holding": sum(1 for c in st.claims.values() if c.actor == actor),
         })
 
+    # WHICH FILES A TASK TOUCHES. Nothing carried this, and it is the first
+    # question anybody opening a task asks. It is not stored on the task: it is
+    # derived from claims tagged `--task <id>`, which is the point of that flag —
+    # the task tracks itself from work the agent was doing anyway.
+    #
+    # Built from the LOG, not from live claims alone, so a file stays on the task
+    # after it is released. A task whose files vanish the moment the work is
+    # finished answers "what did this touch" with "nothing", which is exactly
+    # backwards.
+    held_now = {(c.actor, str(c.scope)) for c in st.claims.values()}
+    task_files: dict[str, dict[str, dict]] = {}
+    for ev in events:
+        if ev.type != _log.TYPE_CLAIM or not ev.scope:
+            continue
+        tag = _string(ev.data, "task")
+        if not tag:
+            continue
+        scope = ev.scope[0]
+        row = task_files.setdefault(tag, {}).setdefault(
+            scope, {"scope": scope, "actor": ev.actor, "held": False, "intent": ""})
+        row["actor"] = ev.actor
+        row["intent"] = _string(ev.data, "intent") or row["intent"]
+        row["held"] = (ev.actor, scope) in held_now
+
     tasks = []
     for t in sorted(st.tasks.values(), key=lambda t: t.id):
+        files = sorted(task_files.get(t.id, {}).values(), key=lambda r: r["scope"])
         tasks.append({
+            "files": files,
+            "files_held": sum(1 for f in files if f["held"]),
             "id": t.id, "title": t.title, "phase": t.phase,
             "doers": t.doers, "did": t.did, "verified_by": t.verified_by,
             "independence": t.independence,
@@ -535,15 +562,14 @@ body {
   display: flex; align-items: center; gap: 7px;
   padding-right: var(--sp-1);
 }
-.brand .mark {
-  width: 14px; height: 14px; border-radius: 2px;
-  background: var(--accent);
-  position: relative; flex: none;
-}
-.brand .mark::after {
-  content: ""; position: absolute; left: 3px; top: 3px; width: 8px; height: 8px;
-  border-radius: 1px; background: var(--surface);
-}
+/* Three nodes and the edges between them: the thing the tool is actually
+   about. Drawn rather than filled so it stays legible at 16px — a solid glyph
+   this small reads as a dot, and the whole point is that they are CONNECTED.
+   The edges sit at lower opacity so the nodes carry the shape at a glance. */
+.brand .mark { width: 16px; height: 16px; flex: none; display: block; }
+.brand .mark path { stroke: var(--accent); stroke-width: 1.3; opacity: .55;
+  fill: none; stroke-linecap: round; }
+.brand .mark circle { fill: var(--accent); }
 .sep { width: 1px; height: 18px; background: var(--line); flex: none; }
 
 .livedot {
@@ -1169,6 +1195,47 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 .tn { font-size: 15px; color: var(--ink); }
 .tl { font-size: 9.5px; letter-spacing: .06em; color: var(--ink-4); }
 .stuck { border-top: 1px solid var(--line-hair); padding: var(--sp-1) var(--sp-2); }
+
+/* the task list, and one task in full */
+.tlist { border-top: 1px solid var(--line-hair); }
+.trow { display: flex; align-items: baseline; gap: var(--sp-1);
+  padding: 5px var(--sp-2); font-size: 12.5px; cursor: pointer;
+  border-bottom: 1px solid var(--line-hair); }
+.trow:last-child { border-bottom: 0; }
+.trow:hover { background: var(--surface-2); }
+.ttitle { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; }
+.tfiles { color: var(--ink-4); font-size: 11px; flex: none; }
+.tphase { flex: none; font-size: 9.5px; letter-spacing: .05em; text-transform: uppercase;
+  border-radius: 3px; padding: 1px 5px; border: 1px solid var(--line-2); color: var(--ink-4); }
+.tphase.p-doing { color: var(--amber); border-color: var(--amber-line); background: var(--amber-wash); }
+.tphase.p-review { color: var(--accent); border-color: var(--accent-line); background: var(--accent-wash); }
+.tphase.p-blocked, .tphase.p-cycle { color: var(--red); border-color: var(--red-line); background: var(--red-wash); }
+.tphase.p-ready { color: var(--green); border-color: var(--green); background: transparent; }
+
+.tdetbox { max-width: 860px; margin: 0 auto; width: 100%; }
+.tdet-hd { display: flex; align-items: center; gap: var(--sp-1);
+  padding: var(--sp-2); border-bottom: 1px solid var(--line); }
+.tdet-title { font-size: 14px; color: var(--ink); }
+.tdet-id { color: var(--ink-4); font-size: 11.5px; }
+.tdet-bd { padding: var(--sp-2); overflow-y: auto; }
+.tdet-state { font-size: 13px; color: var(--ink); padding-bottom: var(--sp-2); }
+.tdet-sec { font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--ink-4); padding: var(--sp-2) 0 var(--sp-h); }
+.tdet-note { font-size: 12.5px; color: var(--ink-3); }
+.tdet-note.amber { color: var(--amber); }
+.tdet-checks { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+.chk { font-size: 11.5px; border-radius: 4px; padding: 1px 6px; border: 1px solid var(--line-2); color: var(--ink-3); }
+.chk.ok { color: var(--green); border-color: var(--green); }
+.chk.bad { color: var(--red); border-color: var(--red-line); background: var(--red-wash); }
+.tdet-files { border-top: 1px solid var(--line-hair); }
+.tfrow { display: flex; align-items: baseline; gap: var(--sp-1); padding: 4px 0;
+  border-bottom: 1px solid var(--line-hair); font-size: 12.5px; }
+.tfdot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--line-2); }
+.tfdot.held { background: var(--amber); }
+.tfdot.done { background: var(--green); }
+.tfpath { color: var(--ink); flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tfactor { color: var(--accent); flex: none; }
+.tfstate { color: var(--ink-4); font-size: 11px; flex: none; }
 .srow { display: flex; gap: var(--sp-1); align-items: baseline; padding: 3px 0; font-size: 12px; }
 .srow .mono { color: var(--ink); flex: none; }
 .stitle { color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1198,7 +1265,7 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 .dagbox iframe { flex: 1 1 auto; width: 100%; border: 0; display: block; min-height: 0; }
 </style>
 <header class="topbar">
-  <div class="brand"><span class="mark"></span>comms</div>
+  <div class="brand"><svg class="mark" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.2 4.6 L11.8 6.2 M4.2 4.6 L7.4 11.6 M11.8 6.2 L7.4 11.6"/><circle cx="4.2" cy="4.6" r="2.3"/><circle cx="11.8" cy="6.2" r="2.3"/><circle cx="7.4" cy="11.6" r="2.3"/></svg>comms</div>
   <div class="sep"></div>
   <div class="live"><span class="livedot" id="livedot"></span><span id="liveTxt">connecting</span><span class="mono" id="clock"></span></div>
   <div class="sep"></div>
@@ -1253,7 +1320,10 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
   </aside>
 </main>
 
-<div class="dagwrap" id="dagWrap" hidden>
+<div class="dagwrap tdetwrap" id="tdetWrap" hidden>
+    <div class="dagbox tdetbox"><div id="tdet"></div></div>
+  </div>
+  <div class="dagwrap" id="dagWrap" hidden>
   <div class="dagbox">
     <div class="dagbar">
       <button class="ghost gtab on" id="gTasks" data-src="/tasks.html">Task graph</button>
@@ -1558,29 +1628,119 @@ function renderTasks() {
   });
   h += "</div>";
 
-  // What is stuck, in words. The numbers say how much; this says what to do.
-  var stuck = ts.filter(function (t) {
-    return t.phase === "review" || t.phase === "cycle" ||
-           (t.phase === "blocked" && t.blocked_by && t.blocked_by.length) ||
-           (t.phase === "blocked" && t.blocked_by && t.blocked_by.length);
+  // EVERY task, not just the stuck ones, and every row opens. The panel used to
+  // show five numbers and a list of what was stuck, which answers "is anything
+  // wrong" and nothing else. The question people actually arrive with is "what
+  // is this task and where does it live", and that needs the files.
+  var order2 = {doing: 0, review: 1, blocked: 2, cycle: 3, ready: 4, closed: 5};
+  var sorted = ts.slice().sort(function (a, b) {
+    var d = (order2[a.phase] === undefined ? 9 : order2[a.phase]) -
+            (order2[b.phase] === undefined ? 9 : order2[b.phase]);
+    return d !== 0 ? d : (a.id < b.id ? -1 : 1);
   });
-  if (stuck.length) {
-    h += '<div class="stuck">';
-    stuck.slice(0, 6).forEach(function (t) {
-      var why = t.phase === "review" ? "needs review"
-              : t.phase === "cycle" ? "in a dependency loop"
-              : "waiting on " + (t.blocked_by || []).join(", ");
-      h += '<div class="srow"><span class="mono">' + esc(t.id) + "</span>" +
-           '<span class="stitle">' + esc(t.title || "") + "</span>" +
-           '<span class="swhy">' + esc(why) + "</span></div>";
-    });
-    if (stuck.length > 6) { h += '<div class="pmore">and ' + (stuck.length - 6) + " more</div>"; }
-    h += "</div>";
-  } else {
-    h += '<div class="allgood">Nothing is stuck.</div>';
-  }
+  h += '<div class="tlist">';
+  sorted.forEach(function (t) {
+    var n = (t.files || []).length;
+    var why = t.phase === "review" ? "needs review"
+            : t.phase === "cycle" ? "dependency loop"
+            : t.phase === "blocked" ? "waiting on " + (t.blocked_by || []).join(", ")
+            : "";
+    h += '<div class="trow" data-task="' + esc(t.id) + '">' +
+         '<span class="tphase p-' + esc(t.phase) + '">' + esc(t.phase) + "</span>" +
+         '<span class="ttitle">' + esc(t.title || t.id) + "</span>" +
+         (n ? '<span class="tfiles mono">' + n + (n === 1 ? " file" : " files") + "</span>" : "") +
+         (why ? '<span class="swhy">' + esc(why) + "</span>" : "") +
+         "</div>";
+  });
+  h += "</div>";
   el("tasks").innerHTML = h;
+  Array.prototype.forEach.call(el("tasks").querySelectorAll(".trow"), function (row) {
+    row.onclick = function () { openTask(row.getAttribute("data-task")); };
+  });
 }
+
+/* One task, in full. Opened from a row rather than always on screen: the list
+   answers "what is there", this answers "what is this and where does it live".
+   Rebuilt from D on every open, so it is never stale against the feed. */
+function openTask(id) {
+  var t = (D.tasks || []).filter(function (x) { return x.id === id; })[0];
+  if (!t) { return; }
+  var h = '<div class="tdet-hd">' +
+          '<span class="tphase p-' + esc(t.phase) + '">' + esc(t.phase) + "</span>" +
+          '<span class="tdet-title">' + esc(t.title || t.id) + "</span>" +
+          '<span class="mono tdet-id">' + esc(t.id) + "</span>" +
+          '<div class="grow"></div><button class="ghost" id="tdetClose">Close</button></div>';
+
+  h += '<div class="tdet-bd">';
+
+  // Is it done? Said in words, because "closed" and "somebody checked it" are
+  // different claims and the difference is the whole point of the review gate.
+  var state;
+  if (t.phase === "closed" && t.ever_verified) {
+    state = "Done, and checked by @" + esc(t.verified_by || "?") +
+            (t.independence ? " (" + esc(t.independence) + ")" : "");
+  } else if (t.phase === "review") {
+    state = "Finished by @" + esc(t.did || "?") + ", waiting for somebody else to check it.";
+  } else if (t.phase === "doing") {
+    state = "Being worked on by " + (t.doers || []).map(function (d) { return "@" + esc(d); }).join(", ");
+  } else if (t.phase === "blocked") {
+    state = "Blocked until these are verified: " + esc((t.blocked_by || []).join(", "));
+  } else if (t.phase === "cycle") {
+    state = "In a dependency loop, so nothing here can start.";
+  } else {
+    state = "Ready — nobody has claimed it.";
+  }
+  h += '<div class="tdet-state">' + state + "</div>";
+  if (t.rejections) {
+    h += '<div class="tdet-note amber">Sent back ' + t.rejections +
+         (t.rejections === 1 ? " time" : " times") + " before.</div>";
+  }
+
+  // The checks it declared, and what actually came back for each.
+  var checks = t.checks || [], res = t.check_results || {};
+  if (checks.length) {
+    h += '<div class="tdet-sec">CHECKS</div><div class="tdet-checks">';
+    checks.forEach(function (c) {
+      var r = res[c] || "";
+      var cls = r === "pass" ? "ok" : r ? "bad" : "none";
+      h += '<span class="chk ' + cls + '"><span class="mono">' + esc(c) + "</span>" +
+           (r ? " " + esc(r) : " not run") + "</span>";
+    });
+    h += "</div>";
+  }
+  if (t.verification) {
+    h += '<div class="tdet-sec">WHAT THE REVIEWER RAN</div>' +
+         '<div class="tdet-note">' + esc(t.verification) + "</div>";
+  }
+
+  // WHERE IT LIVES. Derived from claims tagged to this task, kept after release
+  // so finishing the work does not empty the answer.
+  var files = t.files || [];
+  h += '<div class="tdet-sec">FILES (' + files.length + ")</div>";
+  if (!files.length) {
+    h += '<div class="tdet-note">No files are tagged to this task. An agent ties ' +
+         'them on as it works: <code class="mono">comms-graph claim &lt;path&gt; --task ' +
+         esc(t.id) + "</code></div>";
+  } else {
+    h += '<div class="tdet-files">';
+    files.forEach(function (f) {
+      h += '<div class="tfrow">' +
+           '<span class="tfdot ' + (f.held ? "held" : "done") + '"></span>' +
+           '<span class="mono tfpath">' + esc(f.scope) + "</span>" +
+           '<span class="tfactor">@' + esc(f.actor) + "</span>" +
+           '<span class="tfstate">' + (f.held ? "held now" : "released") + "</span>" +
+           "</div>";
+    });
+    h += "</div>";
+  }
+  h += "</div>";
+
+  el("tdet").innerHTML = h;
+  el("tdetWrap").hidden = false;
+  el("tdetClose").onclick = closeTask;
+}
+
+function closeTask() { el("tdetWrap").hidden = true; }
 
 /* ---------- this repo --------------------------------------------------- */
 
