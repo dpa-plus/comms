@@ -235,9 +235,22 @@ def _to_utc(ts: datetime) -> datetime:
 
 
 def _format_ts(ts: datetime) -> str:
-    """RFC3339 in UTC with trailing Z, trailing zeros trimmed (Go's RFC3339Nano)."""
+    """RFC3339 in UTC with trailing Z, trailing zeros trimmed (Go's RFC3339Nano).
+
+    The year is padded EXPLICITLY rather than by ``strftime("%Y")``, which is not
+    portable: glibc renders year 1 as ``1`` and BSD libc as ``0001``. That is not
+    a cosmetic difference. RFC3339 requires four digits, so on Linux this
+    function used to return ``1-01-01T00:00:00Z`` — a string our own reader
+    refuses. The zero-instant guard in ``encode`` compares the RENDERED value
+    against ``0001-01-01T00:00:00Z`` on purpose (it asks "would our reader accept
+    these bytes?"), and an unpadded year walked straight past it, so the one
+    value guaranteed to brick a log was writable on Linux and not on macOS.
+    """
     ts = _to_utc(ts)
-    base = ts.strftime("%Y-%m-%dT%H:%M:%S")
+    base = (
+        f"{ts.year:04d}-{ts.month:02d}-{ts.day:02d}"
+        f"T{ts.hour:02d}:{ts.minute:02d}:{ts.second:02d}"
+    )
     if ts.microsecond:
         frac = f"{ts.microsecond:06d}".rstrip("0")
         base = f"{base}.{frac}"
@@ -551,6 +564,20 @@ def _repair_torn_tail(fd: int, size: int, target: str) -> int:
     definition a write that never completed — no command was ever told it
     succeeded, and no reader ever counted it. Truncating to the last newline
     restores exactly the state the interrupted command started from.
+
+    THAT PRECONDITION IS NOT DECORATION, and it is now measured. Run unlocked
+    with eight concurrent appenders on Linux, this loses whole events: a process
+    reads the size, another appends before the ftruncate lands, and the truncate
+    cuts back past complete lines it never saw. 136 of 1200 events, gone, with
+    no torn line and no duplicate to show for it — the log simply gets shorter.
+    Neutering this function makes that run clean, which is how the mechanism was
+    confirmed rather than guessed.
+
+    It does not reproduce on macOS, so it is invisible to anyone developing
+    there. Every production path holds the lock (checked call site by call
+    site), so this is a hazard for FUTURE callers, not a live fault — which is
+    exactly why ``append_batch`` takes ``repair_torn_tail`` rather than leaving
+    the requirement in a docstring nothing enforces.
     """
     if not size or os.pread(fd, 1, size - 1) == b"\n":
         return size
@@ -576,12 +603,19 @@ def _repair_torn_tail(fd: int, size: int, target: str) -> int:
     return keep
 
 
-def append(path: str | os.PathLike[str], event: Event) -> None:
+def append(
+    path: str | os.PathLike[str], event: Event, *, repair_torn_tail: bool = True
+) -> None:
     """Append one event as a JSONL line. The caller MUST hold the repo lock."""
-    append_batch(path, (event,))
+    append_batch(path, (event,), repair_torn_tail=repair_torn_tail)
 
 
-def append_batch(path: str | os.PathLike[str], events: Sequence[Event] | Iterable[Event]) -> None:
+def append_batch(
+    path: str | os.PathLike[str],
+    events: Sequence[Event] | Iterable[Event],
+    *,
+    repair_torn_tail: bool = True,
+) -> None:
     """Append several events as consecutive lines in one open and one write.
 
     The caller MUST hold the per-repo lock. Two properties are load-bearing:
@@ -615,7 +649,11 @@ def append_batch(path: str | os.PathLike[str], events: Sequence[Event] | Iterabl
     # before writing past it. O_APPEND still pins every write to end of file.
     fd = os.open(target, os.O_RDWR | os.O_CREAT | os.O_APPEND, 0o600)
     try:
-        start = _repair_torn_tail(fd, os.fstat(fd).st_size, target)
+        start = (
+            _repair_torn_tail(fd, os.fstat(fd).st_size, target)
+            if repair_torn_tail
+            else os.fstat(fd).st_size
+        )
         written = 0
         try:
             while written < len(buf):

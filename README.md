@@ -274,6 +274,26 @@ More in [`docs/DESIGN.md`](docs/DESIGN.md) and [`docs/PROTOCOL.md`](docs/PROTOCO
 
 ---
 
+## Two implementations, one log
+
+This repository holds two builds of comms, and they are not a port and its
+original — they run side by side against **the same store**, read each other's
+events, and block each other's claims.
+
+- **Go** — everything outside `python/`, installed as the `comms` binary. This is
+  what the shipped `PreToolUse` hook runs.
+- **Python** — [`python/`](python/README.md), installed as `comms-graph`. Answers
+  every verb the Go build does, plus `board` and `tasks`: a task graph with a
+  review gate, and a board for the person watching. Built on
+  [graphify](https://pypi.org/project/graphifyy/), so a claim can also report
+  what sits *next to* the code you took.
+
+Because the log is the interface, moving a hook from one to the other is a
+one-line change and reversible — the events already interleave. Both are covered
+by [CI](.github/workflows/ci.yml).
+
+---
+
 ## License
 
 [MIT](LICENSE).

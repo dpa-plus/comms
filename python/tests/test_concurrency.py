@@ -165,7 +165,14 @@ for i in range(n):
     ids.append(ev.id)
 barrier()
 for ev in evs:
-    log.append(path, ev)
+    # repair_torn_tail=False because this run is deliberately UNLOCKED, and
+    # that repair is only sound under the lock: it ftruncates to a point
+    # computed from a size another appender has already moved past, so it
+    # cuts away complete lines nobody told it about. On Linux that silently
+    # loses ~10% of this run; on macOS it does not reproduce. Production
+    # always holds the lock. The property under test here is O_APPEND alone,
+    # so the lock-dependent step has no business inside it.
+    log.append(path, ev, repair_torn_tail=False)
 print(json.dumps(ids))
 """
 
@@ -295,7 +302,12 @@ for i in range(per_batch):
         data={"text": "z" * 1000, "worker": IDX, "seq": i},
     ))
 barrier()
-log.append_batch(path, batch)
+# repair_torn_tail=False for the same reason as the single-append run above:
+# this is deliberately unlocked, and that repair truncates from a stale size.
+# A 250 KiB batch makes a short write likelier, so it loses even more here --
+# 1003 of 1320 lines on Linux -- which would mask the interleaving bug this
+# test exists to catch behind a much louder one.
+log.append_batch(path, batch, repair_torn_tail=False)
 print(json.dumps([e.id for e in batch]))
 """
 

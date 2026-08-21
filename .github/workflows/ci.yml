@@ -81,3 +81,54 @@ jobs:
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
+
+  python:
+    name: python (${{ matrix.os }}, py ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ['3.11', '3.12']
+    defaults:
+      run:
+        working-directory: python
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - name: install
+        run: python -m pip install -e ".[dev]"
+      - name: pytest
+        run: python -m pytest -q
+
+  python-wheel:
+    name: python wheel (clean install)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      # An editable install resolves comms_graph from its own directory, which
+      # hides two failures this job exists to catch: a module missing from
+      # [tool.setuptools] packages, and a console script that only works from
+      # the directory it was built in. Both have happened here.
+      - name: build wheel
+        working-directory: python
+        run: |
+          python -m pip install build
+          python -m build --wheel --outdir dist .
+      - name: install into a clean environment and run from elsewhere
+        run: |
+          python -m venv /tmp/clean
+          /tmp/clean/bin/pip install python/dist/*.whl
+          cd /
+          /tmp/clean/bin/comms-graph version
+          /tmp/clean/bin/comms-graph --help > /tmp/verbs.txt
+          for v in claim release check board status task tasks plan next brief \
+                   session doc find note log hello lesson mcp ui version; do
+            grep -qE "^  $v" /tmp/verbs.txt || { echo "wheel lost the '$v' verb"; exit 1; }
+          done

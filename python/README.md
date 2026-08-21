@@ -1,10 +1,15 @@
 # comms — coordination for parallel coding agents
 
-This is a fork of [graphify](README.md). Graphify turns a folder of code into a
-queryable knowledge graph. This fork adds one thing on top of it: **a way for
+This is the Python implementation of comms, installed as `comms-graph`. It sits
+on top of [graphify](https://pypi.org/project/graphifyy/), which turns a folder
+of code into a queryable knowledge graph, and adds one thing: **a way for
 several agents working in the same checkout at the same time to find out who is
 already on the ground they are about to edit, and whose work sits next to
 theirs.**
+
+The Go implementation in [the repository root](../) answers the same protocol
+against the same log, and the two read each other's events. See
+[Development](#development) for which one to reach for.
 
 That is the whole feature. It is smaller than it sounds, on purpose, and the
 next section says exactly how much smaller — read it before you decide whether
@@ -61,7 +66,7 @@ stops the wrong agent from starting, this is not that, and deliberately so.
 One command, in any git repo:
 
 ```
-graphify comms claim src/parser.py --as agent-a --intent "rewrite tokenizer"
+comms-graph claim src/parser.py --as agent-a --intent "rewrite tokenizer"
 ```
 
 That is the whole interface for the common case. `--as` is required (two agents
@@ -86,9 +91,9 @@ plainly that no contact check was possible.
 Full surface:
 
 ```
-graphify comms claim <scope> --as <actor> [--intent "..."]
-graphify comms release <scope|claim-id> --as <actor> [--result "..."]
-graphify comms board [--as <actor>]
+comms-graph claim <scope> --as <actor> [--intent "..."]
+comms-graph release <scope|claim-id> --as <actor> [--result "..."]
+comms-graph board [--as <actor>]
 ```
 
 `<scope>` is a path, optionally anchored: `src/foo.py`, `src/foo.py#parse`, or
@@ -198,36 +203,27 @@ and `nora` are one agent to the gate. It is a fixed table of the letters that
 actually collide in a Latin name, not a full confusables database — it closes
 the disguise somebody would reach for, not every one that exists.
 
-## Two hooks, and only one of them blocks
+## The hook that blocks
 
-This matters more than it looks, and it is easy to assume wrongly.
-
-`graphify install` wires **`graphify hook-guard edit`**. That guard is
-**advisory by design**: when your edit lands inside somebody else's claim it
-adds a note to the model's context saying so — its own message ends "NOT
-blocking" — and the edit proceeds. It is a nudge, and it is deliberately a
-nudge; it fails open on an unreadable log, an odd filename, a missing store.
-
-**`graphify comms check --stdin-json`** is the one that stops an edit. It exits
-2, which is the only exit code Claude Code treats as "block this tool call and
-show stderr to the model"; every other non-zero code means "the hook errored"
-and the edit goes through anyway. It fails CLOSED: anything it cannot establish
-answers 2, because a coordination tool that cannot read its log has not
-established that the file is free.
-
-If you want claims enforced rather than mentioned, wire the second one yourself:
+Nothing wires itself. Claims are recorded whether or not a hook exists; a hook
+is what turns "recorded" into "enforced", and you install it yourself:
 
 ```json
 { "hooks": { "PreToolUse": [ { "matcher": "Edit|Write",
     "hooks": [ { "type": "command",
-                 "command": "graphify comms check --stdin-json" } ] } ] } }
+                 "command": "comms-graph check --stdin-json" } ] } ] } }
 ```
 
-Both now spell paths the way the filesystem does, so neither is fooled by
-`src/A.py` versus `src/a.py` on a case-insensitive volume. That is worth saying
-because it was not true until recently, and the two were fixed at different
-times: every correctness fix landed on `comms check` first, and `hook-guard`
-inherited none of them until it was pointed at the same canonicaliser.
+**`comms-graph check --stdin-json`** exits 2, which is the only exit code Claude
+Code treats as "block this tool call and show stderr to the model". Every other
+non-zero code means "the hook errored" and the edit goes through anyway — so a
+guard that exits 1 on a conflict is not a guard. It fails CLOSED: anything it
+cannot establish answers 2, because a coordination tool that cannot read its log
+has not established that the file is free.
+
+It spells paths the way the filesystem does, so it is not fooled by `src/A.py`
+versus `src/a.py` on a case-insensitive volume — two agents cannot hold one file
+under two spellings of its name.
 
 ## The work graph — what exists, in what order, and was it checked
 
@@ -237,11 +233,11 @@ second layer does that, and it is optional: claims record and block with or
 without it.
 
 ```
-graphify comms plan --from plan.json --as planner   a whole graph, atomically
-graphify comms next --as <you>                      what you could start now
-graphify comms brief <task-id>                      what it is, and what came before
-graphify comms task done <id> --as <you> --check test=pass --note "..."
-graphify comms task review <id> --as <you> --pass|--fail --evidence "..."
+comms-graph plan --from plan.json --as planner   a whole graph, atomically
+comms-graph next --as <you>                      what you could start now
+comms-graph brief <task-id>                      what it is, and what came before
+comms-graph task done <id> --as <you> --check test=pass --note "..."
+comms-graph task review <id> --as <you> --pass|--fail --evidence "..."
 ```
 
 Three rules carry the design, and each is there because the alternative was
@@ -294,13 +290,15 @@ refuses an edge that would close a loop before writing a single byte.
 
 ## For agents, not just humans
 
-`graphify install` writes a short "Parallel agents" block into the always-on
-instruction files (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, …) telling the agent to
-claim before it edits, and — importantly — how to read the two halves of the
-reply differently.
+There is no install verb: nothing edits your config files behind your back. The
+briefing agents should be given is shipped as `comms_graph/instructions.md` —
+paste it into `CLAUDE.md` / `AGENTS.md` / `GEMINI.md`, or point a skill at it. It
+tells the agent to claim before it edits and, importantly, how to read the two
+halves of the reply differently: the conflict blocks, the nearby note does not.
 
-Over MCP (`graphify-mcp`) the same surface is exposed as four tools:
-`comms_claim`, `comms_check`, `comms_release`, `comms_status`.
+`comms-graph mcp` serves the same surface as MCP tools over stdio: `comms_claim`,
+`comms_check`, `comms_release`, `comms_status`, `comms_find`, `comms_note`,
+`comms_session_id`, `comms_session_name`.
 
 ---
 
@@ -309,11 +307,12 @@ Over MCP (`graphify-mcp`) the same surface is exposed as four tools:
 Two stores, and the split is load-bearing:
 
 - **The map is derived.** `graphify-out/graph.json` is thrown away and rebuilt
-  whenever the code changes, rewritten whole-file, and deleted outright by
-  `graphify uninstall --purge`.
+  whenever the code changes, and rewritten whole-file. Losing it costs you a
+  re-extract and nothing else.
 - **The log is truth.** Append-only, never rewritten, must never be lost. It
   holds claims, releases, findings and tasks, under the user data directory keyed
-  by a hash of the repository root.
+  by a hash of the repository root — the same store the Go build reads and
+  writes, which is why the two can run side by side.
 
 Coordination state is written to the log and only *projected* onto the map.
 Putting it in `graph.json` would lose it on the next rebuild, and would lose
@@ -327,23 +326,31 @@ two private ones that each report success while coordinating nothing.
 
 ## Development
 
-Run the fork's own tests:
+This directory is the whole of the Python build. Edit it here — there is no
+second tree it is generated from.
 
 ```
-pytest tests/comms tests/test_comms_lock.py \
-       tests/test_comms_always_on.py tests/test_comms_edit_hook.py
+python3.11 -m venv .venv && .venv/bin/pip install -e ".[dev]"
+.venv/bin/python -m pytest          # the suite
 ```
 
-CI for this layer is [.github/workflows/comms.yml](.github/workflows/comms.yml):
-the comms tests on Linux and macOS across Python 3.11 and 3.12, plus a packaging
-job that builds the wheel and sdist and asserts `graphify/comms/` is actually
-inside them. That last job exists because the subpackage was missing from the
-explicit `[tool.setuptools] packages` list in `pyproject.toml` — the wheel built
-clean, installed clean, and then raised `ModuleNotFoundError` on the first
-`graphify comms` command. Unit tests cannot catch that, because they import from
-the source tree where the package is always present.
+CI is [.github/workflows/ci.yml](../.github/workflows/ci.yml), which runs this
+suite on Linux and macOS across Python 3.11 and 3.12, plus a packaging job that
+builds the wheel and **installs it into a clean environment and runs the console
+script from an unrelated directory**. That last job is not ceremony. An editable
+install resolves `comms_graph` from its own directory, so it hides two failures
+the wheel does not: a module missing from `[tool.setuptools] packages` installs
+clean and then raises `ModuleNotFoundError` on first use, and a console script
+that depends on the working directory dies everywhere except where you tested
+it. Both happened here. Unit tests cannot catch either, because they import from
+the source tree, where the package is always present.
 
-The upstream graphify suite (`.github/workflows/ci.yml`) still has to pass. If
-you touch anything under `graphify/always_on/`, those files are **generated** —
-edit the fragments in `tools/skillgen/fragments/always-on/` and re-run
-`python -m tools.skillgen`, or the `skillgen-check` job will fail on drift.
+### Which build to reach for
+
+The Go build at the repository root and this one speak the same protocol against
+the same log, and neither is a port frozen behind the other: they read each
+other's events, so a claim taken by one blocks the other. Go is what the
+installed `comms` binary runs today. Python is where `board`, `tasks` and the
+task graph live — Go has no equivalent — and it is the one under active
+development. Switching a hook from one to the other is a one-line change and
+reversible, because the log they share does not care which wrote it.
