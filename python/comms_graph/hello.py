@@ -282,3 +282,86 @@ def main(argv: list[str]) -> int:
 
 if __name__ == "__main__":  # pragma: no cover - parity with the other modules
     sys.exit(main(sys.argv[1:]))
+
+
+# ---------------------------------------------------------------------------
+# completion
+# ---------------------------------------------------------------------------
+
+#: Every verb, and the sub-verbs worth completing. Kept here rather than parsed
+#: out of the usage text, because a completion that silently drifts from the
+#: real command list is worse than none — it teaches a verb that does not exist.
+_COMPLETION_VERBS = [
+    "claim", "release", "board", "check", "task", "plan", "next", "brief",
+    "tasks", "ui", "find", "note", "doc", "lesson", "session", "status",
+    "log", "hello", "mcp", "version", "help",
+]
+_COMPLETION_SUBS = {
+    "task": ["add", "edge", "done", "review"],
+    "session": ["start", "join", "end", "retire", "lead"],
+    "find": ["bug", "fix", "ship", "decision", "gotcha"],
+}
+
+_BASH = """# comms-graph completion for bash. Add to ~/.bashrc:
+#   eval "$(comms-graph completion bash)"
+_comms_graph() {{
+  local cur prev
+  cur="${{COMP_WORDS[COMP_CWORD]}}"
+  prev="${{COMP_WORDS[COMP_CWORD-1]}}"
+  case "$prev" in
+{cases}
+  esac
+  if [ "$COMP_CWORD" -eq 1 ]; then
+    COMPREPLY=( $(compgen -W "{verbs}" -- "$cur") )
+    return
+  fi
+  COMPREPLY=( $(compgen -f -- "$cur") )
+}}
+complete -F _comms_graph comms-graph
+"""
+
+_ZSH = """# comms-graph completion for zsh. Add to ~/.zshrc:
+#   eval "$(comms-graph completion zsh)"
+_comms_graph() {{
+  local -a verbs
+  verbs=({verbs})
+  if (( CURRENT == 2 )); then
+    _describe 'command' verbs
+    return
+  fi
+  case "${{words[2]}}" in
+{cases}
+  esac
+  _files
+}}
+compdef _comms_graph comms-graph
+"""
+
+
+def cmd_completion(argv: list[str]) -> int:
+    """Emit a shell completion script.
+
+    Bash and zsh only. Not because the others do not matter, but because these
+    two are what is on this machine and a completion nobody can run is a file
+    that goes stale without anyone noticing.
+    """
+    shell = (argv[0] if argv else "").strip().lower()
+    if shell in ("", "-h", "--help", "help"):
+        _cli._err("usage: comms-graph completion bash|zsh")
+        _cli._err("  Then: eval \"$(comms-graph completion zsh)\" in your shell rc.")
+        return _cli.EXIT_USAGE if shell else EXIT_USAGE
+    verbs = " ".join(_COMPLETION_VERBS)
+    if shell == "bash":
+        cases = "\n".join(
+            f'    {v}) COMPREPLY=( $(compgen -W "{" ".join(subs)}" -- "$cur") ); return ;;'
+            for v, subs in _COMPLETION_SUBS.items())
+        sys.stdout.write(_BASH.format(cases=cases, verbs=verbs))
+        return _cli.EXIT_OK
+    if shell == "zsh":
+        cases = "\n".join(
+            f'    {v}) _values \'sub\' {" ".join(subs)}; return ;;'
+            for v, subs in _COMPLETION_SUBS.items())
+        sys.stdout.write(_ZSH.format(cases=cases, verbs=verbs))
+        return _cli.EXIT_OK
+    _cli._err(f"error: no completion for {shell!r}; bash and zsh are supported")
+    return _cli.EXIT_USAGE
