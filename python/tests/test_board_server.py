@@ -422,3 +422,41 @@ def test_the_working_now_band_is_actually_visible(board):
     assert 'class="held"' not in body, (
         "the band is using .held again, which the inherited sheet hides"
     )
+
+
+def test_a_findings_text_reaches_the_feed(board):
+    """IF THIS FAILS: every finding on the board renders as an empty quote line.
+
+    `find` writes a finding's text as data["summary"] — that is what the CLI
+    writes, what the Go build wrote before it, and what the findings panel
+    already reads. The feed builder read data["body"] alone, which only notes
+    carry. So the board showed 1532 findings in the real store with the category
+    badge, the actor and the time, and nothing where the sentence goes.
+
+    It is worth a test rather than a fix alone because nothing else notices: the
+    page still renders, the counts are still right, and the panel beside it is
+    still correct. Only a person reading a blank line would ever know.
+    """
+    repo, log_file, base = board
+    clog.append(log_file, clog.Event(
+        ts=_now(), id=clog.new_id(), actor="alice", type=clog.TYPE_FINDING,
+        data={"category": "ship", "summary": "v9 released and installed"},
+    ))
+    clog.append(log_file, clog.Event(
+        ts=_now(), id=clog.new_id(), actor="alice", type=clog.TYPE_NOTE,
+        data={"body": "a note carries body, and must keep working"},
+    ))
+
+    _, raw = _get(base + "/api/status")
+    feed = json.loads(raw).get("feed", [])
+    by_type = {e["type"]: e for e in feed}
+
+    assert by_type["finding"]["body"] == "v9 released and installed", (
+        "the finding reached the feed without its text"
+    )
+    assert by_type["note"]["body"] == "a note carries body, and must keep working"
+
+
+def _now():
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc)
