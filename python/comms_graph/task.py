@@ -51,15 +51,27 @@ PHASE_BLOCKED = "blocked"
 #: In, or downstream of, a dependency cycle. Reported rather than hung on.
 PHASE_CYCLE = "cycle"
 
-#: B consumes an interface or an artifact from A. Reworking A flags B for
-#: recheck, because what B was built against may have moved.
-EDGE_INTERFACE = "interface"
-EDGE_ARTIFACT = "artifact"
+#: B uses something A produces. Reworking A flags B for recheck, because what
+#: B was built against may have moved.
+#:
+#: There used to be two words for this — `interface` and `artifact` — and every
+#: place the kind was READ treated them identically. So writing an edge meant
+#: choosing between synonyms, every time, for no change in behaviour. Both are
+#: still accepted and fold to this, so existing logs are unaffected; `consumes`
+#: is simply what it always meant, and it pairs with `--provides`.
+EDGE_CONSUMES = "consumes"
 #: Ordering only. Reworking A does NOT touch B. This distinction is what makes a
 #: rejection precise instead of invalidating everything downstream of it.
 EDGE_SEQUENCE = "sequence"
 
-_EDGE_KINDS = frozenset({EDGE_INTERFACE, EDGE_ARTIFACT, EDGE_SEQUENCE})
+#: Accepted on input and folded to the canonical kind above.
+_EDGE_ALIASES = {"interface": EDGE_CONSUMES, "artifact": EDGE_CONSUMES}
+
+_EDGE_KINDS = frozenset({EDGE_CONSUMES, EDGE_SEQUENCE})
+
+# Kept so anything importing the old names keeps working; both mean CONSUMES.
+EDGE_INTERFACE = EDGE_CONSUMES
+EDGE_ARTIFACT = EDGE_CONSUMES
 
 
 @dataclass
@@ -355,6 +367,7 @@ def apply_task_edge(edges: list[TaskEdge], ev: Any, string_of,
     if not from_ or not to or from_ == to:
         return
     kind = string_of(ev.data, "kind").lower()
+    kind = _EDGE_ALIASES.get(kind, kind)
     if kind not in _EDGE_KINDS:
         # An unrecognised kind becomes the weakest one. Guessing "interface"
         # would invent a rework dependency nobody declared.
@@ -670,7 +683,7 @@ def derive_phases(
                 not t.verified_by
                 # Finished, and it consumes from this predecessor: what it was
                 # built against has moved, so look again.
-                or kind in (EDGE_INTERFACE, EDGE_ARTIFACT)
+                or kind == EDGE_CONSUMES
                 # Finished, ordering-only edge — but this predecessor has NEVER
                 # been verified, so the successor was never legitimately
                 # startable and its sign-off jumped the queue. That is a

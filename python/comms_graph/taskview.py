@@ -127,7 +127,7 @@ def build(state: Any) -> tuple[list[dict], list[dict], dict]:
             # invent a node, and hiding it silently would lose the fact that
             # somebody wrote it down, so it is reported in the summary instead.
             continue
-        consumes = e.kind in (_task.EDGE_INTERFACE, _task.EDGE_ARTIFACT)
+        consumes = e.kind == _task.EDGE_CONSUMES
         out_edges.append({
             "from": e.from_,
             "to": e.to,

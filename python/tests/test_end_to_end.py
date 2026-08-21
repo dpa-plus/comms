@@ -523,14 +523,11 @@ def test_every_comms_data_file_is_declared_for_the_wheel():
     setuptools_cfg = cfg["tool"]["setuptools"]
     declared = setuptools_cfg.get("packages")
     if isinstance(declared, dict):
-        includes = declared.get("find", {}).get("include", [])
-        covered = any(fnmatch.fnmatch("comms_graph", g) for g in includes)
+        covered = any(fnmatch.fnmatch("comms_graph", g)
+                      for g in declared.get("find", {}).get("include", []))
     else:
         covered = "comms_graph" in (declared or [])
-    assert covered, (
-        "comms_graph is not covered by [tool.setuptools] packages, so the whole "
-        f"package would be missing from the wheel (declared: {declared})"
-    )
+    assert covered, f"comms_graph is not covered by packages (declared: {declared})"
     globs = setuptools_cfg.get("package-data", {}).get("comms_graph", [])
 
     on_disk = sorted(
@@ -614,6 +611,4 @@ def test_the_hook_path_is_the_one_the_cli_dispatches():
 
     for name in ("commands", "tools"):
         assert not (root / "comms_graph" / f"{name}.py").exists(), (
-            f"{name}.py is back. It is a second implementation of this CLI that "
-            "nothing dispatches, and it reads as live code."
-        )
+            f"{name}.py is back. It is a second implementation that nothing dispatches.")

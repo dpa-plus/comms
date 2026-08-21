@@ -199,15 +199,18 @@ For one task at a time, or to extend a plan that already exists:
 ```bash
 COMMS_ACTOR=claude-dev comms task add auth-api --title "Session create / refresh / revoke" \
   --size L --check test --ref tracker:PROJ-1234
-COMMS_ACTOR=claude-dev comms task edge db-schema auth-api --kind artifact \
+COMMS_ACTOR=claude-dev comms task edge db-schema auth-api --kind consumes \
   --provides "sessions table; uuid PKs, no cuid"
 ```
 
-The edge `--kind` is load-bearing, not a label. `interface` and `artifact` mean
-the later task consumes something, so reworking the earlier one flags it for a
-recheck; `sequence` is ordering only and propagates nothing. Say what is consumed
-in `--provides` — that is the text `comms brief` hands to whoever picks the next
-task up.
+The edge `--kind` is load-bearing, not a label, and there are two of them.
+`consumes` means the later task uses something the earlier one produces, so
+reworking the earlier one flags it for a recheck. `sequence` is ordering only
+and propagates nothing. Say what is consumed in `--provides` — that is the text
+`comms brief` hands to whoever picks the next task up.
+
+(`interface` and `artifact` are still accepted and mean `consumes`. They were
+two words for one behaviour, which made every edge a choice between synonyms.)
 
 **One task, one agent at a time.** If somebody else is holding ground tagged to
 a task, take a different one — or split it so you each have your own piece to be
@@ -222,7 +225,7 @@ your own work to verify. `comms task show` prints the whole graph grouped by wha
 you can do about it.
 
 **Run `comms brief <slug>` before you start a task.** It walks the incoming edges
-and gives you the interface or artifact you are building on plus the decisions the
+and gives you what you are building on plus the decisions the
 upstream agent recorded. Without it you will re-decide questions that were already
 settled, and probably differently.
 

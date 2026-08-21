@@ -293,7 +293,7 @@ def test_an_edge_is_upserted_not_duplicated():
                                  "provides": "the schema"})]
     st = cstate.fold(evs)
     assert len(st.task_edges) == 1
-    assert st.task_edges[0].kind == "interface"
+    assert st.task_edges[0].kind == "consumes"
     assert st.task_edges[0].provides == "the schema"
 
 
@@ -1017,7 +1017,7 @@ def test_an_edge_event_naming_no_kind_keeps_the_recorded_one():
            ev("task_edge", "p", {"from": "a", "to": "b", "provides": "schema v2"})]
     st = cstate.fold(evs)
     assert len(st.task_edges) == 1
-    assert st.task_edges[0].kind == "interface"
+    assert st.task_edges[0].kind == "consumes"
     assert st.task_edges[0].provides == "schema v2"
 
 
@@ -1959,3 +1959,53 @@ def test_a_task_is_handed_over_sequentially_not_shared(tmp_path, monkeypatch):
     code, out = _cli(repo, "task", "review", "big", "--as", "alice", "--pass",
                      "--evidence", "x", session="sA")
     assert code != 0, ("an earlier holder signed off work they had touched:\n" + out)
+
+
+def test_the_old_edge_kinds_still_fold(tmp_path, monkeypatch):
+    """IF THIS FAILS: every log written before the merge changes meaning.
+
+    `interface` and `artifact` were two words for one behaviour — every place
+    the kind was READ treated them identically, so writing an edge meant
+    picking between synonyms for no effect. They are one kind now, `consumes`,
+    which is what they always meant and which pairs with `--provides`.
+
+    Both old spellings must keep folding to it. A log is append-only: events
+    written months ago cannot be rewritten, so the reader has to keep
+    understanding them.
+    """
+    from comms_graph import state as cstate
+
+    ev = _Seq()
+    for spelling in ("interface", "artifact", "consumes"):
+        st = cstate.fold([
+            ev("task", "p", {"task": "a", "title": "A"}),
+            ev("task", "p", {"task": "b", "title": "B"}),
+            ev("task_edge", "p", {"from": "a", "to": "b", "kind": spelling,
+                                  "provides": "the schema"}),
+        ])
+        assert st.task_edges[0].kind == "consumes", (spelling, st.task_edges[0].kind)
+        # and it still REOPENS a finished successor, which is what the kind is for
+        assert st.task_edges[0].provides == "the schema"
+
+    # sequence is untouched and still means ordering only
+    st = cstate.fold([
+        ev("task", "p", {"task": "c", "title": "C"}),
+        ev("task", "p", {"task": "d", "title": "D"}),
+        ev("task_edge", "p", {"from": "c", "to": "d", "kind": "sequence"}),
+    ])
+    assert st.task_edges[0].kind == "sequence"
+
+
+def test_the_cli_accepts_the_old_kind_names(tmp_path, monkeypatch):
+    """Agents and plan files in the wild say `interface`. Refusing them would
+    turn a rename into a breaking change for no reason."""
+    repo = _repo(tmp_path, monkeypatch)
+    _cli(repo, "task", "add", "a", "--as", "p", "--title", "A", session="sP")
+    _cli(repo, "task", "add", "b", "--as", "p", "--title", "B", session="sP")
+    for spelling in ("interface", "artifact", "consumes"):
+        code, out = _cli(repo, "task", "edge", "a", "b", "--as", "p",
+                         "--kind", spelling, "--provides", "x", session="sP")
+        assert code == 0, (spelling, out)
+    code, out = _cli(repo, "task", "edge", "a", "b", "--as", "p",
+                     "--kind", "nonsense", session="sP")
+    assert code != 0, out

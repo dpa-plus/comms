@@ -1430,10 +1430,13 @@ def _task_edge(argv: list[str]) -> int:
     # that only makes sense for an interface. The stored kind is looked up under
     # the lock below; this is only the explicitly-given one.
     kind = (flags.get("kind") or "").lower()
-    if kind and kind not in (_task.EDGE_INTERFACE, _task.EDGE_ARTIFACT, _task.EDGE_SEQUENCE):
-        _err(f"error: --kind {kind!r} is not one of interface, artifact, sequence")
-        _err("  interface/artifact mean <to> consumes something from <from>, so reworking")
-        _err("  <from> flags <to>. sequence is ordering only.")
+    kind = _task._EDGE_ALIASES.get(kind, kind)
+    if kind and kind not in (_task.EDGE_CONSUMES, _task.EDGE_SEQUENCE):
+        _err(f"error: --kind {kind!r} is not one of consumes, sequence")
+        _err("  consumes: the later task uses something this one produces, so"
+             " reworking this flags it for a recheck.")
+        _err("  sequence: ordering only. (interface and artifact are accepted"
+             " and mean consumes.)")
         return EXIT_USAGE
 
     with _lock.file_lock(lock_file) as handle:
@@ -2031,8 +2034,9 @@ def _cmd_plan(argv: list[str]) -> int:
             _err(f"error: {from_!r} cannot come after itself")
             return EXIT_USAGE
         kind = str(item.get("kind") or _task.EDGE_SEQUENCE).lower()
-        if kind not in (_task.EDGE_INTERFACE, _task.EDGE_ARTIFACT, _task.EDGE_SEQUENCE):
-            _err(f"error: edge kind {kind!r} is not one of interface, artifact, sequence")
+        kind = _task._EDGE_ALIASES.get(kind, kind)
+        if kind not in (_task.EDGE_CONSUMES, _task.EDGE_SEQUENCE):
+            _err(f"error: edge kind {kind!r} is not one of consumes, sequence")
             return EXIT_USAGE
         if _task.would_cycle(pending, from_, to):
             _err(f"error: this plan contains a dependency loop: {from_} -> {to} closes it")
@@ -2072,9 +2076,9 @@ def _cmd_plan(argv: list[str]) -> int:
 
 TASK_USAGE = """Usage: comms-graph task <command>
 
-  add <id> --as <actor> [--title "..."] [--size S|M|L]
+  add <id> --as <actor> [--title "..."] [--size S|M|L]   (a rough scale, not a gate)
                         [--check <name>]... [--ref "tracker:PROJ-1234"]
-  edge <from> <to> --as <actor> [--kind interface|artifact|sequence]
+  edge <from> <to> --as <actor> [--kind consumes|sequence]
                                 [--provides "..."]      <to> comes AFTER <from>
   done <id> --as <actor> [--check name=pass]... [--note "..."]
   review <id> --as <actor> --pass|--fail [--evidence "..."]
