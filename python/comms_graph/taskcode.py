@@ -71,7 +71,8 @@ def _files_of(graph, node_ids) -> set[str]:
 
 
 def link(graph, tasks: dict[str, Any], task_files: dict[str, list[str]], root,
-         task_actors: dict[str, set[str]] | None = None) -> dict[str, dict]:
+         task_actors: dict[str, set[str]] | None = None,
+         caller: str = "") -> dict[str, dict]:
     """For each task: what its files reach, and which tasks that puts it next to.
 
     Returns ``{task_id: {"touches": int, "related": [{"task", "via", "shared"}]}}``.
@@ -83,7 +84,9 @@ def link(graph, tasks: dict[str, Any], task_files: dict[str, list[str]], root,
         return {}
 
     own: dict[str, set[str]] = {}
-    for tid in tasks:
+    for tid, t in tasks.items():
+        if getattr(t, "probe", False):
+            continue
         scopes = task_files.get(tid) or []
         if scopes:
             own[tid] = _nodes_for(graph, scopes, root)
@@ -118,19 +121,25 @@ def link(graph, tasks: dict[str, Any], task_files: dict[str, list[str]], root,
             if not shared:
                 continue
             places = _files_of(graph, shared)
-            mine = (task_actors or {}).get(tid) or set()
             theirs = (task_actors or {}).get(other) or set()
             related.append({
                 "task": other,
                 # Distinct FILES, which is what "places" means to a reader.
                 "shared": len(places),
                 "via": sorted(places)[:3],
-                # Meeting your own earlier work is a mirror, not a warning. The
-                # point of this is finding the person you have not talked to, and
-                # on a task whose whole list was its author's own prior tasks the
-                # useful rows were pushed off the bottom.
-                "same_actor": bool(mine and theirs and mine <= theirs or
-                                   theirs and mine and theirs <= mine),
+                # Relative to WHO IS ASKING, not to the task being read.
+                #
+                # The first version compared the two tasks' owners, which is a
+                # different question and looks right only on your own task. On a
+                # peer's brief it marked all of THEIR work "your own" — and since
+                # the label means "skip, you already know this", it hid exactly
+                # the rows worth reading and left the caller's own two tasks
+                # unlabelled at the top as though they were the strangers. That
+                # inverts the feature rather than merely annoying.
+                #
+                # With no caller, no label: saying nothing is correct, and
+                # guessing is what went wrong.
+                "same_actor": bool(caller and caller in theirs),
             })
         # Somebody else's work first, then by how specific the overlap is.
         related.sort(key=lambda r: (r["same_actor"], -r["shared"], r["task"]))

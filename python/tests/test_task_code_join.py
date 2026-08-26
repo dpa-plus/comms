@@ -105,3 +105,64 @@ def test_a_task_with_no_tagged_files_is_simply_absent(monkeypatch):
     where it lives."""
     out = _link(monkeypatch, {"task-a": ["a.py"], "orphan": []})
     assert "orphan" not in out
+
+
+def test_your_own_is_relative_to_who_is_asking(monkeypatch):
+    """IF THIS FAILS: reading a peer's task hides the rows you needed.
+
+    "Your own earlier work" means "skip, you already know this". The first
+    version compared the two TASKS' owners rather than asking who was calling —
+    a different question that looks right only on your own task. Read a peer's
+    brief and every one of THEIR tasks was marked yours, so the label hid what
+    was worth reading and left your own tasks unlabelled at the top as though
+    they were the strangers. That inverts the feature rather than annoying you.
+    """
+    monkeypatch.setattr(taskcode, "_nodes_for",
+                        lambda graph, scopes, root: {s for s in scopes if s in graph})
+    files = {"mine": ["a.py"], "theirs": ["b.py"]}
+    actors = {"mine": {"alice"}, "theirs": {"bob"}}
+    tasks = {t: _T(t) for t in files}
+
+    # Alice asking: bob's task is not hers.
+    out = taskcode.link(_graph(), tasks, files, None, actors, caller="alice")
+    assert out["mine"]["related"][0]["same_actor"] is False
+
+    # Bob asking about alice's task: his own work IS his.
+    out = taskcode.link(_graph(), tasks, files, None, actors, caller="bob")
+    assert out["mine"]["related"][0]["same_actor"] is True
+
+
+def test_with_no_caller_nothing_is_labelled(monkeypatch):
+    """Saying nothing is correct; guessing is what went wrong the first time."""
+    monkeypatch.setattr(taskcode, "_nodes_for",
+                        lambda graph, scopes, root: {s for s in scopes if s in graph})
+    files = {"mine": ["a.py"], "theirs": ["b.py"]}
+    out = taskcode.link(_graph(), {t: _T(t) for t in files}, files, None,
+                        {"mine": {"alice"}, "theirs": {"bob"}}, caller="")
+    assert all(r["same_actor"] is False for r in out["mine"]["related"])
+
+
+def test_a_probe_task_is_not_a_neighbour(monkeypatch):
+    """IF THIS FAILS: testing the tool pollutes the graph it produces.
+
+    An agent made a task purely to reproduce a bug in comms — claim a file,
+    append a line, stage, revert, release, zero real changes — and it then sat in
+    the graph permanently as a three-file neighbour of that agent's real work,
+    outranking a genuine one-file neighbour. That is a direct cost of the rule
+    that every file-changing request gets a task, and it compounds: the harder
+    people test, the more of it accumulates.
+
+    A probe stays a task. It is claimed and auditable. It is simply not evidence
+    about where the real work meets.
+    """
+    monkeypatch.setattr(taskcode, "_nodes_for",
+                        lambda graph, scopes, root: {s for s in scopes if s in graph})
+
+    class _P(_T):
+        probe = True
+
+    files = {"real": ["a.py"], "spike": ["b.py"]}
+    tasks = {"real": _T("real"), "spike": _P("spike")}
+    out = taskcode.link(_graph(), tasks, files, None)
+    assert out["real"]["related"] == [], "a probe was counted as a neighbour"
+    assert "spike" not in out, "a probe should not get a neighbourhood of its own"

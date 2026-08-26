@@ -240,6 +240,9 @@ def _snapshot(root: Path, log_file: Path, graph_path: Path | None = None) -> dic
             {t["id"]: [f["scope"] for f in t.get("files") or []] for t in tasks},
             root,
             {t["id"]: {f["actor"] for f in t.get("files") or []} for t in tasks},
+            # The board's viewer is the operator, not one of the agents, so
+            # nothing is "your own" here and the label correctly never appears.
+            os.environ.get("COMMS_ACTOR", "").strip(),
         ) if graph is not None else {}
     except Exception as exc:  # pragma: no cover - defensive by intent
         links = {}

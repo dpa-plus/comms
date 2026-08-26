@@ -388,6 +388,39 @@ The map runs at roughly a third to a half recall on this kind of codebase, so
 **silence from it is weak evidence**. "Meets nothing" means "nothing found", not
 "nothing there".
 
+**And some files are not on the map at all**, which is a different thing from low
+recall and reads the same. The map is built from code: a JSON catalogue, a
+config file, a SQL migration has no symbols and no imports, so it is simply
+absent. In this repo the single highest-traffic shared file is
+`frontend/messages/de.json` — the one most likely to be edited by two agents at
+once — and it can never appear as a shared file. An agent lost work to exactly
+that file while its task showed no relevant neighbours. Treat catalogue, config
+and migration files as invisible here and coordinate them by claiming, not by
+looking for a connection that cannot exist.
+
+**The map is only as fresh as the last extract.** It does not update itself. A
+map several commits old reports line numbers that have moved and misses
+connections added since, and it does so confidently — which is worse than having
+none, because a wrong answer and a right one look identical. The board shows the
+map's age and warns past a day. If what you are reading matters, re-run
+`graphify extract . --code-only` first.
+
+**Where this is worth reading, and where it is not.** Measured by the agents
+using it: for the author of both sides of a connection it is confirmation, not
+information — you already know. It earns its place when you are about to touch a
+file you did NOT write and cannot know who is downstream of it right now. The
+code map gives you the fan-out; the claims give you which of those are in
+somebody's open task. Neither half is the feature; the join is.
+
+That is also why `claim` runs the same check at the moment you take ground: that
+is when the information is new.
+
+**A task you made to find something out is not work.** Declare it with
+`comms-graph task add <slug> --probe` and it stays out of the derived
+neighbours. Diagnostics, spikes and reproductions get tasks under the rule
+above, and without the flag they sit in the graph afterwards as permanent
+neighbours of real work.
+
 **In practice, before you start a task:**
 
 ```bash
@@ -413,8 +446,18 @@ The split is not a matter of taste; it was measured on this codebase.
 `rg` locates a symbol. Once you have its name, graphify tells you what connects
 to it — which is the part grep cannot do without a manual fan-out.
 
+**The two forms answer different questions and only one of them gives you
+callers.** `explain <symbol>` returns what that symbol calls and what contains
+it; it does NOT reliably return its callers, including plain same-file calls.
+`explain <file>` returns the files that import it, and is complete. So if the
+question is "who depends on this", ask for the FILE. Measured against `rg` on a
+real change: the file form matched grep exactly, and its per-symbol precision is
+what makes it worth running before a signature change — nine files imported the
+module, only three imported the symbol being changed.
+
 ```bash
-graphify explain "matchTransactionToTenancy"   # callers, callees, relation kinds
+graphify explain "<symbol>"                    # its CALLEES and what contains it
+graphify explain "path/to/file.ts"             # its IMPORTERS — who depends on it
 graphify affected "<node-id>"                  # transitive blast radius
 graphify god-nodes                             # the hubs, when you are new here
 ```
