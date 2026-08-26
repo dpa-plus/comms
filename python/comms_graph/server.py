@@ -2006,7 +2006,7 @@ function renderTasks() {
     // chip cost about a third of the row and the title, which is the only part
     // anybody reads, was being truncated to twenty characters to make room.
     return '<div class="trow p-' + esc(t.phase) + '" data-task="' + esc(t.id) + '" ' +
-           'title="' + esc(t.phase + " — " + (t.title || t.id)) + '">' +
+           'title="' + esc(t.phase + ": " + (t.title || t.id)) + '">' +
            '<div class="ttitle">' + esc(t.title || t.id) + "</div>" +
            '<div class="tmeta">' +
              (why ? '<span class="swhy">' + esc(why) + "</span>" : "") +
