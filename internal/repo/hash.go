@@ -57,7 +57,7 @@ func Discover(start, gitTopLevelOverride string) (Identity, error) {
 	}
 	resolved, err := filepath.EvalSymlinks(abs)
 	if err != nil {
-		// On macOS, /tmp resolves to /private/tmp via symlink — that's expected.
+		// On macOS, /tmp resolves to /private/tmp via symlink: that's expected.
 		if errors.Is(err, os.ErrNotExist) {
 			return Identity{}, fmt.Errorf("repo: resolve %q: %w", abs, err)
 		}

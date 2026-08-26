@@ -9,7 +9,7 @@ somebody is standing*. That is the whole vocabulary. There is no "blocked", no
 "go first", no "wait for", no number that ranks one piece of work above another.
 
 That restriction is not politeness, it is the measured result. Deriving ORDER
-from the map — A changes something B leans on, therefore A first — was checked
+from the map. A changes something B leans on, therefore A first: was checked
 against three months of real changes on two projects and was right about as often
 as a coin flip; on one project the real work went the other way round most of the
 time. See ``docs/COMMS.md``. A picture is far more persuasive than a line of
@@ -21,14 +21,14 @@ HOW IT STAYS THE SAME PICTURE. It calls the real exporter
 (:func:`graphify.exporters.html.to_html`) and then appends one ``<style>`` and one
 ``<script>`` before ``</body>``. Nothing in the base document is edited. Community
 colouring, physics, the legend, the learning overlay, the vis-network options and
-the CDN ``<script>`` tag are whatever the exporter produced — including its
+the CDN ``<script>`` tag are whatever the exporter produced: including its
 warts, which are deliberately inherited rather than forked (see NETWORK below).
 If the exporter changes, this changes with it.
 
 NETWORK. The exporter loads vis-network from unpkg.com with an SRI hash, and that
 tag is inherited unchanged, so **the produced file is not offline-capable: the
 drawing needs the network the first time a browser opens it.** Verified, not
-assumed — with the library unreachable the map area is a blank dark rectangle.
+assumed: with the library unreachable the map area is a blank dark rectangle.
 
 What is NOT inherited is failing silently. The exporter's script declares
 ``network`` and ``nodesDS`` as top-level ``const``s; when the library is missing
@@ -36,7 +36,7 @@ that script throws before initialising them, and they stay in the temporal dead
 zone where even ``typeof network`` raises. A naive overlay is killed by the same
 ReferenceError and vanishes with the picture. Everything here reaches those
 bindings through a guarded accessor instead, so with no network you still get the
-roster — who holds what, and why — plus a visible line saying the map did not
+roster: who holds what, and why: plus a visible line saying the map did not
 draw. A blank page beside a silent panel would read as "nothing is going on",
 which is the one thing this must never say by accident.
 
@@ -72,7 +72,7 @@ DEFAULT_FILENAME = "graph.comms.html"
 #: does not stamp its owner's name onto forty rings.
 #:
 #: This is a legibility rule about text, and nothing else. It used to also
-#: suppress the "nearby" ring — see MAX_NEAR below for why that was wrong.
+#: suppress the "nearby" ring: see MAX_NEAR below for why that was wrong.
 MAX_LABELLED_PLACES = 3
 
 #: Cap on how many faint rings ONE claim may draw. A whole-file claim in a busy
@@ -80,7 +80,7 @@ MAX_LABELLED_PLACES = 3
 #: the picture to mush.
 #:
 #: WHAT WAS WRONG BEFORE. This module suppressed the nearby ring entirely for any
-#: claim covering more than three PLACES — three graph nodes. A whole-file claim
+#: claim covering more than three PLACES: three graph nodes. A whole-file claim
 #: is the natural unit and resolves to one node per symbol, so every ordinary
 #: claim blew past three instantly: the four claims in a real run covered 24, 37,
 #: 11 and 9 places and every one of them printed "nearby not drawn". The faint
@@ -112,10 +112,10 @@ class HeldNode:
     actor: str
     scope: str
     why: str = ""
-    via: str = ""  # "file" | "symbol" | "lines" — how the claim reached it
+    via: str = ""  # "file" | "symbol" | "lines": how the claim reached it
     #: Whether the who/why tag is drawn beside this ring. A whole-file claim
     #: lands on every symbol in the file, and repeating one person's name fifty
-    #: times over a tight cluster is a smear, not information — so a big claim
+    #: times over a tight cluster is a smear, not information, so a big claim
     #: rings every node it holds and captions exactly one of them.
     tag: bool = True
     #: For that one captioned node: how many other places the same claim holds.
@@ -164,7 +164,7 @@ class ViewData:
     notes: list[str] = field(default_factory=list)
     generated: str = ""
     #: True when the log could not be READ. An empty claim list then means "we
-    #: do not know", not "nobody" — and those two must never render alike,
+    #: do not know", not "nobody", and those two must never render alike,
     #: because one of them is the most reassuring sentence this tool prints.
     blind: bool = False
 
@@ -215,7 +215,7 @@ def load_graph(path: Path):
         return _lg(Path(path))
     except Exception as exc:
         # A map that exists and will not load is NOT the same as no map, and
-        # saying "no map has been built yet — run graphify extract" sends
+        # saying "no map has been built yet: run graphify extract" sends
         # somebody to re-run a command that already produced the broken file.
         # Recorded here and reported by the caller.
         raise _MapUnreadable(str(exc)) from exc
@@ -226,7 +226,7 @@ def communities_of(graph) -> tuple[dict[int, list[str]], dict[int, str]]:
 
     Same reconstruction ``serve.py`` does. Reading them back off the nodes rather
     than re-clustering is what guarantees the colours match ``graph.html``
-    exactly — re-running the clustering could legitimately land on a different
+    exactly: re-running the clustering could legitimately land on a different
     (equally valid) split and repaint the whole map.
     """
     communities: dict[int, list[str]] = {}
@@ -258,8 +258,8 @@ def read_state(root: Path, log_file: str | Path | None = None) -> _state.State:
         return _state.State()
     except Exception as exc:
         # A log that will NOT PARSE is a different thing entirely, and returning
-        # empty state made the picture assert its most reassuring sentence —
-        # "Nobody is holding anything right now" — out of data it had just
+        # empty state made the picture assert its most reassuring sentence:
+        # "Nobody is holding anything right now": out of data it had just
         # failed to read. An empty log and an unreadable one must never render
         # the same way.
         raise _LogUnreadable(str(exc)) from exc
@@ -280,7 +280,7 @@ def _stale_note(root: Path, map_path: Path, rel_path: str) -> str | None:
 
     COMMS.md: a claim pointing at code that changed since the map was built is
     reported as out of date rather than as truth. This is the cheapest honest
-    version of that — file mtime against graph.json mtime.
+    version of that: file mtime against graph.json mtime.
     """
     try:
         map_mtime = map_path.stat().st_mtime
@@ -307,7 +307,7 @@ def collect(graph, state, root: Path, map_path: Path) -> ViewData:
         # No map is not the same as nobody working. The claims live in the log,
         # which does not need the map at all, and an early return here once made
         # the no-map page print "nobody is holding anything" under a heading that
-        # promised what the log knows — the single most dangerous sentence this
+        # promised what the log knows: the single most dangerous sentence this
         # tool can get wrong, because it reads as all-clear.
         for claim in claims:
             scope = getattr(claim, "scope", None)
@@ -356,7 +356,7 @@ def collect(graph, state, root: Path, map_path: Path) -> ViewData:
 
         for p in res.places:
             # First claim on a node wins the label; a second one is still shown
-            # in the panel, so nothing is hidden — only the ring text is one name.
+            # in the panel, so nothing is hidden: only the ring text is one name.
             data.held.setdefault(
                 p.node_id,
                 HeldNode(
@@ -405,7 +405,7 @@ def collect(graph, state, root: Path, map_path: Path) -> ViewData:
 
     # Count only people the picture can actually SHOW. Counting every claimant
     # made the headline say "1 place(s) held by 3 people" when two of the three
-    # had claimed files the map has never seen — so the sentence promised a
+    # had claimed files the map has never seen, so the sentence promised a
     # picture of three agents and drew one, and the reader had no way to tell
     # which. The unplaced ones are not dropped; they are counted separately and
     # listed underneath, because an unplaceable claim is usually a brand-new
@@ -450,13 +450,13 @@ def _js(obj) -> str:
     Escaping only ``</`` is not enough, and the gap is reachable from ordinary
     agent input: an intent containing ``<!--<script`` opens an HTML comment that
     swallows the rest of the element, so the coordination overlay silently
-    vanished while the map itself still drew. Nothing errored — the claims were
+    vanished while the map itself still drew. Nothing errored: the claims were
     simply not there, which is the worst possible way for this to fail.
 
     ``<`` is escaped wholesale instead. Inside a JSON string ``\u003c`` is the
     same character to any parser, and no sequence the HTML tokeniser cares about
     can survive: not ``</script``, not ``<!--``, not ``<![CDATA[``.
-    ``\u2028``/``\u2029`` go too — they are line terminators in JavaScript but
+    ``\u2028``/``\u2029`` go too: they are line terminators in JavaScript but
     not in JSON, so a raw one ends the statement early.
     """
     text = json.dumps(obj, ensure_ascii=False)
@@ -781,8 +781,8 @@ def _standalone_page(data: ViewData, map_path: Path) -> str:
         # Two DIFFERENT empty states, and the second one used to borrow the
         # first's sentence. This page was missed when the interactive one was
         # fixed: with an unreadable log it printed the most reassuring line the
-        # tool has — "Nobody is holding anything right now. That is what the log
-        # says" — attributing it to a log it had just failed to parse, while the
+        # tool has: "Nobody is holding anything right now. That is what the log
+        # says": attributing it to a log it had just failed to parse, while the
         # board rail beside it showed the parse error. The page contradicted
         # itself and the reassuring half was the false one.
         "<div class='quiet'>The coordination log could not be read, so this page "
@@ -918,7 +918,7 @@ def render(
     communities, labels = communities_of(graph)
 
     # The exporter silently swaps to an aggregated community-level meta-graph
-    # above its node cap, and in that render the node ids ARE community ids —
+    # above its node cap, and in that render the node ids ARE community ids:
     # every mark would land on the wrong thing, or on nothing. Say so instead.
     if graph.number_of_nodes() > _viz_limit():
         data.held.clear()

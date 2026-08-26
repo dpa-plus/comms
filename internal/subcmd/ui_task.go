@@ -10,8 +10,8 @@ import (
 
 // The dashboard's route map.
 //
-// Layout is computed HERE, in Go, and shipped as coordinates. The alternative —
-// laying out in the browser — means hand-rolled graph code inside a Go raw
+// Layout is computed HERE, in Go, and shipped as coordinates. The alternative:
+// laying out in the browser: means hand-rolled graph code inside a Go raw
 // string that cannot contain a backtick, untestable except through the DOM. This
 // way the geometry is ordinary Go with ordinary tests, and the page only draws.
 //
@@ -95,7 +95,7 @@ type uiTaskBoard struct {
 }
 
 // buildTaskBoard lays the graph out. staleAfter marks an agent that has gone
-// quiet while holding work — the only red thing on the board.
+// quiet while holding work: the only red thing on the board.
 func buildTaskBoard(st *state.State, now time.Time, staleAfter time.Duration) *uiTaskBoard {
 	b := &uiTaskBoard{Tasks: []uiTask{}, Edges: []uiTaskEdge{}}
 	if st == nil || len(st.Tasks) == 0 {

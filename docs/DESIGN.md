@@ -116,3 +116,61 @@ So we compute glob ∩ glob purely as a string operation. `src/**` overlaps `src
 - LSP integration for symbol anchors (string equality is good enough).
 - Web UI (CLI + grep + `git log` are sufficient).
 - Replacing this design is cheap if it doesn't work: the on-disk shape is JSONL + Markdown, both of which any tool can read.
+
+---
+
+## Where comms came from
+
+This is the third generation of multi-agent coordination at DPA+. The first was
+a single 1,632-line `COMMS.md` markdown file. It worked, but grew without bound,
+had no targeted reads, relied on agents remembering to update it, and iCloud
+sync kept forking the file. The second was `mcp-agent-mail`, a heavy MCP server
+with severity ladders and seven identities: too much ceremony, and agents kept
+forgetting the protocol. comms is the small version that learned from both.
+
+## Why comms reads git, and not only its own log
+
+Every guard here used to ask one question, *is this path claimed by somebody
+else*, and report "no" as safety. It is not. "Nobody has declared anything" and
+"nothing is happening" are different facts. Four measured incidents, all failing
+in the reassuring direction:
+
+1. The board printed "no active claims in this repo" while `git status` showed
+   fifteen changed files. Four of those paths appear zero times in the log.
+2. `check --staged` passed a commit carrying a staged deletion left behind by a
+   departed agent. The check was true on its own terms, the file was unclaimed,
+   and the deletion shipped.
+3. An agent committed a translation file while another agent **held the claim on
+   it**, and seventeen of the holder's in-flight keys shipped inside somebody
+   else's commit.
+4. One agent ran zero comms commands after a context compaction and edited
+   heavily anyway. In its own words: *a rule that only exists as prose decays
+   exactly this way.*
+
+Two of those look identical and are not. (2) was a **detection** failure: the
+check asked the wrong question, and reading `git status` fixes it. (3) was not.
+`check --staged` would have refused it by name, with the holder's claim id in the
+message. That is an **enforcement** failure, and no amount of better checking
+closes it, which is why `guard install` exists.
+
+The rule that falls out, and it generalises past this tool: prefer the signal
+nobody has to remember to emit, and never render "we could not establish
+anything" as "all clear".
+
+## What the task tag buys
+
+A claim says who is on a file. A task says what the work is, and tagging claims
+to it with `--task <slug>` is what lets the board answer "which files did this
+touch" and "whose work sits next to mine". It costs one flag on a command you
+were running anyway, and it is the only bookkeeping in the tool that is not
+derived for you.
+
+When it was phrased as a suggestion, agents skipped it: across 4,356 real claims
+exactly one carried a task. It is a rule in the skill now, and stated as one.
+
+## Task titles are written for people
+
+`--title` is the only line about a task that somebody outside the code ever
+reads. It is plain English, in English, with no file names, function names or
+jargon, and the technical detail goes in the notes, the checks and the files.
+"Round money the same way everywhere", not "money-rounding refactor in toCents".

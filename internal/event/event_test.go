@@ -83,7 +83,7 @@ func TestDecodeReportsUnknownTypeDistinctly(t *testing.T) {
 	}
 }
 
-// TestEncodeStillRefusesUnknownType — the asymmetry that makes forward
+// TestEncodeStillRefusesUnknownType: the asymmetry that makes forward
 // compatibility safe. A binary may READ a type it does not know; it must never
 // WRITE one, or it would author events it cannot itself fold.
 func TestEncodeStillRefusesUnknownType(t *testing.T) {

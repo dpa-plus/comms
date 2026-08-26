@@ -9,7 +9,7 @@
 //	        | <symbol-name>      (opaque identifier)
 //
 // The `#` is escaped as `\#` when it appears in a filename. We never
-// expand globs against the real filesystem — overlap is computed
+// expand globs against the real filesystem: overlap is computed
 // purely as a string operation on the patterns themselves.
 package overlap
 
@@ -24,7 +24,7 @@ import (
 
 // lineRangeRe matches the exact line-range anchor shape `L<n>-<m>` and nothing
 // else. Anchors that merely start with 'L' and contain '-' (e.g. "List-impl",
-// "Loader-2", "L-value", "Linked-list") must NOT be treated as ranges — they
+// "Loader-2", "L-value", "Linked-list") must NOT be treated as ranges: they
 // are legitimate symbol names and have to fall through to the SYMBOL branch.
 var lineRangeRe = regexp.MustCompile(`^L([0-9]+)-([0-9]+)$`)
 
@@ -46,7 +46,7 @@ type Scope struct {
 type AnchorKind int
 
 const (
-	AnchorWhole  AnchorKind = iota // no `#` anchor — claims the entire file
+	AnchorWhole  AnchorKind = iota // no `#` anchor: claims the entire file
 	AnchorLine                     // L<n>-<m>
 	AnchorSymbol                   // symbol-name (opaque string)
 )
@@ -125,13 +125,13 @@ func NormalizePath(raw string) (string, error) {
 
 // isControlRune reports whether r is a C0 control character (< 0x20), DEL
 // (0x7F), or a C1 control character (U+0080–U+009F). These code points can
-// carry terminal-escape sequences — notably C1 CSI (U+009B), which many
-// terminals interpret exactly like the two-byte ESC[ introducer — so we
+// carry terminal-escape sequences: notably C1 CSI (U+009B), which many
+// terminals interpret exactly like the two-byte ESC[ introducer, so we
 // refuse to persist any scope path or anchor that contains them.
 //
 // We deliberately check by rune rather than by raw byte so that normal
-// printable Unicode — whose multi-byte UTF-8 encodings contain continuation
-// bytes in the 0x80–0xBF range — is never rejected: legitimate code points
+// printable Unicode: whose multi-byte UTF-8 encodings contain continuation
+// bytes in the 0x80–0xBF range: is never rejected: legitimate code points
 // (Café, файл, 日本語) decode to runes ≥ 0x100 and pass cleanly. A C1 control,
 // by contrast, is a single code point in 0x80–0x9F (e.g. valid-UTF-8 U+009B is
 // bytes 0xC2 0x9B) and is caught here regardless of how it was encoded.
@@ -163,7 +163,7 @@ func normalizePath(raw string) (string, error) {
 	if cleaned == "." || cleaned == "" {
 		return "", fmt.Errorf("scope: empty path after normalization")
 	}
-	// Reject any remaining `..` segments — they escape the repo root.
+	// Reject any remaining `..` segments: they escape the repo root.
 	segments := strings.Split(cleaned, "/")
 	for _, seg := range segments {
 		if seg == ".." {
@@ -205,7 +205,7 @@ func parseAnchor(s string) (Anchor, error) {
 		return Anchor{}, fmt.Errorf("scope: symbol is empty after trimming whitespace")
 	}
 	for _, r := range sym {
-		// Reject control bytes (C0/C1/DEL) and newlines — same hardening as the
+		// Reject control bytes (C0/C1/DEL) and newlines: same hardening as the
 		// path side, so anchors can't smuggle terminal-escape sequences either.
 		if isControlRune(r) {
 			return Anchor{}, fmt.Errorf("scope: symbol contains control character")

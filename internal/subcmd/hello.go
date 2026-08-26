@@ -85,7 +85,7 @@ func runHello(args []string, label, model, vendor string) error {
 	//
 	// COMMS_ACTOR is set per COMMAND in practice (agents prefix each invocation),
 	// not in the session environment. A PreToolUse hook inherits the environment
-	// and therefore has no actor at all — so it could not tell the agent that
+	// and therefore has no actor at all, so it could not tell the agent that
 	// holds a claim from a stranger, and blocked agents from editing files they
 	// had just claimed themselves. The hook payload carries the same session id
 	// that is in this process's environment, so recording it here is what lets
@@ -149,7 +149,7 @@ const maxLabelRunes = 120
 // validateLabel rejects labels that could forge output lines or inject
 // terminal-escape sequences. The label is rendered raw via %s in human output
 // (here and in `comms status`), so refuse any control character (C0 < 0x20, DEL
-// 0x7F, or the C1 range 0x80–0x9f — this includes newline, carriage return, and
+// 0x7F, or the C1 range 0x80–0x9f: this includes newline, carriage return, and
 // ESC) and cap the length. Called on the trimmed value before it is stored in
 // the event. Delegates to the shared rejectControlText helper so the label gets
 // the same C1 coverage as note bodies and finding summaries.
@@ -160,7 +160,7 @@ func validateLabel(label string) error {
 	return rejectControlText("--label", label, maxLabelRunes)
 }
 
-// baseNameOfActor returns everything before the first `-` — `claude-3a1f`
+// baseNameOfActor returns everything before the first `-`: `claude-3a1f`
 // → `claude`, `human-eli` → `human`, `alice` → `alice`.
 func baseNameOfActor(name string) string {
 	if i := strings.IndexByte(name, '-'); i > 0 {

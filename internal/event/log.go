@@ -146,7 +146,7 @@ func Read(path string) ([]Event, error) {
 		}
 		ev, derr := Decode(trimmed)
 		if derr != nil {
-			// A type we do not know is not corruption — it is a newer writer.
+			// A type we do not know is not corruption: it is a newer writer.
 			// Skip it and carry on, the same way a duplicate ID is skipped below.
 			// Everything else still aborts: a log we cannot parse is not a log we
 			// should silently act on.

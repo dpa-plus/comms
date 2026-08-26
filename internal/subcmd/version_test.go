@@ -9,7 +9,7 @@ import (
 )
 
 // The version command must surface the build metadata injected at release time
-// — without it, `comms version` on a real release would be useless for bug
+// because without it, `comms version` on a real release would be useless for bug
 // reports. Lock the fields (version/commit/date) plus the runtime Go version.
 func TestVersionCmdPrintsInjectedBuildInfo(t *testing.T) {
 	info := BuildInfo{Version: "1.2.3", Commit: "abc1234def0", Date: "2026-01-01T00:00:00Z"}

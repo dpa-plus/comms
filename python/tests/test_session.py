@@ -2,7 +2,7 @@
 
 A session is the only thing in comms that spans agents AND spans verbs. If it
 breaks, it breaks quietly: the commands still exit 0, the claims are still
-recorded, and the damage shows up later — ground that `end` cannot free because
+recorded, and the damage shows up later: ground that `end` cannot free because
 it was never tagged, two halves of one group working under two ids that look
 like different projects, or an agent that starts a session and is then blocked
 from editing the file it just claimed because its identity record was
@@ -121,7 +121,7 @@ def _claim_as_the_wiring_will(repo, actor, scope, *, ts=None):
 
 
 def _hello_at(repo, actor, when, **data):
-    """A hello dated `when` — for the actors a test needs to be silent or old."""
+    """A hello dated `when`: for the actors a test needs to be silent or old."""
     ev = clog.Event(ts=when, id=clog.new_id(when), actor=actor, type="hello",
                     scope=None, data=data)
     clog.append(clog.log_path(repo), ev)
@@ -129,7 +129,7 @@ def _hello_at(repo, actor, when, **data):
 
 
 # ---------------------------------------------------------------------------
-# Starting and joining — one name, one id
+# Starting and joining: one name, one id
 # ---------------------------------------------------------------------------
 
 
@@ -150,7 +150,7 @@ def test_starting_a_session_records_the_id_every_later_event_repeats(tmp_path, m
     assert sess.session_name == "auth-refactor"
     assert sess.session_id, "the hello must carry the id, not just print it"
     assert sess.label == "Claude Dev"
-    assert sess.session_id in out, "the id has to be printable — peers join by it"
+    assert sess.session_id in out, "the id has to be printable: peers join by it"
 
     hello = [e for e in _events(repo) if e.type == "hello"][-1]
     assert hello.data["comms_session_start"] is True
@@ -161,8 +161,8 @@ def test_starting_a_session_records_the_id_every_later_event_repeats(tmp_path, m
 def test_two_agents_in_one_named_session_share_one_id(tmp_path, monkeypatch):
     """IF THIS FAILS: joining silently forks the group.
 
-    Everything the session is for — ending it frees exactly its ground, the
-    archive counts exactly its work — is keyed on the id. Two agents who believe
+    Everything the session is for: ending it frees exactly its ground, the
+    archive counts exactly its work: is keyed on the id. Two agents who believe
     they are in one session but carry two ids coordinate nothing and are told
     nothing.
     """
@@ -234,7 +234,7 @@ def test_joining_a_session_nobody_started_is_refused(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Switching — the claims do not follow you
+# Switching: the claims do not follow you
 # ---------------------------------------------------------------------------
 
 
@@ -245,7 +245,7 @@ def test_moving_to_another_session_frees_the_ground_you_took_in_the_old_one(
     The claim stays tagged with the session the agent has LEFT, so ending that
     session cannot find it (its holder moved on) and the new session does not
     know it exists. The file is then held by somebody who has stopped thinking
-    about it until it goes stale — an hour of every other agent being blocked
+    about it until it goes stale: an hour of every other agent being blocked
     for no reason anybody can see.
     """
     repo = _repo(tmp_path, monkeypatch)
@@ -273,7 +273,7 @@ def test_the_release_that_ends_the_old_session_folds_before_the_new_hello(
 
     The fold sorts by TIMESTAMP, not by append order. If the retire and the
     hello share an instant they can fold in either order, and in the wrong one
-    the retire drops the session the hello has just created — leaving an agent
+    the retire drops the session the hello has just created: leaving an agent
     that ran `session start`, was told it worked, and is on no roster at all.
     """
     repo = _repo(tmp_path, monkeypatch)
@@ -325,7 +325,7 @@ def test_leaving_a_session_is_recorded_even_when_you_were_holding_nothing(
 def test_rejoining_the_session_you_are_already_in_keeps_your_claims(tmp_path, monkeypatch):
     """IF THIS FAILS: re-running `join` throws away your own work.
 
-    Agents re-announce themselves — a wrapper script, a resumed session, a
+    Agents re-announce themselves: a wrapper script, a resumed session, a
     relabel. Treating that as a move would release every claim the agent is
     actively working behind, and it would look like a no-op command.
     """
@@ -352,7 +352,7 @@ def test_ending_a_session_frees_its_claims_and_leaves_the_other_one_alone(
     """IF THIS FAILS: closing one piece of work wipes the repo.
 
     A release with no comms_session_id is the GLOBAL end, and the fold reads it
-    as "archive everything and start over" — every claim and every actor in the
+    as "archive everything and start over": every claim and every actor in the
     repo, including the group working in the session next door, who are given no
     warning and whose files are handed to whoever asks next.
     """
@@ -400,7 +400,7 @@ def test_a_session_whose_agents_all_died_can_still_be_ended_by_name(tmp_path, mo
     """IF THIS FAILS: the ground a crashed session took is unreachable by name.
 
     Liveness is judged on the actors, so a session whose agents have all gone
-    quiet is on no roster — but its CLAIMS are still tagged with it and still
+    quiet is on no roster, but its CLAIMS are still tagged with it and still
     blocking everybody. If `end` only looked at the roster, the one command that
     clears them would answer "no such session" and the files could be freed only
     one claim id at a time.
@@ -429,7 +429,7 @@ def test_session_housekeeping_stays_out_of_the_finished_work_feed(tmp_path, monk
     A retire, a leader transfer and a session end are all release events that
     carry refs, because they sweep up the claims they close. Reported as
     finished work they drown the real releases, and the one question the feed
-    answers — what actually got done — stops being answerable.
+    answers: what actually got done: stops being answerable.
     """
     repo = _repo(tmp_path, monkeypatch)
     _cli(repo, "session", "start", "mine", "--as", "claude-dev", session="agent-A")
@@ -544,7 +544,7 @@ def test_re_announcing_yourself_does_not_take_leadership_back(tmp_path, monkeypa
     """IF THIS FAILS: the board shows two leaders, and the priority rule breaks.
 
     A hello decides its own `leader` flag. If it ignores the transfer that has
-    already happened, the founder — who is still the earliest arrival — flags
+    already happened, the founder: who is still the earliest arrival: flags
     itself leader again on its next join, while the actor leadership was handed
     to keeps its flag too. Two leaders means the leader-only channel is either
     open to both or refused to both, depending on which one a reader finds first.
@@ -587,7 +587,7 @@ def test_lead_is_judged_on_activity_not_on_when_the_greeting_was(tmp_path, monke
     An agent that greeted this morning and has been claiming all afternoon is
     shown active by every other reader in this build. Gating on the one-shot
     hello would refuse it here while the board calls it the most active actor
-    on the roster — one screen contradicting the next.
+    on the roster: one screen contradicting the next.
     """
     repo = _repo(tmp_path, monkeypatch)
     _cli(repo, "session", "start", "auth-refactor", "--as", "claude-dev", session="agent-A")
@@ -604,7 +604,7 @@ def test_lead_is_judged_on_activity_not_on_when_the_greeting_was(tmp_path, monke
 
 
 # ---------------------------------------------------------------------------
-# The stamp — the writing side of the whole mechanic
+# The stamp: the writing side of the whole mechanic
 # ---------------------------------------------------------------------------
 
 
@@ -629,7 +629,7 @@ def test_stamp_leaves_an_unnamed_actor_and_a_deliberate_tag_alone(tmp_path, monk
     """IF THIS FAILS: session-lifecycle events are re-tagged to the wrong window.
 
     `retire` names the session it is ACTING ON, which is not always the one the
-    writer is in — an operator in session B clearing up after an agent in
+    writer is in: an operator in session B clearing up after an agent in
     session A is the case. A stamp that overwrites would file that event under
     the operator's own work. And an actor in no named session must stay
     untagged: inventing an id would put its events in a window that does not
@@ -655,7 +655,7 @@ def test_the_session_hello_keeps_the_identity_the_pre_edit_hook_matches_on(
     The pre-edit hook has no COMMS_ACTOR; it identifies the caller by matching
     the host session id against `agent_session` on the hello. This hello
     REPLACES the actor's previous one in the fold, so dropping that key erases
-    the pairing and every claim in the repo — the caller's own included — comes
+    the pairing and every claim in the repo: the caller's own included: comes
     back as somebody else's.
 
     It is also what keeps the session alive: claim writes a fresh hello whenever
@@ -685,7 +685,7 @@ def test_a_session_hello_carries_the_vendor_so_reviews_stay_independent(
 
     Independence is read off the verifier's hello. This one supersedes the one
     that had the vendor, so dropping it turns "verified by a different family of
-    model" into "unknown" — a weaker claim than the truth, made silently.
+    model" into "unknown": a weaker claim than the truth, made silently.
     """
     repo = _repo(tmp_path, monkeypatch)
     monkeypatch.setenv("COMMS_VENDOR", "anthropic")

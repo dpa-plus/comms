@@ -12,7 +12,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Task ids are chosen by whoever writes the plan and are meant to be SAID —
+// Task ids are chosen by whoever writes the plan and are meant to be SAID:
 // quoted between agents, typed into a claim, read off a dashboard. They are not
 // ULIDs on purpose: on a real store of 11,000 events, 99.5% of ULIDs share their
 // six-character short prefix, so no agent can refer to one unambiguously.

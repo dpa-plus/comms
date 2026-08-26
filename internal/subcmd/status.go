@@ -98,7 +98,7 @@ func emitStatusHuman(rt *Runtime, cutoff time.Time, since string, staleAfter tim
 				sessionLabel = fmt.Sprintf("  session=%q", s.SessionName)
 			}
 			// An actor holding locks while silent past the stale threshold is the
-			// crash signal worth surfacing — staleness alone (idle holder, no locks)
+			// crash signal worth surfacing: staleness alone (idle holder, no locks)
 			// is benign. The fix is the already-built `release --all-mine` (or the
 			// dashboard's release-all).
 			silent := now.Sub(lastSeenOf(s))
@@ -126,7 +126,7 @@ func emitStatusHuman(rt *Runtime, cutoff time.Time, since string, staleAfter tim
 				sessionLabel = fmt.Sprintf("   session=%q", c.SessionName)
 			}
 			// Age + STALE tag so a lock opened 14h ago doesn't read the same as one
-			// opened 2m ago — the web dashboard already shows this; the CLI (what
+			// opened 2m ago: the web dashboard already shows this; the CLI (what
 			// agents actually pipe) was blind to it.
 			age := now.Sub(c.TS)
 			staleTag := ""
@@ -194,7 +194,7 @@ type statusJSONShape struct {
 }
 
 // statusTask is one node of the work graph. Phase, blockers and doers are all
-// derived by the reducer — none of them is written by an agent.
+// derived by the reducer: none of them is written by an agent.
 type statusTask struct {
 	ID         string   `json:"id"`
 	Title      string   `json:"title"`
@@ -311,7 +311,7 @@ func emitStatusJSON(rt *Runtime, cutoff time.Time, staleAfter time.Duration) err
 const activeWindow = 4 * time.Hour
 
 // staleClaimAfter is the age at which a held claim is considered stale: it is
-// flagged STALE, its silent holder is flagged "likely dead", AND — once stale —
+// flagged STALE, its silent holder is flagged "likely dead", AND: once stale:
 // the claim may be stolen without confirmation (a stale claim's holder is
 // presumed gone). `comms status` and `comms ui` expose it as a --stale-after
 // flag sharing this default; steal eligibility uses the constant directly.
@@ -359,7 +359,7 @@ func sortSessionsByActivity(sessions []*state.Session) {
 // rosterSessions is the operator-facing roster: every actor active within the
 // window PLUS any actor that has gone silent past the window but STILL holds
 // claims (a crashed-but-holding agent). Without the second set, a crashed holder
-// — and the "likely dead" flag + one-click Release that exist precisely for it —
+// (and the "likely dead" flag + one-click Release that exist precisely for it)
 // would vanish from the roster the moment its silence crossed the window, exactly
 // when its orphaned locks most need releasing. Active actors come first (with the
 // leader marked among them only), then the silent holders. Leader election and
@@ -371,7 +371,7 @@ func sortSessionsByActivity(sessions []*state.Session) {
 // The silent-holder set has two parts: holders that still have a Session entry,
 // and ORPHANED holders that hold claims but have no Session at all. An actor is
 // orphaned when its session was deleted (a retire, or its named session ended)
-// yet its still-running process kept claiming — those post-retire claims have no
+// yet its still-running process kept claiming: those post-retire claims have no
 // hello to anchor a session. Both are surfaced; otherwise an orphan's locks show
 // up in the claims list with no roster row, so the operator sees claims that
 // "won't go away" and no button to clear them.
@@ -404,7 +404,7 @@ func rosterSessions(s *state.State, cutoff time.Time) []*state.Session {
 // orphanClaimHolders synthesizes roster entries for actors that hold active
 // claims but have no Session entry (exclude already-rostered actors). The
 // synthetic session's heartbeat is derived from the actor's own claim
-// timestamps — earliest as TS, latest as LastSeen — so the row can still be
+// timestamps: earliest as TS, latest as LastSeen, so the row can still be
 // flagged "likely dead" once it is silent past the stale window and offer a
 // one-click Release/Remove. A claim carries the comms session it was made in; we
 // keep that tag only when all of the actor's orphan claims agree on it.
@@ -651,7 +651,7 @@ func listGlobalLessons() []string {
 }
 
 // emitTaskSummary prints the work graph, but only the parts somebody could do
-// something about. A wall of blocked tasks is not status, it is noise — so
+// something about. A wall of blocked tasks is not status, it is noise: so
 // blocked work is a count, and the things that need a person are named.
 func emitTaskSummary(st *state.State) {
 	if st == nil || len(st.Tasks) == 0 {

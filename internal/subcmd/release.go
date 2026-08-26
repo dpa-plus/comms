@@ -107,7 +107,7 @@ func runRelease(args []string, latest, allMine bool, reason, result string) erro
 // in one locked, single-fold pass. It is the engine behind the UI's "release
 // all of an agent's claims" control: when an agent dies holding many locks the
 // operator frees the whole set in one click instead of releasing each claim by
-// hand. Unlike retire it leaves the actor on the roster — it only frees files.
+// hand. Unlike retire it leaves the actor on the roster: it only frees files.
 // Releasing another actor's claims is an arbitrated release, so `reason` is
 // auto-filled when blank and every event records the original holder for audit.
 // Returns the number of claims released. Caller MUST hold the flock.
@@ -178,6 +178,6 @@ func appendReleaseEvent(rt *Runtime, targets []*state.Claim, reason, result stri
 		}
 		evs = append(evs, ev)
 	}
-	// Append every release and fold once, not once per claim — shorter lock hold.
+	// Append every release and fold once, not once per claim: shorter lock hold.
 	return rt.AppendBatch(evs)
 }

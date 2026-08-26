@@ -2,7 +2,7 @@
 scope-to-map resolution.
 
 Every test here is about a way coordination can fail SILENTLY. A crash in
-comms is cheap — somebody sees a traceback and fixes it. The expensive failures
+comms is cheap: somebody sees a traceback and fixes it. The expensive failures
 are the quiet ones: two agents both believing they hold the same symbol, a
 phantom claim nobody can release, a typo that reads as "nothing to worry
 about". Each test below names the quiet failure it is standing in front of.
@@ -80,7 +80,7 @@ def test_scope_round_trips_through_str(raw):
     come back as a WHOLE-file claim (silently widening one agent's territory),
     a line claim can come back as a symbol claim (so it never intersects the
     range it was meant to protect), or it can come back as a ScopeError that
-    state.py swallows — dropping a claim whose event lives in the log forever.
+    state.py swallows: dropping a claim whose event lives in the log forever.
     All three end with two agents editing the same code believing they are
     alone."""
     once = parse(raw)
@@ -113,7 +113,7 @@ def test_whitespace_padded_line_anchor_is_not_a_symbol():
     """WHAT BREAKS: if " L1-1" parsed as a SYMBOL named "L1-1", its canonical
     form would be "f#L1-1", which parses back as a LINE range. One claim would
     mean two different things depending on how many times it had been through
-    the log — and a symbol claim replayed as a line claim protects the wrong
+    the log, and a symbol claim replayed as a line claim protects the wrong
     territory."""
     padded = parse("src/a.ts#L1-1 ")
     assert padded.anchor.kind is AnchorKind.LINE
@@ -137,7 +137,7 @@ def test_symbol_names_that_merely_look_like_ranges_stay_symbols():
 def test_scope_rejects_what_it_cannot_represent(raw):
     """WHAT BREAKS: these must raise at the CLI boundary where a human sees the
     message. Accepting them writes a claim into the permanent log that either
-    names territory outside the repo or has no coherent meaning — and once it is
+    names territory outside the repo or has no coherent meaning, and once it is
     in an append-only file, nothing can take it back out."""
     with pytest.raises(ScopeError):
         parse(raw)
@@ -166,7 +166,7 @@ _SCOPE_MATRIX = [
 def test_overlap_is_reflexive(raw):
     """WHAT BREAKS: a scope that does not overlap itself is a scope two agents
     can both claim. Reflexivity is the floor the whole exclusion property
-    stands on — every other overlap rule is a refinement of "the same claim
+    stands on: every other overlap rule is a refinement of "the same claim
     twice is a conflict"."""
     s = parse(raw)
     assert overlaps(s, s)
@@ -237,7 +237,7 @@ def test_shallow_and_recursive_globs_stay_distinguishable():
 )
 def test_line_ranges_are_inclusive_intervals(a, b, expected):
     """WHAT BREAKS, in both directions. Treat the ranges as half-open and
-    L10-20 / L20-30 come back clear — two agents both edit line 20, and the
+    L10-20 / L20-30 come back clear: two agents both edit line 20, and the
     second write silently loses the first. Be too generous instead and L10-20
     conflicts with L21-30, so every claim in a file blocks every other one;
     agents wait for nothing, stop trusting the tool, and turn it off."""
@@ -261,8 +261,8 @@ def test_a_whole_file_claim_swallows_every_anchor_in_that_file():
 
 
 def test_a_symbol_and_a_line_range_conflict_pessimistically():
-    """WHAT BREAKS: this module has no symbol table — it runs BEFORE the map
-    exists, which is the whole point of a claim — so it cannot know whether
+    """WHAT BREAKS: this module has no symbol table: it runs BEFORE the map
+    exists, which is the whole point of a claim, so it cannot know whether
     #parse lives inside #L10-40. The only safe answer is "maybe, so treat it as
     a conflict". Answering "no" here trades a rare unnecessary wait for a
     silent concurrent edit, which is the wrong direction to fail in."""
@@ -321,7 +321,7 @@ _MALFORMED = [
 def test_fold_is_total_on_malformed_events(bad):
     """WHAT BREAKS: fold() runs on the pre-edit hot path in front of EVERY agent
     write. If it raises, one corrupt line in an append-only file that is never
-    rewritten permanently disables every agent's ability to edit anything —
+    rewritten permanently disables every agent's ability to edit anything:
     there is no "delete the bad line" recovery, because the log is truth. Total
     means total: drop what cannot be placed, never throw."""
     st = state_mod.fold([bad])
@@ -339,7 +339,7 @@ def test_fold_is_total_on_a_self_referential_event():
 
 
 def test_fold_survives_a_corrupt_line_in_the_middle_of_a_good_log():
-    """WHAT BREAKS: corruption is not an all-or-nothing event — one bad line
+    """WHAT BREAKS: corruption is not an all-or-nothing event: one bad line
     lands in a log full of good ones. A reducer that gave up at the first bad
     line would throw away every claim written after it, freeing scopes that are
     still actively held."""
@@ -372,7 +372,7 @@ def test_fold_does_not_mutate_or_consume_its_input():
 def test_fold_orders_by_timestamp_not_arrival():
     """WHAT BREAKS: a release must be able to close a claim regardless of the
     order the lines are handed to fold(). If arrival order won, a release read
-    before its claim would leave the claim active forever — a scope nobody can
+    before its claim would leave the claim active forever: a scope nobody can
     free."""
     release = ev(ts="2026-01-01T00:00:05Z", id="r1", actor="agent-a", type="release",
                  data={"refs": ["c1"], "result": "done"})
@@ -412,7 +412,7 @@ _CORRUPT_CLAIMS = [
 
 @pytest.mark.parametrize("corrupt", _CORRUPT_CLAIMS)
 def test_a_corrupt_event_never_materialises_an_active_claim(corrupt):
-    """WHAT BREAKS: an active claim is a lock, and this one would be a PHANTOM —
+    """WHAT BREAKS: an active claim is a lock, and this one would be a PHANTOM:
     held by no writer, matching a scope nobody typed, and impossible to release
     because no agent knows it exists and no release event references its id. It
     blocks every other agent on that scope for the life of the log. Salvaging
@@ -428,7 +428,7 @@ def test_a_dropped_event_does_not_refresh_an_actors_heartbeat():
     """WHAT BREAKS: last_seen is the passive heartbeat used to decide whether an
     agent is still alive, and therefore whether its claims may be stolen. A
     malformed line that folds "far enough" to bump last_seen hands a dead agent
-    a fresh pulse — its stale claims then look live and can never be reclaimed,
+    a fresh pulse: its stale claims then look live and can never be reclaimed,
     so the scope stays locked by a process that exited."""
     hello = ev(ts="2026-01-01T00:00:00Z", id="h1", actor="agent-a", type="hello")
     later_but_corrupt = ev(ts="2026-01-01T01:00:00Z", id="x1", actor="agent-a",
@@ -461,7 +461,7 @@ def two_agents_on_one_file():
 
 
 def test_conflicts_for_excludes_your_own_claims():
-    """WHAT BREAKS: an agent re-checks its scope constantly — before each edit,
+    """WHAT BREAKS: an agent re-checks its scope constantly: before each edit,
     and again when narrowing or extending a claim. If its OWN claim came back as
     a conflict it would be permanently blocked by itself, and the only way out
     would be to release the claim it is actively relying on. Self-deadlock,
@@ -500,7 +500,7 @@ def test_conflicts_for_reports_the_oldest_holder_first():
 
 def test_a_released_claim_stops_conflicting():
     """WHAT BREAKS: this is the other half of exclusion. A claim that survives
-    its own release locks the scope forever — the agent that took it has exited,
+    its own release locks the scope forever: the agent that took it has exited,
     and there is no second release to send."""
     st = state_mod.fold([
         claim_ev("c1", "agent-a", "src/api/server.ts", ts="2026-01-01T00:00:00Z"),
@@ -527,7 +527,7 @@ def test_a_steal_leaves_exactly_one_holder():
 def test_active_claims_by_actor_returns_only_mine_oldest_first():
     """WHAT BREAKS: this is what "release everything I hold" iterates over. Too
     wide and one agent releases another's claims, freeing code that is being
-    edited right now. Too narrow and it leaves its own claims behind on exit —
+    edited right now. Too narrow and it leaves its own claims behind on exit:
     the stale-lock failure again."""
     st = state_mod.fold([
         claim_ev("a2", "agent-a", "src/b.ts", ts="2026-01-01T00:00:02Z"),
@@ -541,7 +541,7 @@ def test_active_claims_by_actor_returns_only_mine_oldest_first():
 
 def test_conflicts_for_uses_scope_overlap_not_string_equality():
     """WHAT BREAKS: claims are typed by different agents in different
-    spellings — one claims the subtree, one claims the file, one claims a
+    spellings: one claims the subtree, one claims the file, one claims a
     symbol inside it. If the lookup compared strings, only a character-for-
     character rematch would ever be a conflict, and the tool would report clear
     for every real collision it exists to catch."""
@@ -569,7 +569,7 @@ def small_map():
 
 def test_a_typoed_symbol_gives_a_reason_not_an_empty_list(small_map):
     """WHAT BREAKS: an empty result is indistinguishable from "this code is
-    isolated — nobody else is near it", which reads as reassurance. A name typed
+    isolated: nobody else is near it", which reads as reassurance. A name typed
     from memory that does not exist would then look like a clean bill of health
     on ground the tool never actually checked. The miss has to say so, and it
     has to say what the file DOES contain so the typo can be fixed on the
@@ -584,7 +584,7 @@ def test_a_typoed_symbol_gives_a_reason_not_an_empty_list(small_map):
 
 def test_a_typoed_path_says_check_the_spelling(tmp_path, small_map):
     """WHAT BREAKS: "not in the map" and "no such file" call for opposite
-    actions — rebuild the index vs fix your typo. Conflating them sends the
+    actions: rebuild the index vs fix your typo. Conflating them sends the
     agent to re-run extraction over and over against a filename that will never
     appear."""
     (tmp_path / "src" / "api").mkdir(parents=True)
@@ -594,7 +594,7 @@ def test_a_typoed_path_says_check_the_spelling(tmp_path, small_map):
     assert "spelling" in typo.miss_reason
 
     # The same file, present on disk but absent from the map, must NOT be
-    # reported as a typo — it is a stale or incomplete index.
+    # reported as a typo: it is a stale or incomplete index.
     (tmp_path / "src" / "api" / "client.ts").write_text("x", encoding="utf-8")
     stale = resolve_mod.resolve(small_map, parse("src/api/client.ts"), root=tmp_path)
     assert stale.places == []
@@ -619,7 +619,7 @@ def test_no_map_at_all_is_a_reason_not_a_silence():
     ],
 )
 def test_every_empty_resolution_carries_a_reason(scope_str, small_map):
-    """WHAT BREAKS: this is the invariant the two tests above are instances of —
+    """WHAT BREAKS: this is the invariant the two tests above are instances of:
     places==[] and miss_reason==None must be an unreachable combination. The
     moment one miss path forgets to set a reason, that path starts reading as
     "checked, nothing there", which is the failure this whole module exists to
@@ -630,7 +630,7 @@ def test_every_empty_resolution_carries_a_reason(scope_str, small_map):
 
 def test_a_symbol_that_exists_resolves_to_just_that_symbol(small_map):
     """WHAT BREAKS: the control. If a real symbol also missed, every claim would
-    be loud and the reason text would become noise people scroll past — at which
+    be loud and the reason text would become noise people scroll past: at which
     point the genuine misses above are invisible again."""
     res = resolve_mod.resolve(small_map, parse("src/api/server.ts#parseBody"))
     assert res.miss_reason is None
@@ -642,7 +642,7 @@ def test_a_line_claim_resolves_through_implied_spans(small_map):
     """WHAT BREAKS: the map records where a symbol STARTS and not where it ends,
     so a span runs to just before the next symbol. If a line claim only matched
     the exact start line, L41-79 (the whole body of parseBody) would resolve to
-    nothing and report a miss on code that is plainly indexed — and a miss on
+    nothing and report a miss on code that is plainly indexed, and a miss on
     real ground trains people to ignore misses."""
     inside = resolve_mod.resolve(small_map, parse("src/api/server.ts#L41-79"))
     assert [p.node_id for p in inside.places] == ["s:parseBody"]
@@ -654,7 +654,7 @@ def test_a_line_claim_resolves_through_implied_spans(small_map):
     # The LAST symbol's span runs to end-of-file, because nothing in the map
     # records where a file stops. WHAT BREAKS otherwise: a claim on lines below
     # the last recorded symbol would report "nothing indexed there" about code
-    # that is plainly indexed — a false miss, which costs more than the
+    # that is plainly indexed: a false miss, which costs more than the
     # occasional over-wide span (the span is advisory and blocks nothing).
     past_the_end = resolve_mod.resolve(small_map, parse("src/api/server.ts#L5000-5001"))
     assert [p.node_id for p in past_the_end.places] == ["s:sendReply"]
@@ -682,7 +682,7 @@ def test_resolution_matches_paths_the_way_a_person_typed_them():
     """WHAT BREAKS: the map stores whatever path the scan walked, which may
     carry a leading "./"; a claim is written repo-relative. Comparing raw
     strings makes EVERY claim miss, which surfaces as "not in the map" for a
-    fully indexed repo — the loud channel firing constantly, which is how it
+    fully indexed repo: the loud channel firing constantly, which is how it
     gets tuned out."""
     g = graph_with(("s:parse", "./src/api/server.ts", "L10", "parse"))
     res = resolve_mod.resolve(g, parse("src/api/server.ts#parse"))
@@ -693,7 +693,7 @@ def test_resolution_matches_paths_the_way_a_person_typed_them():
 def test_resolve_reads_the_anchor_off_the_real_scope_type(small_map):
     """WHAT BREAKS: resolve() reaches into Scope for its anchor. An earlier
     draft looked for attributes this Scope does not have, so EVERY anchored
-    claim fell through to the whole-file branch — a wrong answer with no error
+    claim fell through to the whole-file branch: a wrong answer with no error
     anywhere: a claim on one symbol reported contact with every symbol in the
     file. This pins that an anchored claim and a whole-file claim on the same
     path give different answers."""

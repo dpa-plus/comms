@@ -3,7 +3,7 @@
 These are the commands nobody double-checks. A session starts, the hook runs
 `comms status --since 24h`, and whatever it prints is what every agent in the
 repo believes about who is working where. So the failures worth testing are not
-crashes — they are the confident wrong answers:
+crashes: they are the confident wrong answers:
 
   * a board that looks calm because the log could not be read
   * a claim held since yesterday that reads exactly like one taken two minutes
@@ -227,7 +227,7 @@ def test_the_stale_threshold_is_movable_and_actually_moves(tmp_path, monkeypatch
 
 def test_collisions_prevented_is_reported_all_time(tmp_path, monkeypatch):
     """IF THIS FAILS: the only number that justifies the ceremony disappears.
-    A prevented collision is not news that goes stale — a store of thousands of
+    A prevented collision is not news that goes stale: a store of thousands of
     claims reporting zero collisions ever prevented is what this line exists to
     stop."""
     repo = _repo(tmp_path, monkeypatch)
@@ -249,7 +249,7 @@ def test_collisions_prevented_is_reported_all_time(tmp_path, monkeypatch):
 
 def test_a_task_refusal_is_not_rendered_as_an_editing_collision(tmp_path, monkeypatch):
     """IF THIS FAILS: a refused self-review prints "stopped from editing  (held
-    by @)" — an empty scope and an empty holder — which reads as a bug in comms
+    by @)": an empty scope and an empty holder, which reads as a bug in comms
     rather than as the review gate doing its job."""
     repo = _repo(tmp_path, monkeypatch)
     _write(repo, [
@@ -280,8 +280,8 @@ def test_findings_and_notes_outside_the_window_are_not_shown(tmp_path, monkeypat
 
 
 def test_status_json_is_the_machine_shape_and_is_uncapped(tmp_path, monkeypatch):
-    """IF THIS FAILS: anything built on `status --json` — a dashboard, a
-    supervisor deciding whether to start an agent — reads a different world than
+    """IF THIS FAILS: anything built on `status --json`: a dashboard, a
+    supervisor deciding whether to start an agent: reads a different world than
     the human output, or worse, a truncated one. The human view caps claims for
     readability; the machine view must not, or a consumer can edit into a
     conflict the cap hid."""
@@ -326,7 +326,7 @@ def test_status_json_marks_a_stale_claim_as_stale(tmp_path, monkeypatch):
 
 def test_log_prints_readable_history_within_the_default_window(tmp_path, monkeypatch):
     """IF THIS FAILS: the history is only readable as JSON, and the default
-    window silently shows everything ever — which on a real store is thousands
+    window silently shows everything ever, which on a real store is thousands
     of lines where the caller asked for today."""
     repo = _repo(tmp_path, monkeypatch)
     _write(repo, [
@@ -345,7 +345,7 @@ def test_log_prints_readable_history_within_the_default_window(tmp_path, monkeyp
 
 def test_log_type_filter_rejects_a_type_this_build_cannot_read(tmp_path, monkeypatch):
     """IF THIS FAILS: a typo like `--type findings` silently matches nothing and
-    reads as "there are no findings" — the exact confident wrong answer this
+    reads as "there are no findings": the exact confident wrong answer this
     surface must never give. The whitelist has to refuse, loudly, with the real
     names in the message."""
     repo = _repo(tmp_path, monkeypatch)
@@ -378,8 +378,8 @@ def test_log_type_filter_keeps_only_the_named_types(tmp_path, monkeypatch):
 def test_log_scope_filter_matches_a_finding_that_names_the_file_only_by_ref(
     tmp_path, monkeypatch
 ):
-    """IF THIS FAILS: `log --scope <file> --type finding` — the query an agent
-    runs to learn a file's history before touching it — returns nothing while
+    """IF THIS FAILS: `log --scope <file> --type finding`: the query an agent
+    runs to learn a file's history before touching it: returns nothing while
     the log is full of findings about that file. Findings carry their target in
     data.refs and have an EMPTY top-level scope, so matching only the scope
     array answers "no history" for every one of them."""
@@ -500,7 +500,7 @@ def test_a_corrupt_log_is_reported_not_rendered_as_an_empty_board(
 ):
     """IF THIS FAILS: a broken log looks exactly like a quiet repo. An agent
     reads "(none)", concludes nothing is claimed, and edits straight into
-    somebody's ground — while the file on disk plainly says otherwise. "I could
+    somebody's ground, while the file on disk plainly says otherwise. "I could
     not find out" must never render as "nothing is held"."""
     repo = _repo(tmp_path, monkeypatch)
     path = _write(repo, [_ev("claim", "dev", scope=["a.py"], data={"intent": "x"})])
@@ -541,7 +541,7 @@ def test_a_read_surface_writes_nothing_at_all(verb, tmp_path, monkeypatch):
     """IF THIS FAILS: reading the board mutates it. Several agents run these on
     every session start; a surface that appends, rewrites, or even takes the
     lock turns "check the board" into contention with the agents doing real
-    work — and an accidental append corrupts a log that is truth."""
+    work, and an accidental append corrupts a log that is truth."""
     repo = _repo(tmp_path, monkeypatch)
     path = _write(repo, [
         _ev("hello", "dev"),
@@ -562,7 +562,7 @@ def test_a_read_surface_writes_nothing_at_all(verb, tmp_path, monkeypatch):
 @pytest.mark.parametrize("verb", ["status", "log"])
 def test_a_read_surface_does_not_create_the_store(verb, tmp_path, monkeypatch):
     """IF THIS FAILS: asking a question builds a store. That is how one
-    unwritable HOME denied every edit in every repository on the machine — the
+    unwritable HOME denied every edit in every repository on the machine: the
     read path mkdir'd, the mkdir failed, and the fail-closed hook turned the
     exception into a block."""
     repo = _repo(tmp_path, monkeypatch)
@@ -581,7 +581,7 @@ def test_a_window_the_go_build_would_reject_is_rejected_here_too(
 ):
     """IF THIS FAILS: the two builds accept different windows over one shared
     log. `--since 7d` works here and dies on the Go build, so a script copied
-    between them breaks for whoever inherited it — and quietly accepting it as
+    between them breaks for whoever inherited it, and quietly accepting it as
     something else would show the wrong window under the right label."""
     repo = _repo(tmp_path, monkeypatch)
 

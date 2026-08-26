@@ -4,10 +4,10 @@ Both were found by auditing the skill file against the CLI rather than by a
 failing test, which is the point: an instruction file is a promise to whoever
 types it, and nothing in a test suite types it.
 
-* `claim a b c --intent "..."` — a task boundary is usually several files, and
+* `claim a b c --intent "..."`: a task boundary is usually several files, and
   taking them one at a time leaves the half-held state where you have two of
   three and somebody else has the third.
-* `check --staged` — the guard that stops you committing somebody else's
+* `check --staged`: the guard that stops you committing somebody else's
   claimed work.
 """
 
@@ -53,7 +53,7 @@ def test_several_scopes_are_claimed_together(repo, monkeypatch):
 def test_a_batch_takes_all_of_it_or_none_of_it(repo, monkeypatch, capsys):
     """IF THIS FAILS: an agent ends up holding half a task boundary.
 
-    That is the state with no good move in it — you hold two files, somebody
+    That is the state with no good move in it: you hold two files, somebody
     else holds the third, and neither of you can finish without handing
     something back. Partial acquisition is worse than refusal.
     """
@@ -93,7 +93,7 @@ def test_one_scope_twice_in_a_batch_is_refused(repo, monkeypatch):
 
 
 def test_a_batch_cannot_be_used_to_share_a_task(repo, monkeypatch, capsys):
-    """One task, one agent — the rule the single-scope path enforces. A batch
+    """One task, one agent: the rule the single-scope path enforces. A batch
     must not be the way round it."""
     _as(monkeypatch, "alice")
     cli.main(["task", "add", "auth-api", "--title", "Auth"])
@@ -160,7 +160,7 @@ def test_staged_prints_a_recovery_command_that_actually_runs(repo, monkeypatch, 
 
     Two details carry it. Before the first commit there is no HEAD to restore
     FROM, so `git restore --staged` fails and `git rm --cached` is the one that
-    works — and being blocked on an initial commit is not rare. And the pathspec
+    works, and being blocked on an initial commit is not rare. And the pathspec
     is `:(literal)`, so a filename containing a glob character names itself
     instead of matching other people's staged files.
     """
@@ -261,8 +261,8 @@ def test_staged_does_not_block_you_with_your_own_claims(repo, monkeypatch, capsy
     wrote them and staged them was told "3 staged file(s) are claimed by somebody
     else" and handed a command to unstage its own work.
 
-    The incentive that creates is exactly backwards — claim nothing and commit
-    freely, claim properly and you cannot commit at all — so this is worse than
+    The incentive that creates is exactly backwards: claim nothing and commit
+    freely, claim properly and you cannot commit at all, so this is worse than
     no guard.
     """
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-alice")
@@ -302,8 +302,8 @@ def test_staged_says_so_when_it_cannot_tell_who_is_committing(repo, monkeypatch,
 
     With no actor and no session there is no way to know whose claims those are.
     "Claimed by somebody else" would be an assertion we cannot support, so this
-    reports the identity problem and uses 2 — this command's code for "could not
-    find out" — rather than 1, which means conflict.
+    reports the identity problem and uses 2: this command's code for "could not
+    find out": rather than 1, which means conflict.
     """
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-alice")
     _as(monkeypatch, "alice")

@@ -15,7 +15,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// `comms mcp` — the coordination protocol as tools the model already has.
+// `comms mcp`: the coordination protocol as tools the model already has.
 //
 // docs/DESIGN.md lists "MCP server" under what we cut, because mcp-agent-mail's
 // version came wrapped in severity ladders, threaded inboxes and registration
@@ -32,8 +32,8 @@ import (
 // does not belong here.
 //
 // It speaks JSON-RPC 2.0 over stdio with no SDK. comms has four direct
-// dependencies and the subset of MCP a tool server needs — initialize,
-// tools/list, tools/call — is small, stable, and cheaper to own than a
+// dependencies and the subset of MCP a tool server needs: initialize,
+// tools/list, tools/call: is small, stable, and cheaper to own than a
 // dependency is to carry.
 
 const mcpProtocolVersion = "2025-06-18"
@@ -94,7 +94,7 @@ func serveMCP(in io.Reader, out io.Writer) error {
 		if err := json.Unmarshal([]byte(line), &req); err != nil {
 			continue // a frame we cannot parse has no id to answer on
 		}
-		// A notification (no id) gets no reply, ever — answering one is a
+		// A notification (no id) gets no reply, ever: answering one is a
 		// protocol violation that some clients treat as fatal.
 		if len(req.ID) == 0 {
 			continue
@@ -198,7 +198,7 @@ type toolCall struct {
 }
 
 // text wraps a plain string in the content shape MCP expects. isError marks a
-// tool-level failure, which the model sees and can act on — as opposed to a
+// tool-level failure, which the model sees and can act on: as opposed to a
 // protocol error, which it cannot.
 func text(s string, isError bool) obj {
 	return obj{
@@ -244,7 +244,7 @@ func callMCPTool(params json.RawMessage) (interface{}, *rpcError) {
 }
 
 // openMCP resolves a runtime for one tool call. Tool-level failures come back as
-// text the model can read, never as a process exit — a server that exits on a
+// text the model can read, never as a process exit: a server that exits on a
 // conflict takes the whole session down with it.
 func openMCP(actorName string, mutating bool) (*Runtime, *rpcError) {
 	rt, err := Open(OpenOpts{Mutating: mutating, Actor: actorName})

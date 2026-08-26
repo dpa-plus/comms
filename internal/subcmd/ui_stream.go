@@ -20,7 +20,7 @@ import (
 //
 // The browser used to GET /api/status every 2 seconds, and each request made the
 // server re-open the repo, re-read and re-parse the entire JSONL log, and
-// pretty-print a fresh snapshot — N browsers × a full parse every 2s, forever,
+// pretty-print a fresh snapshot. N browsers × a full parse every 2s, forever,
 // even when nothing changed.
 //
 // Now a single fsnotify watcher in the `comms ui` process is notified by the OS
@@ -64,7 +64,7 @@ func (h *hub) subscribe() chan []byte {
 	h.mu.Lock()
 	// Prime BEFORE registering, while the channel is still invisible to
 	// broadcasters. Registering first and sending after unlocking looks harmless
-	// — the buffer is fresh — but a publish landing in between fills the cap-1
+	// (the buffer is fresh) but a publish landing in between fills the cap-1
 	// buffer, and the prime send then blocks forever on a channel nobody is
 	// reading yet: the SSE handler is still inside this call. Sending under the
 	// lock is safe precisely because an unregistered cap-1 channel cannot block.
@@ -103,12 +103,12 @@ func (h *hub) beginPublish() (ticket uint64, watermark time.Time) {
 	return h.issued, h.newestSeen
 }
 
-// publish stores the FULL frame as the new prime value — every newly connected
-// client still gets the complete history — and broadcasts the DELTA frame to
+// publish stores the FULL frame as the new prime value: every newly connected
+// client still gets the complete history, and broadcasts the DELTA frame to
 // clients that already have it. Delivery is coalescing: a slow client that has
 // not drained the prior frame simply has it replaced with the newer one (cap-1
 // buffer). The hub never blocks on a slow client, and a client can never fall
-// more than one frame behind — exactly the right trade-off for a "latest state
+// more than one frame behind: exactly the right trade-off for a "latest state
 // wins" dashboard. Coalescing can drop a delta, which is why every frame also
 // carries events_total: the page notices it is short and refetches once.
 func (h *hub) publish(ticket uint64, full, delta []byte, newest time.Time) {
@@ -117,13 +117,13 @@ func (h *hub) publish(ticket uint64, full, delta []byte, newest time.Time) {
 		payload = full
 	}
 	h.mu.Lock()
-	// Rebuilds run concurrently — the watcher goroutine and the cold-start call in
-	// serveEvents both publish — so a slow one can finish AFTER a newer one. Drop
+	// Rebuilds run concurrently: the watcher goroutine and the cold-start call in
+	// serveEvents both publish, so a slow one can finish AFTER a newer one. Drop
 	// it: otherwise it overwrites the prime frame with a staler history that a new
 	// tab would be handed, and coalescing could replace a queued newer frame with
 	// it while carrying an events_total low enough that no client notices it is
 	// short. A rebuild that simply found no new event has a fresh ticket and is
-	// still delivered — claims, rosters and sessions change without one.
+	// still delivered: claims, rosters and sessions change without one.
 	if ticket <= h.applied {
 		h.mu.Unlock()
 		return
@@ -178,7 +178,7 @@ func (s uiServer) snapshotJSON() ([]byte, error) {
 //
 // A zero `since` means "no client has history yet"; only the full frame is built.
 // The boundary is inclusive (rows AT the watermark are repeated) because two
-// events can share a timestamp — the page merges by event ID, so a repeat is
+// events can share a timestamp: the page merges by event ID, so a repeat is
 // free and a miss would not be.
 func (s uiServer) snapshotFrames(since time.Time) (full, delta []byte, newest time.Time, err error) {
 	snap, err := s.buildSnapshot()
@@ -209,8 +209,8 @@ func (s uiServer) snapshotFrames(since time.Time) (full, delta []byte, newest ti
 // can tell it is missing rows), and drop the per-session event copies.
 //
 // Those copies used to be the compatibility view the dashboard filtered on. Since
-// history became one continuous list they are dead weight the page never reads —
-// measured at roughly a fifth of the payload — while event_count, which it does
+// history became one continuous list they are dead weight the page never reads:
+// measured at roughly a fifth of the payload, while event_count, which it does
 // read, is already carried alongside them.
 func finalizeSnapshot(snap *uiSnapshot) {
 	snap.Build = uiBuildID
@@ -286,7 +286,7 @@ func (s uiServer) buildSnapshot() (uiSnapshot, error) {
 
 // publishSnapshot rebuilds the snapshot once and broadcasts it to every SSE
 // client. Called once at startup (to prime the hub) and on every debounced log
-// change detected by the watcher. A build failure is logged and skipped — the
+// change detected by the watcher. A build failure is logged and skipped: the
 // last good snapshot stays primed and the next change retries.
 func (s uiServer) publishSnapshot() {
 	ticket, watermark := s.hub.beginPublish()
@@ -420,8 +420,8 @@ func (s uiServer) buildWatchPlan() watchPlan {
 	}
 }
 
-// watchLog runs the fsnotify loop until ctx is done, calling publishSnapshot —
-// debounced — whenever a relevant log file is written or created. Demo mode is
+// watchLog runs the fsnotify loop until ctx is done, calling publishSnapshot:
+// debounced: whenever a relevant log file is written or created. Demo mode is
 // static and never starts a watcher. Any setup failure degrades gracefully:
 // browsers still get the primed snapshot and heartbeats, just not live pushes.
 func (s uiServer) watchLog(ctx context.Context) {

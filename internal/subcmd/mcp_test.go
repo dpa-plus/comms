@@ -80,7 +80,7 @@ func TestMCPNotificationIsNotAnswered(t *testing.T) {
 	}
 }
 
-// An unparseable line must not kill the loop — the next valid frame still works.
+// An unparseable line must not kill the loop: the next valid frame still works.
 func TestMCPSurvivesAGarbageFrame(t *testing.T) {
 	got := drive(t,
 		`{"jsonrpc":"2.0"`,

@@ -12,7 +12,7 @@ import (
 //
 // A task is what should happen. An edge is the order two tasks must happen in
 // AND what the later one consumes from the earlier. Every task has two steps:
-// an agent does it, then a DIFFERENT agent verifies it — and a task unblocks
+// an agent does it, then a DIFFERENT agent verifies it, and a task unblocks
 // what comes after it only once it has been verified, not merely finished.
 // That is what keeps review on the critical path instead of at the end.
 //
@@ -25,19 +25,19 @@ import (
 type TaskPhase string
 
 const (
-	// PhaseReady — every dependency is verified and nobody has claimed it.
+	// PhaseReady: every dependency is verified and nobody has claimed it.
 	PhaseReady TaskPhase = "ready"
-	// PhaseDoing — at least one agent holds a file claim tagged to this task.
+	// PhaseDoing: at least one agent holds a file claim tagged to this task.
 	PhaseDoing TaskPhase = "doing"
-	// PhaseReview — the implementation is finished and is waiting for a second
+	// PhaseReview: the implementation is finished and is waiting for a second
 	// pair of eyes. This is the most valuable thing on the board: it is holding
 	// up everything downstream.
 	PhaseReview TaskPhase = "review"
-	// PhaseClosed — verified. Only now does it unblock its successors.
+	// PhaseClosed: verified. Only now does it unblock its successors.
 	PhaseClosed TaskPhase = "closed"
-	// PhaseBlocked — at least one dependency is not verified yet.
+	// PhaseBlocked: at least one dependency is not verified yet.
 	PhaseBlocked TaskPhase = "blocked"
-	// PhaseCycle — the task can be reached from itself. A plan bug; surfaced
+	// PhaseCycle: the task can be reached from itself. A plan bug; surfaced
 	// rather than hidden, and never allowed to hang the reducer.
 	PhaseCycle TaskPhase = "cycle"
 )
@@ -46,11 +46,11 @@ const (
 // rejection invalidates. Reworking a task that another one CONSUMES from means
 // the consumer must be rechecked; reworking one it merely follows does not.
 const (
-	// EdgeInterface — B calls a surface A provides.
+	// EdgeInterface. B calls a surface A provides.
 	EdgeInterface = "interface"
-	// EdgeArtifact — B uses a file or schema A produced.
+	// EdgeArtifact. B uses a file or schema A produced.
 	EdgeArtifact = "artifact"
-	// EdgeSequence — ordering only. Nothing flows across it.
+	// EdgeSequence: ordering only. Nothing flows across it.
 	EdgeSequence = "sequence"
 )
 
@@ -71,7 +71,7 @@ type Task struct {
 	Doers []string
 
 	// Did is the actor whose implementation is awaiting review, or whose work was
-	// verified. Cleared by a rejection — that is the rework edge.
+	// verified. Cleared by a rejection: that is the rework edge.
 	Did          string
 	Notes        []string // decisions written while working; what a verifier reads
 	VerifiedBy   string
@@ -97,7 +97,7 @@ type TaskEdge struct {
 	From string
 	To   string
 	Kind string // interface, artifact or sequence
-	// Provides describes what To consumes from From — an interface, a schema, a
+	// Provides describes what To consumes from From: an interface, a schema, a
 	// file's public surface. It is what travels to whoever picks up To, and what
 	// makes a rejection precise instead of invalidating everything downstream.
 	Provides string
@@ -125,7 +125,7 @@ func baseActor(a string) string {
 	return a
 }
 
-// applyTask upserts a node. Only the DESCRIPTION is replaced — re-titling a task
+// applyTask upserts a node. Only the DESCRIPTION is replaced: re-titling a task
 // must not unverify it, so lifecycle fields are left alone.
 func (s *State) applyTask(ev event.Event) {
 	id := stringOf(ev.Data, "task")
@@ -161,7 +161,7 @@ func (s *State) applyTask(ev event.Event) {
 
 // applyTaskEdge upserts an edge, replacing any existing one with the same
 // endpoints. Edges are their own events so any agent can add one at the moment
-// it discovers the dependency — the only moment it is actually known.
+// it discovers the dependency: the only moment it is actually known.
 func (s *State) applyTaskEdge(ev event.Event) {
 	from, to := stringOf(ev.Data, "from"), stringOf(ev.Data, "to")
 	if from == "" || to == "" || from == to {
@@ -302,7 +302,7 @@ func findingsFrom(data map[string]interface{}) []TaskFinding {
 //
 // It must be safe on a cyclic plan: Fold returns no error and runs on the hot
 // path of `comms check`, which fires before every agent file edit. So the
-// traversal here is iterative with an explicit frontier — a cycle resolves to
+// traversal here is iterative with an explicit frontier: a cycle resolves to
 // PhaseCycle and the reducer still returns.
 func (s *State) deriveTaskPhases() {
 	if len(s.Tasks) == 0 {
@@ -409,7 +409,7 @@ func (s *State) SortedTasks() []*Task {
 	return out
 }
 
-// EdgesInto returns the dependencies of a task — what it comes after.
+// EdgesInto returns the dependencies of a task: what it comes after.
 func (s *State) EdgesInto(id string) []*TaskEdge {
 	if s == nil {
 		return nil
@@ -440,7 +440,7 @@ func (s *State) EdgesOutOf(id string) []*TaskEdge {
 }
 
 // AffectedBy answers "if this task were reworked, what has to be looked at
-// again?" Only edges that carry something propagate — a successor that merely
+// again?" Only edges that carry something propagate: a successor that merely
 // follows in sequence consumed nothing and is untouched. Iterative, so a cyclic
 // plan cannot hang it.
 func (s *State) AffectedBy(id string) (recheck []string, unaffected []string) {

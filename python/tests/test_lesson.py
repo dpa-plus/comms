@@ -80,14 +80,14 @@ def _editor_script(tmp_path, monkeypatch, body: str, name: str = "fake-editor") 
 
 
 # ---------------------------------------------------------------------------
-# The empty shelf — the state this verb is actually met in
+# The empty shelf: the state this verb is actually met in
 # ---------------------------------------------------------------------------
 
 
 def test_no_lessons_yet_is_an_answer_not_an_error(home):
     """IF THIS FAILS: the first agent ever to run `lesson --list` on a machine
     gets an error or a traceback for the ordinary, expected state of having no
-    lessons — and concludes the verb is broken rather than empty. Zero lessons
+    lessons, and concludes the verb is broken rather than empty. Zero lessons
     have ever been written here, so this is the common path, not the edge."""
     code, out = _run("--list")
     assert code == 0, out
@@ -95,21 +95,21 @@ def test_no_lessons_yet_is_an_answer_not_an_error(home):
 
 
 def test_listing_survives_a_lessons_dir_that_was_never_created(home):
-    """IF THIS FAILS: listing has a side effect — it creates directories in the
+    """IF THIS FAILS: listing has a side effect: it creates directories in the
     user's data home just to answer a read. A read must not write."""
     _run("--list")
     assert not clesson.lessons_dir().exists()
 
 
 # ---------------------------------------------------------------------------
-# Global, not repo-local — the whole reason the verb exists
+# Global, not repo-local: the whole reason the verb exists
 # ---------------------------------------------------------------------------
 
 
 def test_a_lesson_is_readable_from_a_directory_that_is_not_a_repo(home, tmp_path):
     """IF THIS FAILS: lessons became repo-local. Knowledge written while working
     on one project is invisible in the next one, which is the exact opposite of
-    what a cross-project lesson is for — and running the verb outside any git
+    what a cross-project lesson is for, and running the verb outside any git
     checkout would fail instead of answering."""
     _write("verify-data-first", "# verify-data-first\n\nCheck API data before UI.\n")
     elsewhere = tmp_path / "not-a-repo"
@@ -157,7 +157,7 @@ def test_a_lesson_with_only_headings_still_gets_a_hint(home):
 def test_the_listing_ignores_sidecars_and_non_lessons(home):
     """IF THIS FAILS: the editor's own lock files and stray notes show up as
     lessons. The sidecar for `foo` would list as a lesson named `.foo`, and
-    `lesson .foo` then refuses it as an invalid slug — a listed entry that
+    `lesson .foo` then refuses it as an invalid slug: a listed entry that
     cannot be opened."""
     _write("real-lesson", "# real-lesson\n\nBody.\n")
     d = clesson.lessons_dir()
@@ -171,7 +171,7 @@ def test_the_listing_ignores_sidecars_and_non_lessons(home):
 
 
 # ---------------------------------------------------------------------------
-# Refusals — 1 means "no", 2 means "that did not work"
+# Refusals: 1 means "no", 2 means "that did not work"
 # ---------------------------------------------------------------------------
 
 
@@ -186,7 +186,7 @@ def test_a_lesson_that_does_not_exist_is_a_no_not_a_breakage(home):
 
 def test_a_slug_cannot_walk_out_of_the_lessons_directory(home, tmp_path):
     """IF THIS FAILS: `lesson` becomes a file reader for the whole disk. The
-    slug is pasted straight into a path, so a traversal prints private files —
+    slug is pasted straight into a path, so a traversal prints private files:
     and with --edit it would open $EDITOR on one."""
     secret = home / "secret.md"
     secret.write_text("private\n", encoding="utf-8")
@@ -198,7 +198,7 @@ def test_a_slug_cannot_walk_out_of_the_lessons_directory(home, tmp_path):
 
 def test_a_slug_the_go_build_accepts_is_not_refused_here(home):
     """IF THIS FAILS: this build's stricter task-id slug rule leaks in and
-    refuses lessons the Go build wrote into the same directory — dots and
+    refuses lessons the Go build wrote into the same directory: dots and
     underscores included. The file lists, and then will not open."""
     _write("verify.data_first-2", "# verify.data_first-2\n\nStill a lesson.\n")
     code, out = _run("verify.data_first-2")
@@ -232,7 +232,7 @@ def test_a_misspelled_flag_does_not_quietly_become_a_read(home, monkeypatch):
 
 def test_edit_creates_the_stub_that_makes_a_lesson_worth_writing(home, monkeypatch):
     """IF THIS FAILS: $EDITOR opens on an empty buffer, and what gets written is
-    a paragraph with no "Avoid" and no "Evidence" — the two sections that make a
+    a paragraph with no "Avoid" and no "Evidence": the two sections that make a
     lesson checkable instead of an opinion."""
     monkeypatch.setenv("COMMS_ACTOR", "human-eli")
     monkeypatch.setenv("EDITOR", "true")
@@ -258,7 +258,7 @@ def test_edit_opens_the_existing_lesson_instead_of_overwriting_it(home, monkeypa
 
 
 def test_the_editor_gets_its_arguments_and_the_path(home, monkeypatch, tmp_path):
-    """IF THIS FAILS: an $EDITOR with flags — `code --wait`, `subl -w` — is run
+    """IF THIS FAILS: an $EDITOR with flags: `code --wait`, `subl -w`: is run
     as a binary literally named "code --wait", which does not exist. Editing
     fails for everyone whose editor needs a wait flag, and for those where it
     does not, the editor returns immediately and the lesson is saved unedited."""
@@ -344,7 +344,7 @@ def test_visual_wins_over_editor(home, monkeypatch, tmp_path):
 
 def test_a_second_editor_is_told_who_holds_the_lesson(home, monkeypatch):
     """IF THIS FAILS: two agents open the same lesson, both save, and the second
-    write silently discards the first — the failure mode comms exists to
+    write silently discards the first: the failure mode comms exists to
     prevent, in the one directory whose content is irreplaceable."""
     monkeypatch.setenv("COMMS_ACTOR", "human-eli")
     monkeypatch.setenv("EDITOR", "true")
@@ -364,7 +364,7 @@ def test_a_second_editor_is_told_who_holds_the_lesson(home, monkeypatch):
 
 def test_the_lesson_is_editable_again_once_the_holder_leaves(home, monkeypatch):
     """IF THIS FAILS: the sidecar is never released, so one finished edit locks
-    that lesson out of every future edit — and the lock file is never removed,
+    that lesson out of every future edit, and the lock file is never removed,
     so there is nothing to clear."""
     monkeypatch.setenv("COMMS_ACTOR", "human-eli")
     monkeypatch.setenv("EDITOR", "true")

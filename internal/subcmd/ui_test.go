@@ -248,7 +248,7 @@ func TestBuildGlobalUISnapshotOrdersPriorityFindingsFirst(t *testing.T) {
 		t.Fatalf("want 2 merged findings, got %d", len(snap.Findings))
 	}
 	// The priority finding must sort first in the merged all-projects view even
-	// though it is older — matching the per-repo view's priority-first ordering.
+	// though it is older: matching the per-repo view's priority-first ordering.
 	if !snap.Findings[0].Priority {
 		t.Fatalf("priority finding must sort first in the merged view, got: %+v", snap.Findings)
 	}
@@ -890,7 +890,7 @@ func TestUIServeEndCurrentSessionIDArchivesLegacyCurrentSession(t *testing.T) {
 // (session_id=="current") must drive the no-session global sweep, NOT the
 // operator fallback. Previously, when the operator (rt.Actor) also held its own
 // NAMED comms session, "end current" wrongly resolved to that named session and
-// released only its claims — leaving a different actor's legacy claim active and
+// released only its claims: leaving a different actor's legacy claim active and
 // tagging the archive with the operator's named session id.
 func TestUIServeEndCurrentSessionIDDoesNotEndOperatorNamedSession(t *testing.T) {
 	repo := setupUITestRepo(t)
@@ -1837,7 +1837,7 @@ func TestSnapshotWireDropsDuplicatedSessionEvents(t *testing.T) {
 
 // TestUIHistoryMergesDeltaFramesAndReconcilesAgainstTotal pins the wiring of the
 // incremental history: that the merge exists, runs before anything renders, and is
-// fed a freshness stamp by load(). It can only check that the source says so —
+// fed a freshness stamp by load(). It can only check that the source says so:
 // TestUIHistoryMergeLogic executes the same code under node and is what proves the
 // behaviour.
 func TestUIHistoryMergesDeltaFramesAndReconcilesAgainstTotal(t *testing.T) {

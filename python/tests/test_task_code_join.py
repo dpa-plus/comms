@@ -2,7 +2,7 @@
 
 This is the join comms exists on top of graphify for. The log knows which files
 a task touched, because claims carry `--task`; the map knows how files reach
-each other. Apart, the task graph can only show edges somebody typed — and
+each other. Apart, the task graph can only show edges somebody typed: and
 measured on a real store, nobody ever typed one: eight tasks, zero task_edge
 events, in a log with thousands of events.
 """
@@ -22,7 +22,7 @@ class _T:
 
 
 def _graph():
-    """a.py — b.py directly; hub.py touched by a.py and by d.py; c.py alone."""
+    """a.py: b.py directly; hub.py touched by a.py and by d.py; c.py alone."""
     g = nx.Graph()
     for n in ("a.py", "b.py", "c.py", "d.py", "hub.py"):
         g.add_node(n, path=n)
@@ -45,7 +45,7 @@ def test_a_task_whose_reach_contains_your_file_is_related(monkeypatch):
     """IF THIS FAILS: the graph shows only what somebody typed, which is nothing.
 
     Neither task declares anything about the other. They are related because a
-    file one touched reaches a file the OTHER TOUCHED — a fact about the code,
+    file one touched reaches a file the OTHER TOUCHED: a fact about the code,
     true whether or not anybody noticed.
     """
     out = _link(monkeypatch, {"task-a": ["a.py"], "task-b": ["b.py"]})
@@ -64,8 +64,8 @@ def test_merely_sharing_a_hub_is_not_a_relation(monkeypatch):
     is the tempting generalisation and it is the one that destroys the feature:
     on a real codebase a handful of hub files are reachable from nearly
     everything, so the answer becomes "all of them" and stops carrying
-    information. The rule is deliberately the narrower one — your files, in my
-    reach — because a signal that fires constantly is the same as no signal.
+    information. The rule is deliberately the narrower one: your files, in my
+    reach, because a signal that fires constantly is the same as no signal.
     """
     out = _link(monkeypatch, {"task-a": ["a.py"], "task-d": ["d.py"]})
     assert [r["task"] for r in out["task-a"]["related"]] == []
@@ -83,8 +83,8 @@ def test_relations_are_symmetric_whichever_way_the_import_points(monkeypatch):
     other, so one of the two agents is warned and the other is not.
 
     The same bug the claim-time contact check already had: `neighbors` on a
-    directed graph yields successors only, so the holder of the callee — whose
-    change breaks the caller — heard nothing.
+    directed graph yields successors only, so the holder of the callee: whose
+    change breaks the caller: heard nothing.
     """
     out = _link(monkeypatch, {"task-a": ["a.py"], "task-b": ["b.py"]})
     a_sees = {r["task"] for r in out["task-a"]["related"]}
@@ -101,7 +101,7 @@ def test_no_map_means_no_answer_rather_than_a_guess():
 
 def test_a_task_with_no_tagged_files_is_simply_absent(monkeypatch):
     """An untagged task cannot be placed on the map at all. It must not claim to
-    meet nothing — it is not that it has no neighbours, it is that nobody said
+    meet nothing: it is not that it has no neighbours, it is that nobody said
     where it lives."""
     out = _link(monkeypatch, {"task-a": ["a.py"], "orphan": []})
     assert "orphan" not in out
@@ -111,7 +111,7 @@ def test_your_own_is_relative_to_who_is_asking(monkeypatch):
     """IF THIS FAILS: reading a peer's task hides the rows you needed.
 
     "Your own earlier work" means "skip, you already know this". The first
-    version compared the two TASKS' owners rather than asking who was calling —
+    version compared the two TASKS' owners rather than asking who was calling:
     a different question that looks right only on your own task. Read a peer's
     brief and every one of THEIR tasks was marked yours, so the label hid what
     was worth reading and left your own tasks unlabelled at the top as though
@@ -145,8 +145,8 @@ def test_with_no_caller_nothing_is_labelled(monkeypatch):
 def test_a_probe_task_is_not_a_neighbour(monkeypatch):
     """IF THIS FAILS: testing the tool pollutes the graph it produces.
 
-    An agent made a task purely to reproduce a bug in comms — claim a file,
-    append a line, stage, revert, release, zero real changes — and it then sat in
+    An agent made a task purely to reproduce a bug in comms: claim a file,
+    append a line, stage, revert, release, zero real changes, and it then sat in
     the graph permanently as a three-file neighbour of that agent's real work,
     outranking a genuine one-file neighbour. That is a direct cost of the rule
     that every file-changing request gets a task, and it compounds: the harder
@@ -176,7 +176,7 @@ def test_your_own_work_is_demoted_but_never_dropped(monkeypatch):
     peer's unclaimed task through a file shared with its OWN earlier task.
 
     It also made discovery depend on which end you opened. `brief theirs` would
-    list yours, `brief yours` would not list theirs — and the end you naturally
+    list yours, `brief yours` would not list theirs, and the end you naturally
     open when investigating somebody else's work was the blind one.
     """
     monkeypatch.setattr(taskcode, "_nodes_for",

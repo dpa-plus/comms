@@ -4,7 +4,7 @@
 // The load-bearing rule (Round 4 Patch #1): the actor MUST be a per-session
 // name like `claude-3a1f`, `codex-9b2c`, `human-eli`. Per-user generic names
 // like `eli`, `claude`, `codex` are rejected by default because they break
-// the conflict model — `comms check` would treat every other live agent's
+// the conflict model: `comms check` would treat every other live agent's
 // claim as "held by same actor" and wave through edits.
 package actor
 
@@ -37,7 +37,7 @@ const (
 // name plus an explanatory error if validation fails.
 //
 // In ReadOnly mode an unset env var returns ("", nil).
-// In Mutating mode an unset or generic name returns ("", err) — err.Error()
+// In Mutating mode an unset or generic name returns ("", err): err.Error()
 // is the user-facing message the CLI prints to stderr.
 func Resolve(mode Mode) (string, error) {
 	return ResolveName(os.Getenv(EnvVar), mode)
@@ -48,7 +48,7 @@ func Resolve(mode Mode) (string, error) {
 // One process, one COMMS_ACTOR is right for a CLI invocation and wrong for a
 // long-lived server that acts on behalf of several agents over one connection.
 // Splitting the validation out lets such a caller pass the name per request and
-// still get exactly the same rules — charset, and the refusal to let a
+// still get exactly the same rules: charset, and the refusal to let a
 // per-person name like "claude" stand in for a per-session actor.
 func ResolveName(raw string, mode Mode) (string, error) {
 	if raw == "" {
@@ -88,7 +88,7 @@ func GenericAllowed() bool {
 }
 
 // genericNames is the case-insensitive equality blocklist. Per the plan's
-// Round 4 patch: equality, not substring — so `claude-3a1f`, `codex-9b2c`,
+// Round 4 patch: equality, not substring, so `claude-3a1f`, `codex-9b2c`,
 // `agent-0`, `human-eli` all pass.
 var genericNames = []string{"eli", "claude", "codex", "agent", "user"}
 
@@ -115,7 +115,7 @@ func genericAllowed() bool {
 // whitespace, and anything that could confuse terminal rendering or
 // downstream JSON consumers.
 //
-// Max length is 64 runes — long enough for `claude-` + a UUID prefix, short
+// Max length is 64 runes: long enough for `claude-` + a UUID prefix, short
 // enough to keep status output legible.
 func validateCharset(name string) error {
 	if name == "" {

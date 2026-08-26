@@ -1,6 +1,6 @@
 """The event log is the only durable record of who is doing what.
 
-Everything else in comms — the board, the state fold, the map projection — is a
+Everything else in comms: the board, the state fold, the map projection: is a
 view that can be rebuilt. The log cannot. So the properties tested here are all
 of one kind: a line that reaches disk must mean tomorrow what it meant when it
 was written, and a bad line must never take the good ones down with it.
@@ -38,7 +38,7 @@ def ev(**kw) -> Event:
 
 def test_a_naive_timestamp_is_refused_rather_than_read_as_utc():
     """IF THIS FAILS: every agent that reaches for `datetime.now()` (the naive,
-    local one — the obvious spelling) writes events shifted by its machine's UTC
+    local one: the obvious spelling) writes events shifted by its machine's UTC
     offset. Nothing errors and no line is malformed; claims just expire hours
     early or late and events from two machines interleave in the wrong causal
     order. A silent hours-wide skew in coordination state is far worse than a
@@ -52,7 +52,7 @@ def test_a_naive_timestamp_is_refused_rather_than_read_as_utc():
 
 def test_the_zero_instant_is_never_written():
     """IF THIS FAILS: an accidental zero/default timestamp appends a line that
-    this very module's reader classifies as corrupt — so one bad event bricks
+    this very module's reader classifies as corrupt, so one bad event bricks
     the whole log from that point on, including every good claim appended after
     it. A writer must never author bytes its own reader would refuse."""
     for spelling in (
@@ -65,7 +65,7 @@ def test_the_zero_instant_is_never_written():
 
 def test_a_timestamp_without_a_zone_is_not_guessed_at_on_the_way_in(tmp_path):
     """IF THIS FAILS: a line from some other writer that omitted its offset gets
-    read as if it were UTC, inventing an instant the file never stated — and the
+    read as if it were UTC, inventing an instant the file never stated, and the
     invented instant decides which of two claims came first."""
     p = tmp_path / "log.jsonl"
     p.write_text('{"ts":"2026-05-22T14:30:00","id":"1","actor":"a","type":"note"}\n')
@@ -137,7 +137,7 @@ def test_the_same_event_encodes_to_the_same_bytes_every_time():
 
 def test_an_event_type_a_newer_build_invented_does_not_brick_this_one(tmp_path, capsys):
     """IF THIS FAILS: the day a newer comms adds a tenth event type, every older
-    install on the machine stops being able to read that repo's log at all —
+    install on the machine stops being able to read that repo's log at all:
     status, claim, note and the pre-edit hook fail together, on a log that is
     perfectly well formed. Readers must be tolerant of what they do not know."""
     p = tmp_path / "log.jsonl"
@@ -176,7 +176,7 @@ def test_a_writer_still_refuses_the_type_a_reader_tolerates():
 )
 def test_a_line_we_cannot_parse_is_an_error_naming_its_line_number(tmp_path, bad, why):
     """IF THIS FAILS: a log that is genuinely damaged is read as a shorter, valid
-    log — and an agent then acts on a picture of the repo that is missing claims
+    log, and an agent then acts on a picture of the repo that is missing claims
     it must respect. Refusing loudly, at a line number a human can go and look
     at, is the only safe direction to fail in. (Contrast the unknown-type case
     above: a newer writer is not a broken file.)"""
@@ -204,8 +204,8 @@ def test_a_torn_final_line_does_not_cost_the_events_before_it(tmp_path):
 
 def test_a_line_appended_twice_is_still_one_event(tmp_path):
     """IF THIS FAILS: a retried write, a log concatenated onto itself, or a
-    copy-paste during recovery replays a claim AFTER its own release — so a
-    scope nobody holds blocks everybody — and double-counts every finding."""
+    copy-paste during recovery replays a claim AFTER its own release, so a
+    scope nobody holds blocks everybody, and double-counts every finding."""
     p = tmp_path / "log.jsonl"
     line = ev(id="DUPLICATE").encode()
     with open(p, "wb") as fh:
@@ -216,7 +216,7 @@ def test_a_line_appended_twice_is_still_one_event(tmp_path):
 
 def test_a_runaway_line_is_refused_before_it_is_materialised(tmp_path):
     """IF THIS FAILS: one absurd line (a stuck writer, a binary file dropped in
-    place) is read into memory in full during every replay — and replay happens
+    place) is read into memory in full during every replay, and replay happens
     on the pre-edit hot path, in front of every agent write."""
     p = tmp_path / "log.jsonl"
     with open(p, "wb") as fh:
@@ -230,8 +230,8 @@ def test_a_runaway_line_is_refused_before_it_is_materialised(tmp_path):
 def test_the_writer_refuses_a_line_its_own_reader_would_call_corrupt(tmp_path):
     """IF THIS FAILS: an oversized event is accepted by the writer and then
     rejected by the reader, so the log is bricked the instant it lands and the
-    line that did it is already on disk. Every later read of that repo aborts —
-    board, log, claim, and the pre-edit hook — and the store cannot be opened to
+    line that did it is already on disk. Every later read of that repo aborts:
+    board, log, claim, and the pre-edit hook, and the store cannot be opened to
     find out why. The two limits must be one limit."""
     p = tmp_path / "log.jsonl"
     with pytest.raises(ValueError, match="line limit"):
@@ -245,7 +245,7 @@ def test_appending_after_a_torn_line_does_not_fuse_with_it(tmp_path):
     """IF THIS FAILS: a crash mid-append is survivable until the NEXT command
     runs, and then it is not. Appending after an unterminated line concatenates
     onto it, so the fragment and the new event become one unparseable line in
-    the MIDDLE of the log — no longer the tolerated trailing-garbage case, but
+    the MIDDLE of the log: no longer the tolerated trailing-garbage case, but
     permanent corruption that costs the entire history. One crash plus one
     ordinary later claim was enough to lose the repo's whole log."""
     p = tmp_path / "log.jsonl"
@@ -259,7 +259,7 @@ def test_appending_after_a_torn_line_does_not_fuse_with_it(tmp_path):
 def test_a_log_that_is_nothing_but_a_torn_line_still_accepts_writes(tmp_path):
     """IF THIS FAILS: a crash during the very FIRST append leaves a file with no
     newline anywhere in it, and the repair has no boundary to scan back to. That
-    repo can never be written to again — the failure lands on a brand-new store,
+    repo can never be written to again: the failure lands on a brand-new store,
     where it looks like comms is simply broken."""
     p = tmp_path / "log.jsonl"
     p.write_bytes(b'{"ts":"2026-05-22T14:30:00Z","id":"TORN","ty')
@@ -281,7 +281,7 @@ def test_a_torn_line_longer_than_one_read_chunk_is_still_found(tmp_path):
 
 def test_a_repaired_torn_line_says_so_on_stderr(tmp_path, capsys):
     """IF THIS FAILS: bytes disappear from the append-only log silently. The
-    fragment is safe to drop — nothing was ever told it succeeded — but dropping
+    fragment is safe to drop: nothing was ever told it succeeded, but dropping
     it quietly means a crash leaves no trace anyone can find afterwards."""
     p = tmp_path / "log.jsonl"
     clog.append(p, ev(id="A"))
@@ -306,7 +306,7 @@ def test_a_missing_log_is_not_an_error(tmp_path):
 
 def test_one_bad_event_in_a_batch_writes_nothing_at_all(tmp_path):
     """IF THIS FAILS: a command that emits several events (a claim plus its note,
-    a release plus its finding) can land half-written and stay that way forever —
+    a release plus its finding) can land half-written and stay that way forever:
     the log is append-only, so there is no repair. All-or-nothing is what lets a
     caller retry after an error instead of reconciling a partial record."""
     p = tmp_path / "log.jsonl"
@@ -322,7 +322,7 @@ def test_one_bad_event_in_a_batch_writes_nothing_at_all(tmp_path):
 
 def test_a_batch_lands_as_whole_consecutive_lines(tmp_path):
     """IF THIS FAILS: a batch bigger than a stream buffer flushes mid-object and
-    tears a JSON line in half. A torn line is not a lost event — it is a log that
+    tears a JSON line in half. A torn line is not a lost event: it is a log that
     stops parsing there, taking every later event with it."""
     p = tmp_path / "log.jsonl"
     big = "x" * 20_000
@@ -347,8 +347,8 @@ def test_the_log_is_not_readable_by_other_users(tmp_path):
 
 
 def test_ids_minted_in_one_millisecond_still_sort_in_the_order_they_were_minted():
-    """IF THIS FAILS: two events written in the same millisecond — a claim and
-    the steal that displaces it is exactly that fast — sort in random order, so
+    """IF THIS FAILS: two events written in the same millisecond: a claim and
+    the steal that displaces it is exactly that fast: sort in random order, so
     the reducer can replay the steal before the claim it steals from and leave
     two holders (or none) on one scope."""
     ids = [clog.new_id(T0) for _ in range(500)]
@@ -365,7 +365,7 @@ def test_ids_minted_in_one_millisecond_still_sort_in_the_order_they_were_minted(
 def test_the_log_does_not_live_inside_the_repo(tmp_path):
     """IF THIS FAILS: coordination truth sits next to a derived artifact that is
     rewritten whole on every update and deleted outright by `graphify uninstall
-    --purge` — so removing the map silently destroys the record of who claimed
+    --purge`, so removing the map silently destroys the record of who claimed
     what. The map is derived; the log is truth; they must not share a fate."""
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -375,7 +375,7 @@ def test_the_log_does_not_live_inside_the_repo(tmp_path):
 
 
 def test_two_checkouts_do_not_share_a_log(tmp_path):
-    """IF THIS FAILS: unrelated projects coordinate against each other — agent A
+    """IF THIS FAILS: unrelated projects coordinate against each other: agent A
     in project one is blocked by agent B's claim on a same-named file in project
     two."""
     a, b = tmp_path / "one", tmp_path / "two"
@@ -409,7 +409,7 @@ def test_every_worktree_of_one_repo_shares_one_log(tmp_path):
 
 def test_a_store_under_a_temp_root_is_flagged_as_private(tmp_path):
     """IF THIS FAILS: a run with an overridden $HOME writes to a throwaway store
-    that a normally-launched agent never opens — two agents coordinating through
+    that a normally-launched agent never opens: two agents coordinating through
     logs that cannot see each other, with no error anywhere. The caller can only
     warn about that if this reports it."""
     assert clog.is_ephemeral_store("/tmp/whatever/comms/abc") is True

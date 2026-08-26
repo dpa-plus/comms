@@ -40,14 +40,14 @@ type Conflict struct {
 // WriteConflict writes the structured conflict report to w.
 func WriteConflict(w io.Writer, c Conflict) {
 	if len(c.Holders) == 0 {
-		// Shouldn't happen — caller only invokes this when there's an
-		// actual conflict — but be defensive.
+		// Shouldn't happen: caller only invokes this when there's an
+		// actual conflict, but be defensive.
 		fmt.Fprintln(w, "BLOCKED: scope claimed by an unknown holder.")
 		return
 	}
 	primary := c.Holders[0]
-	raw := time.Since(primary.TS)   // exact age — drives the stale decision
-	since := raw.Round(time.Minute) // rounded — display only
+	raw := time.Since(primary.TS)   // exact age: drives the stale decision
+	since := raw.Round(time.Minute) // rounded: display only
 
 	// Every field below can originate from the append-only log (holder
 	// actors/scopes/intents are only validated for non-emptiness at decode
@@ -69,7 +69,7 @@ func WriteConflict(w io.Writer, c Conflict) {
 		}
 	}
 
-	// A stale blocking claim (holder presumed gone) can be stolen directly — no
+	// A stale blocking claim (holder presumed gone) can be stolen directly: no
 	// user confirmation needed. This is the common "took over a dead agent's
 	// file" path, so lead with it when it applies.
 	// Use the EXACT age (not the rounded display value) so this advice never tells
@@ -123,8 +123,8 @@ func formatDuration(d time.Duration) string {
 // sanitizeControl replaces every C0 control rune (< 0x20), DEL (0x7F), and C1
 // control rune (U+0080–U+009F) with a visible '?' placeholder so
 // attacker-controlled strings read back from the append-only log can't smuggle
-// ANSI/terminal escape sequences (ESC, CSI — including the single-code-point C1
-// CSI U+009B — newlines, carriage returns, etc.) into terminal output.
+// ANSI/terminal escape sequences (ESC, CSI: including the single-code-point C1
+// CSI U+009B: newlines, carriage returns, etc.) into terminal output.
 func sanitizeControl(s string) string {
 	var b strings.Builder
 	for _, r := range s {

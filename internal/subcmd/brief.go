@@ -128,7 +128,7 @@ func runBrief(slug string) error {
 //
 // It used to special-case one scheme and print the command that resolves it,
 // which contradicted both this comment and docs/PROTOCOL.md ("comms stores it
-// and never resolves it") — and hard-wired one team's internal tool into a
+// and never resolves it"), and hard-wired one team's internal tool into a
 // public repository. An agent that owns a reference already knows how to read
 // it; where a scheme maps to a command belongs in that team's own skill, not
 // in here.

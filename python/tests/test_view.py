@@ -4,7 +4,7 @@ Kept in its own directory rather than in ``tests/comms/`` because that tree is
 being edited by other people right now.
 
 The assertions that matter most here are the NEGATIVE ones: the picture must not
-contain a word that reads as an order or a verdict. That is not style policing —
+contain a word that reads as an order or a verdict. That is not style policing:
 docs/COMMS.md records that order derived from this map was measured at coin-flip
 accuracy and cut, and a picture is the most persuasive place to reintroduce it by
 accident.
@@ -115,7 +115,7 @@ def test_base_document_is_untouched_apart_from_the_appended_block(tmp_path):
 
 
 #: Phrases that DENY an order or a verdict. They contain the very words the
-#: guard below hunts for, so they are removed before it looks — otherwise the
+#: guard below hunts for, so they are removed before it looks: otherwise the
 #: only way to pass the test would be to delete the disclaimers, which is the
 #: opposite of what it is for.
 _DISCLAIMERS = re.compile(
@@ -246,7 +246,7 @@ def test_a_whole_file_claim_still_gets_its_nearby_ring(tmp_path):
     """IF THIS FAILS: the faint ring is dead again and half the legend lies.
 
     This module used to withhold the nearby ring from any claim covering more
-    than three PLACES — three graph nodes. A whole-file claim is the natural
+    than three PLACES: three graph nodes. A whole-file claim is the natural
     unit and resolves to one node per symbol, so every ordinary claim tripped it
     at once: four claims in a real run covered 24, 37, 11 and 9 places and every
     one printed "nearby not drawn", while the legend below the picture went on
@@ -306,7 +306,7 @@ def test_a_hostile_intent_cannot_break_out_of_the_script(tmp_path):
     assert "</script><img" not in added
     # Assert the PROPERTY, not the spelling: no raw "<" from agent text may
     # reach the script element. The escape used to be "<\\/" and is now
-    # "\\u003c", which is stronger — it also closes "<!--" and "<![CDATA[",
+    # "\\u003c", which is stronger: it also closes "<!--" and "<![CDATA[",
     # neither of which the old form touched.
     assert "\\u003c/script>" in added or "<\\/script>" in added
 
@@ -317,7 +317,7 @@ def test_agent_text_cannot_delete_the_coordination_overlay(tmp_path):
 
     The payload sits inside a <script> element. Escaping only `</` left
     `<!--<script` open an HTML comment that swallowed the rest of the element,
-    so the overlay disappeared with nothing erroring — the worst way for this to
+    so the overlay disappeared with nothing erroring: the worst way for this to
     fail, because the page looks fine and simply reports nobody is anywhere.
     """
     import json
@@ -335,7 +335,7 @@ def test_a_log_that_will_not_parse_does_not_render_as_nobody_is_here(tmp_path):
     """IF THIS FAILS: the picture prints its most reassuring sentence out of
     data it just failed to read.
 
-    An absent log and an unreadable one had the same result — empty state — so
+    An absent log and an unreadable one had the same result: empty state: so
     the map said "Nobody is holding anything right now" for both. One of those
     is true and the other is the absence of an answer, and an agent reading the
     second as the first edits ground somebody is standing on.
@@ -382,7 +382,7 @@ def test_a_genuinely_empty_log_still_reads_as_empty(tmp_path):
 
 def test_a_map_that_exists_and_will_not_load_says_so(tmp_path):
     """IF THIS FAILS: a corrupt graph.json is reported as "no map has been built
-    yet — run graphify extract", which sends somebody to re-run the command that
+    yet, run graphify extract", which sends somebody to re-run the command that
     produced the broken file, and reads as an ordinary first-run state."""
     from comms_graph import view as _v
 
@@ -400,7 +400,7 @@ def test_the_headline_counts_only_the_people_it_can_draw(tmp_path):
 
     Counting every claimant made it say "1 place(s) held by 3 people" when two
     of the three had claimed files the map has never seen. The unplaced claims
-    are not dropped — they are counted separately and listed, because an
+    are not dropped: they are counted separately and listed, because an
     unplaceable claim is usually a brand-new file, which is exactly when two
     agents are most likely to collide.
     """
@@ -420,9 +420,9 @@ def test_the_no_map_page_also_stops_answering_from_an_unreadable_log(tmp_path):
     false one.
 
     The interactive template was fixed for this; the no-map page was missed. It
-    printed "Nobody is holding anything right now. That is what the log says" —
+    printed "Nobody is holding anything right now. That is what the log says",
     attributing the most reassuring sentence the tool has to a log it had just
-    failed to parse — while the board rail beside it showed the parse error.
+    failed to parse, while the board rail beside it showed the parse error.
     """
     from comms_graph import view as _v
 

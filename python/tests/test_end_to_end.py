@@ -498,7 +498,7 @@ def test_the_whole_run_is_replayable_from_the_log_alone(run: Transcript):
 
 def test_every_comms_data_file_is_declared_for_the_wheel():
     """IF THIS FAILS: a non-Python file in graphify/comms/ is dropped from the
-    built wheel, and the drop is INVISIBLE. Tests pass — they run against the
+    built wheel, and the drop is INVISIBLE. Tests pass: they run against the
     source tree, where the file is always there. Only a user installing from a
     wheel meets the failure.
 
@@ -506,7 +506,7 @@ def test_every_comms_data_file_is_declared_for_the_wheel():
     text) was never declared, so setuptools left it out, and the loader treats a
     missing file as "coordination guidance is optional" and returns "". The
     install SUCCEEDED, reported nothing wrong, and set up no coordination at
-    all — agents were simply never told to claim files. There is no way to
+    all: agents were simply never told to claim files. There is no way to
     notice that from the outside, which is what makes it worth a test.
 
     include-package-data is false and the package-data table is per-package, so
@@ -548,7 +548,7 @@ def test_every_command_the_briefing_teaches_actually_exists():
     CLI does not dispatch.
 
     That file is the ENTIRE instruction set an agent gets, and it is loaded on
-    every turn — so a verb renamed here and not there sends every agent in the
+    every turn, so a verb renamed here and not there sends every agent in the
     fleet at something that exits 2. The briefing is documentation that runs.
     """
     import re
@@ -593,7 +593,7 @@ def test_the_hook_path_is_the_one_the_cli_dispatches():
 
     graphify/comms/commands.py holds a complete, plausible, well-commented
     implementation of claim/check/release that NOTHING imports and that has not
-    tracked any of the correctness work — the self-review gate, filesystem-aware
+    tracked any of the correctness work: the self-review gate, filesystem-aware
     paths, the fail-closed wrapper. It is marked as superseded. This pins the
     fact that the CLI does not quietly start using it again.
     """
@@ -626,13 +626,13 @@ def test_no_document_teaches_a_command_from_the_tree_this_was_split_out_of():
     README.md carried the old spelling for twelve commands, because it sat
     outside the directory the copy step rewrote. Nothing failed: the tests
     imported the package directly, and the only reader who would have hit it was
-    somebody following the README. That is the failure mode worth a test — a
+    somebody following the README. That is the failure mode worth a test: a
     document is wrong in a way the suite cannot feel.
     """
     for doc in _package_docs():
         assert "graphify comms" not in doc.read_text(encoding="utf-8"), (
             f"{doc.name} teaches `graphify comms`, which is not a command in "
-            f"this package — the console script is `comms-graph`"
+            f"this package: the console script is `comms-graph`"
         )
 
 
@@ -660,5 +660,5 @@ def test_the_synced_copy_step_is_gone_and_stays_gone():
     root = Path(__file__).resolve().parents[1]
     assert not (root / "sync-from-graphify.py").exists(), (
         "sync-from-graphify.py is back, which means this directory is generated "
-        "from somewhere else again — edit it here instead"
+        "from somewhere else again: edit it here instead"
     )

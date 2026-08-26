@@ -4,7 +4,7 @@
 // The contract: every comms command that reads-and-writes the log first
 // acquires an exclusive flock on `<logdir>/.lock` and holds it until the
 // command exits. The kernel releases the lock automatically when the
-// process's file descriptors close — including on `kill -9` — so we don't
+// process's file descriptors close: including on `kill -9`, so we don't
 // rely on Go defers for correctness.
 package lock
 
@@ -25,7 +25,7 @@ type Handle struct {
 // Close method releases the lock by closing the FD.
 //
 // NEVER spawn a child process while holding this lock that itself tries to
-// acquire it — the child would inherit the FD via fork and deadlock.
+// acquire it: the child would inherit the FD via fork and deadlock.
 func Acquire(path string) (*Handle, error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
@@ -59,9 +59,9 @@ func TryAcquire(path string) (*Handle, error) {
 // TryAcquireOK is the non-blocking acquire used to build a *bounded* (looping,
 // deadline-capped) acquire on top of a single non-blocking attempt. It returns:
 //
-//	(handle, true, nil)  — lock obtained; caller owns the FD and must Close it.
-//	(nil, false, nil)    — lock is currently held by another process (EWOULDBLOCK).
-//	(nil, false, err)    — a real error (e.g. open failure).
+//	(handle, true, nil) : lock obtained; caller owns the FD and must Close it.
+//	(nil, false, nil)   : lock is currently held by another process (EWOULDBLOCK).
+//	(nil, false, err)   : a real error (e.g. open failure).
 //
 // Unlike TryAcquire, the "already held" case is NOT an error, which lets a
 // caller poll without allocating/inspecting a sentinel each iteration. The FD

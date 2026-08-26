@@ -1,5 +1,5 @@
 // Package state folds a JSONL event stream into the current state of the
-// world: which claims are active, who's hello'd recently, what findings and
+// world, which claims are active, who's hello'd recently, what findings and
 // notes have landed.
 //
 // The reducer is pure: given the same events in order it always returns the
@@ -33,7 +33,7 @@ type State struct {
 	Findings []*Finding
 	Notes    []*Note
 
-	// Releases of actual claims (refs present), in chronological order — the
+	// Releases of actual claims (refs present), in chronological order: the
 	// "recently completed work" trail. Session-end/retire/leader releases are
 	// excluded. Caller filters by `since`.
 	Releases []*Release
@@ -45,7 +45,7 @@ type State struct {
 	Tasks     map[string]*Task
 	TaskEdges []*TaskEdge
 
-	// RefusedTaskStates are transitions the reducer would not apply — a
+	// RefusedTaskStates are transitions the reducer would not apply: a
 	// self-review, or work marked done with failing checks. Kept rather than
 	// dropped so the operator can see the attempt.
 	RefusedTaskStates []*RefusedTransition
@@ -56,7 +56,7 @@ type State struct {
 	Blocked []*Blocked
 }
 
-// Blocked is one refused claim — who wanted what, and who already had it.
+// Blocked is one refused claim: who wanted what, and who already had it.
 type Blocked struct {
 	ID          string
 	TS          time.Time
@@ -106,12 +106,12 @@ type Session struct {
 	//
 	// Scope is actor-global, NOT session-scoped: it is the max TS over all of the
 	// actor's events regardless of which comms session they belong to. This is
-	// deliberate — liveness is "is this agent's process alive?", which is a
+	// deliberate: liveness is "is this agent's process alive?", which is a
 	// property of the actor, not of any one named session.
 	LastSeen time.Time
 	// AgentSession is the host agent's session id (Claude Code's session_id),
-	// recorded at hello. It is how a PreToolUse hook — which has no COMMS_ACTOR
-	// of its own — identifies which actor is asking.
+	// recorded at hello. It is how a PreToolUse hook, which has no COMMS_ACTOR
+	// of its own: identifies which actor is asking.
 	AgentSession string
 	SessionID    string
 	SessionName  string
@@ -206,7 +206,7 @@ func Fold(events []event.Event) *State {
 	var windowStart time.Time
 	windowActors := map[string]bool{}
 	// lastSeen[actor] = TS of that actor's most-recent event of ANY type. Because
-	// `sorted` is in ascending TS order, the final write per actor is the max —
+	// `sorted` is in ascending TS order, the final write per actor is the max:
 	// the actor's passive heartbeat. Assigned onto each Session after the fold.
 	lastSeen := map[string]time.Time{}
 	windowEvents, windowClaims, windowFindings, windowNotes := 0, 0, 0, 0
@@ -277,7 +277,7 @@ func Fold(events []event.Event) *State {
 		case event.TypeClaim:
 			c, err := claimFromEvent(ev)
 			if err != nil {
-				// Drop malformed events silently — log corruption is exit-2 territory,
+				// Drop malformed events silently: log corruption is exit-2 territory,
 				// handled in event.Read.
 				continue
 			}
@@ -305,7 +305,7 @@ func Fold(events []event.Event) *State {
 			}
 			// An actual claim release (refs present) is a completed unit of work;
 			// record it for the "recently completed" feed. Session lifecycle
-			// releases — retire, leader-transfer, comms-session-end — ALSO carry
+			// releases: retire, leader-transfer, comms-session-end. ALSO carry
 			// refs (the claims they sweep), but they are coordination admin, not
 			// finished work, so exclude them from the feed.
 			isHousekeeping := boolOf(ev.Data, "session_retire") ||
