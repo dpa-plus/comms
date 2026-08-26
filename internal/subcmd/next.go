@@ -19,7 +19,7 @@ func NewNextCmd() *cobra.Command {
 
 Work waiting to be verified comes first. It is finished work that is holding up
 everything downstream, and it is cheap: read the task, the handover notes and the
-diff. You will not be offered anything you did yourself — the whole value of a
+diff. You will not be offered anything you did yourself: the whole value of a
 second pair of eyes is that they are somebody else's.
 
 Then tasks nobody has claimed, then tasks with a free slot you could join.`,

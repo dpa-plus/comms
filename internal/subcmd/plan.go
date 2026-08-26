@@ -39,7 +39,7 @@ func NewPlanCmd() *cobra.Command {
 		Short: "Append a whole decomposition at once, or nothing at all",
 		Long: `Append a whole plan in one write.
 
-Every task and every edge is validated first — slugs, sizes, unknown endpoints,
+Every task and every edge is validated first: slugs, sizes, unknown endpoints,
 duplicate edges and dependency cycles. If any of it is wrong, nothing is written.
 A half-created graph is worse than none: agents would start picking work off a
 plan that does not say what its author meant.
@@ -53,12 +53,12 @@ plan that does not say what its author meant.
     ],
     "edges": [
       {"from": "auth-api", "to": "login-ui", "kind": "interface",
-       "provides": "POST /session — httpOnly cookie, no bearer token"}
+       "provides": "POST /session: httpOnly cookie, no bearer token"}
     ]
   }
 
 "after" is shorthand for an ordering-only edge. Use the "edges" list when the
-later task actually consumes something, and say what in "provides" — that is
+later task actually consumes something, and say what in "provides": that is
 what reaches whoever picks it up, and what decides how much a rework costs.`,
 		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error { return runPlan(from) },
@@ -160,7 +160,7 @@ func runPlan(from string) error {
 		pairs = append(pairs, [2]string{e.from, e.to})
 	}
 	if cycle := wouldCycle(rt.State, pairs); cycle != "" {
-		Fatalf(1, "plan: rejected — a task would depend on itself (%s)", cycle)
+		Fatalf(1, "plan: rejected, a task would depend on itself (%s)", cycle)
 	}
 
 	// ---- one batch, one fold, all or nothing ----

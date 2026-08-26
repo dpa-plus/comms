@@ -4,7 +4,7 @@ This fork adds coordination for parallel coding agents to graphify: who is
 working on what, and whose work is near yours.
 
 It is deliberately smaller than the idea it started as. This document records
-what was tried, what was measured, and what was cut — so the cut parts are not
+what was tried, what was measured, and what was cut, so the cut parts are not
 quietly reintroduced later by someone who only sees the appealing version.
 
 ## The idea that failed
@@ -14,7 +14,7 @@ something job B leans on, A goes first. Foundation before floor. It is a clean
 story and it sounds obviously right.
 
 It was checked against three months of real changes on two projects. It was
-right about as often as a coin flip — roughly half — on both. On one project the
+right about as often as a coin flip: roughly half: on both. On one project the
 real work went the *other* way round most of the time.
 
 So the neat theory is a nice story, not a measured fact. Had it shipped as a
@@ -26,7 +26,7 @@ says.
 **Permanent rule that follows: no arrow the machine draws will ever block
 anything on its own.** That is not first-version caution. Order may later be
 *suggested*, shown to a person as a yes/no question with the reason attached, and
-only a confirmed suggestion may ever hold work up — so that every refusal traces
+only a confirmed suggestion may ever hold work up, so that every refusal traces
 back to a named human decision.
 
 ## What survived, and why
@@ -51,7 +51,7 @@ output, because a limit the user cannot see is a limit that misleads them.
 - **A warning is a prompt to look, never a verdict.** Of the pairs the map does
   flag, well under half turn out to be things that really get changed together.
 - **It needs small, specific claims.** Claim everything you touch and the board
-  turns to mush — measured, not guessed. Three places is the cap; a job needing
+  turns to mush: measured, not guessed. Three places is the cap; a job needing
   more has to be split.
 - **A mistyped name finds nothing and looks exactly like a job with no
   connections.** In testing, a quarter of names typed from memory named something
@@ -61,7 +61,7 @@ output, because a limit the user cannot see is a limit that misleads them.
   that changed since then is reported as out of date rather than as truth.
 - **It fits projects shaped like the one it was built for.** On a large,
   loosely-connected codebase, narrow claims produce almost no connections at all
-  — an empty board. The measuring step exists to detect that and say so rather
+ : an empty board. The measuring step exists to detect that and say so rather
   than shipping a board that looks calm because it knows nothing.
 
 ## Where the data lives, and why it is split
@@ -76,6 +76,6 @@ Two stores, on purpose:
   by a hash of the repository root.
 
 Coordination state is therefore written to the log and only *projected* onto the
-map. Putting it in `graph.json` would lose it on the next rebuild — and would
+map. Putting it in `graph.json` would lose it on the next rebuild, and would
 lose concurrent writes besides, since that file is replaced wholesale rather than
 appended to.

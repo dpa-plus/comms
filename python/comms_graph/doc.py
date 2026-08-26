@@ -486,7 +486,7 @@ def main(argv: list[str]) -> int:
     if not _SLUG_RE.match(slug):
         _err(f"error: {slug!r} is not a doc name")
         _err("  Names are lowercase [a-z0-9][a-z0-9._-] up to 81 characters, with")
-        _err("  no slashes — which is also what keeps a name inside .comms/docs.")
+        _err("  no slashes, which is also what keeps a name inside .comms/docs.")
         return EXIT_USAGE
 
     root = _repo_root(flags.get("root"))

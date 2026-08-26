@@ -37,7 +37,7 @@ func NewTaskCmd() *cobra.Command {
 
 A task is what should happen. An edge is the order two tasks must happen in and
 what the later one consumes from the earlier. Every task has two steps: an agent
-does it, then a DIFFERENT agent verifies it — and a task unblocks what comes
+does it, then a DIFFERENT agent verifies it, and a task unblocks what comes
 after it only once it has been verified, not merely finished.
 
 Status is never written by hand. Ready, blocked, doing and closed are computed
@@ -59,7 +59,7 @@ func newTaskAddCmd() *cobra.Command {
 Re-running add with the same slug edits the description in place. It does not
 touch the task's progress: re-titling verified work does not reopen it.
 
-Write the title as an instruction, not a label — "Rotate refresh tokens on every
+Write the title as an instruction, not a label: "Rotate refresh tokens on every
 use", not "Token rotation". It is what another agent reads before picking it up.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
@@ -67,7 +67,7 @@ use", not "Token rotation". It is what another agent reads before picking it up.
 		},
 	}
 	cmd.Flags().StringVar(&title, "title", "", "what should happen, phrased as an instruction (required on first declaration)")
-	cmd.Flags().StringVar(&size, "size", "", "S, M or L — a rough sense of scale for whoever picks it up. Advice, not a gate: nothing refuses a claim on an L")
+	cmd.Flags().StringVar(&size, "size", "", "S, M or L: a rough sense of scale for whoever picks it up. Advice, not a gate, and nothing refuses a claim on an L")
 	cmd.Flags().IntVar(&slots, "slots", 0, "how many agents may work it at once (default 1)")
 	cmd.Flags().StringArrayVar(&checks, "check", nil, "a check that must pass before this can be marked done (repeatable, e.g. --check test)")
 	cmd.Flags().StringVar(&ref, "ref", "", "opaque reference to wherever the real context lives, e.g. tracker:PROJ-1234")
@@ -144,7 +144,7 @@ The kind decides what a rejection costs later:
 
   interface   <to> calls a surface <from> provides
   artifact    <to> uses a file or schema <from> produced
-  sequence    ordering only — nothing flows across it
+  sequence    ordering only: nothing flows across it
 
 Reworking a task only forces a recheck of successors that CONSUME something from
 it. A successor that merely follows in sequence is left alone. --provides is what
@@ -182,7 +182,7 @@ func runTaskEdge(from, to, kind, provides string) error {
 
 	for _, id := range []string{from, to} {
 		if rt.State.Tasks[id] == nil {
-			Fatalf(2, "task edge: no task %q — declare it first with `comms task add %s --title ...`", id, id)
+			Fatalf(2, "task edge: no task %q: declare it first with `comms task add %s --title ...`", id, id)
 		}
 	}
 	if cycle := wouldCycle(rt.State, [][2]string{{from, to}}); cycle != "" {
@@ -206,7 +206,7 @@ func newTaskDoneCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "done <slug> --note \"<a decision you made>\"",
 		Short: "Say the implementation is finished and hand it to a verifier",
-		Long: `Mark the implementation finished. The task is NOT closed — it now waits for a
+		Long: `Mark the implementation finished. The task is NOT closed: it now waits for a
 different agent to verify it, and nothing downstream moves until that happens.
 
 Notes are the handover. Write the decisions you made and why, not a summary of
@@ -267,7 +267,7 @@ func runTaskDone(slug string, notes, checks []string) error {
 			slug, strings.Join(failed, ", "), failed[0])
 	}
 	if len(notes) == 0 {
-		fmt.Printf("note: %s has no handover notes — the verifier will only see the diff\n", slug)
+		fmt.Printf("note: %s has no handover notes, so the verifier will only see the diff\n", slug)
 	}
 
 	data := map[string]interface{}{"task": slug, "state": "done"}
@@ -281,7 +281,7 @@ func runTaskDone(slug string, notes, checks []string) error {
 	if err := rt.Append(newTaskEvent(rt, event.TypeTaskState, data)); err != nil {
 		return err
 	}
-	fmt.Printf("%s is finished and waiting to be verified — by someone other than %s\n", slug, baseName(rt.Actor))
+	fmt.Printf("%s is finished and waiting to be verified, by someone other than %s\n", slug, baseName(rt.Actor))
 	return nil
 }
 
@@ -294,8 +294,8 @@ func newTaskReviewCmd() *cobra.Command {
 		Long: `Verify a task somebody else finished. You cannot verify your own.
 
 Come to it fresh: read the task and the diff, not the author's session. A finding
-must be checkable — an input that breaks it, a line that contradicts the spec, a
-case the tests do not cover — because the rule downstream is "if the reason is
+must be checkable: an input that breaks it, a line that contradicts the spec, a
+case the tests do not cover, because the rule downstream is "if the reason is
 real, fix it, whoever gave it". An opinion cannot be acted on that way.
 
 A verdict is one shot. Do not iterate to agreement with the author; if you
@@ -306,7 +306,7 @@ disagree after this, escalate to a third agent or to a human.`,
 		},
 	}
 	cmd.Flags().BoolVar(&pass, "pass", false, "the work holds up")
-	cmd.Flags().BoolVar(&fail, "fail", false, "send it back — requires at least one --finding")
+	cmd.Flags().BoolVar(&fail, "fail", false, "send it back: requires at least one --finding")
 	cmd.Flags().StringArrayVar(&claims, "finding", nil, "what is wrong (repeatable, pairs with --evidence)")
 	cmd.Flags().StringArrayVar(&evidence, "evidence", nil, "how to check that finding is real (repeatable, same order)")
 	return cmd
@@ -343,7 +343,7 @@ func runTaskReview(slug string, pass, fail bool, claims, evidence []string) erro
 		Fatalf(2, "task review: nothing is awaiting review on %s", slug)
 	}
 	if baseName(rt.Actor) == baseName(t.Did) {
-		Fatalf(1, "task review: %s did this work — verification has to come from somewhere else\n"+
+		Fatalf(1, "task review: %s did this work, so verification has to come from somewhere else\n"+
 			"  a fresh session of another agent is enough; a different model family is better", t.Did)
 	}
 
@@ -488,7 +488,7 @@ func printTaskBoard(s *state.State) {
 		{state.PhaseReady, "READY"},
 		{state.PhaseDoing, "BEING WORKED ON"},
 		{state.PhaseBlocked, "WAITING ON SOMETHING"},
-		{state.PhaseCycle, "DEPENDS ON ITSELF — the plan is wrong"},
+		{state.PhaseCycle, "DEPENDS ON ITSELF: the plan is wrong"},
 		{state.PhaseClosed, "CLOSED"},
 	}
 	for _, g := range groups {
@@ -520,7 +520,7 @@ func printTaskBoard(s *state.State) {
 func taskDetailLine(t *state.Task) string {
 	switch t.Phase {
 	case state.PhaseReview:
-		return "done by " + t.Did + " — needs someone else"
+		return "done by " + t.Did + ": needs someone else"
 	case state.PhaseDoing:
 		s := strings.Join(t.Doers, ", ")
 		if free := t.FreeSlots(); free > 0 {

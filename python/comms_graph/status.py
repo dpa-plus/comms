@@ -571,7 +571,7 @@ def _emit_task_summary(st: _state.State) -> None:
     print(f"TASKS ({open_count} open, {len(closed)} closed)")
     for t in buckets[_task.PHASE_REVIEW]:
         print(f"  VERIFY  {t.id:<16} {t.title}")
-        print(f"          done by @{t.did} — needs someone else")
+        print(f"          done by @{t.did}: needs someone else")
     for t in buckets[_task.PHASE_READY]:
         print(f"  READY   {t.id:<16} {t.title}")
     for t in buckets[_task.PHASE_DOING]:
@@ -580,10 +580,10 @@ def _emit_task_summary(st: _state.State) -> None:
     if buckets[_task.PHASE_BLOCKED]:
         print(f"  {len(buckets[_task.PHASE_BLOCKED])} waiting on work that has not been verified yet")
     for t in buckets[_task.PHASE_CYCLE]:
-        print(f"  CYCLE   {t.id:<16} depends on itself — the plan needs fixing")
+        print(f"  CYCLE   {t.id:<16} depends on itself: the plan needs fixing")
     if st.refused_task_states:
         n = len(st.refused_task_states)
-        print(f"  {n} refused transition{_plural(n)} — see `comms-graph brief <task>`")
+        print(f"  {n} refused transition{_plural(n)}: see `comms-graph brief <task>`")
 
 
 def _emit_blocked_summary(st: _state.State, cutoff: datetime, since_raw: str) -> None:
@@ -963,7 +963,7 @@ def _print_event_human(ev, extra_scopes: list | None = None) -> None:
         target = text("scope") or (f"task {text('task')}" if text("task") else "")
         holder = text("holder")
         by = f" (held by @{holder})" if holder else ""
-        why = f" — {text('reason')}" if text("reason") else ""
+        why = f": {text('reason')}" if text("reason") else ""
         print(f"{ts}  blocked  @{ev.actor}  {target}{by}{why}")
     elif ev.type == _log.TYPE_TASK:
         print(f"{ts}  task     @{ev.actor}  {text('task')}  {text('title')}")

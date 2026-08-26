@@ -15,15 +15,15 @@ alike is the main way this gets misused:
 - **CLAIM CONFLICT** blocks, and exits 1. This is exact, read straight from the
   log: somebody holds overlapping ground and nothing was recorded for you.
   Narrow your claim, or agree with them who takes it.
-- **SAME GROUND / NEARBY** is advisory. A prompt to look before you start — never
+- **SAME GROUND / NEARBY** is advisory. A prompt to look before you start: never
   a conflict, never a reason to wait, and never an instruction about what order
   to work in.
 - **NOT ON THE MAP** means the name you typed matched nothing in the code map.
   Your claim still stands; check the spelling, or rebuild the map with
   `graphify extract . --code-only`.
 
-If a claim is blocking you and its holder is plainly gone — no events for hours,
-a session that died — you may take it:
+If a claim is blocking you and its holder is plainly gone: no events for hours,
+a session that died: you may take it:
 
 ```
 comms-graph claim <path> --as <your-name> --steal <claim-id> --reason "..."
@@ -38,7 +38,7 @@ the file pairs that really do get changed together, and of the pairs it does
 flag, well under half turn out to matter. Claim anyway.
 
 If an edit of yours is refused, that refusal is the tool working. Do not reach
-for another way to make the same edit — a different tool, a shell command, a
+for another way to make the same edit: a different tool, a shell command, a
 changed actor name. Say what you were blocked on and stop.
 
 ### What you learned
@@ -54,7 +54,7 @@ comms-graph note "schema migration lands next session" --as <you>
 ```
 
 `bug` is open, `fix` is closed, `ship` is out, `decision` is why, `gotcha` is what
-will bite. A note is the throwaway version — say it and forget it. A finding is
+will bite. A note is the throwaway version: say it and forget it. A finding is
 the one somebody reads six weeks from now, so write the reason, not the summary.
 
 ### Work that is planned
@@ -73,10 +73,10 @@ while it was built. That is how the reasoning behind the last piece reaches you,
 and there is nowhere else it is written down.
 
 A task is worked by one agent at a time. If somebody else is holding ground on
-it, take a different one or split it — you still work in parallel, on different
+it, take a different one or split it: you still work in parallel, on different
 files, which is what claims are for.
 
-Tag your claim with the task so the board knows who is on what — it is derived
+Tag your claim with the task so the board knows who is on what: it is derived
 from live claims, so releasing the file clears it for you:
 
 ```
@@ -105,7 +105,7 @@ HOW the thing was checked, and `brief` hands it to whoever builds on the task
 next. Without it they read "closed" and cannot tell a real check from a glance.
 
 - You cannot verify work you submitted. Not under a different name, not under a
-  role suffix — the check is on the process, not the spelling.
+  role suffix: the check is on the process, not the spelling.
 - You CAN reject your own work. Saying "this is not ready" needs no second
   opinion.
 - If `next` offers you something to review, clear it before starting new work.

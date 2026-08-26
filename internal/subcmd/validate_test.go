@@ -17,7 +17,7 @@ func TestRejectControlText(t *testing.T) {
 		{"plain ascii ok", "note body", "deploy is green", 280, false},
 		{"latin1 cafe ok", "note body", "Café", 280, false},
 		{"cjk ok", "finding summary", "日本語", 280, false},
-		{"emoji and dash ok", "--label", "Cläude — Dev ✨", 280, false},
+		{"emoji and dash ok", "--label", "Cläude. Dev ✨", 280, false},
 		{"max length ok", "note body", strings.Repeat("x", 280), 280, false},
 		{"no cap means any length ok", "note body", strings.Repeat("x", 10000), 0, false},
 

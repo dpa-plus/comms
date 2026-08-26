@@ -1,7 +1,7 @@
 # Contributing to comms
 
-Thanks for your interest in improving `comms`. It's a small, lean project — a
-single Go binary with no runtime dependencies — and contributions that keep it
+Thanks for your interest in improving `comms`. It's a small, lean project: a
+single Go binary with no runtime dependencies, and contributions that keep it
 that way are very welcome.
 
 ## Development setup
@@ -17,7 +17,7 @@ make vet        # go vet ./...
 make lint       # golangci-lint run     (config in .golangci.yml)
 ```
 
-There is no codegen, no external services, and no database — `comms` reads and
+There is no codegen, no external services, and no database: `comms` reads and
 writes a per-machine append-only JSONL log under a file lock.
 
 ## Before you open a PR
@@ -35,7 +35,7 @@ All of the following must be green:
 - `go test -race ./...` passes
 - `golangci-lint run` passes
 
-New behavior needs tests. The project leans on a strong test suite — if you add
+New behavior needs tests. The project leans on a strong test suite: if you add
 or change a command, the reducer, or the dashboard's derived state, add a
 `*_test.go` covering it.
 
@@ -50,7 +50,7 @@ or change a command, the reducer, or the dashboard's derived state, add a
 ## Commit messages
 
 Match the existing convention (see `git log --oneline`): a short type prefix
-plus an imperative summary —
+plus an imperative summary:
 
 - `comms: ...` for behavior/features/fixes in the tool
 - `security: ...` for security-relevant changes
@@ -62,7 +62,7 @@ user-visible change.
 ## Reporting bugs and requesting features
 
 Use the issue templates (the "New issue" button). For **security** issues, do
-not open a public issue — follow [`SECURITY.md`](SECURITY.md) instead.
+not open a public issue: follow [`SECURITY.md`](SECURITY.md) instead.
 
 ## Code of conduct
 

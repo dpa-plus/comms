@@ -27,11 +27,11 @@ func NewFindCmd() *cobra.Command {
 		Short: "Record a finding (bug, fix, ship, decision, or gotcha)",
 		Long: `Record a finding in one of five categories:
 
-  bug       — an open problem that needs fixing
-  fix       — a problem you just resolved
-  ship      — something now in production or released
-  decision  — an architectural choice the team should remember
-  gotcha    — a non-obvious trap; persistent reminder for future agents
+  bug      : an open problem that needs fixing
+  fix      : a problem you just resolved
+  ship     : something now in production or released
+  decision : an architectural choice the team should remember
+  gotcha   : a non-obvious trap; persistent reminder for future agents
 
 Use --ref kind:value (repeatable) to attach commit hashes, paths, PR
 numbers, issue links. Example:

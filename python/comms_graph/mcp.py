@@ -71,7 +71,7 @@ USAGE = """Usage: comms-graph mcp
   other without either knowing which the other is.
 
   Every tool takes an "actor" argument, so one server process can act for
-  several agents over one connection — which COMMS_ACTOR alone cannot express,
+  several agents over one connection: which COMMS_ACTOR alone cannot express,
   being per process. COMMS_ACTOR is still the default when it is omitted.
 
   Takes no arguments. Exit status: 0 clean shutdown, 2 bad usage."""
@@ -607,7 +607,7 @@ def _record_blocked(log_file: Path, st, actor: str, scope_str: str, intent: str,
 
 def _release(actor_arg: str, result: str):
     if not result:
-        return _text("result is required — say what came of the work", True)
+        return _text("result is required: say what came of the work", True)
     with _writing(actor_arg) as (actor, log_file, _handle, st):
         held = st.active_claims_by_actor(actor)
         if not held:
@@ -638,7 +638,7 @@ def _status(actor_arg: str):
 
     lines = [f"{len(st.claims)} active claim(s), {len(st.sessions)} agent(s) seen"]
     for claim in sorted(st.claims.values(), key=lambda c: c.ts):
-        lines.append(f"  {claim.scope} — @{claim.actor} ({claim.intent})")
+        lines.append(f"  {claim.scope}: @{claim.actor} ({claim.intent})")
     if st.blocked:
         lines.append(f"collisions prevented: {len(st.blocked)}")
     return _text("\n".join(lines), False)

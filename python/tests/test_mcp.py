@@ -550,7 +550,7 @@ def test_status_counts_claims_agents_and_prevented_collisions(tmp_path, monkeypa
     text, is_error = _call(repo, "comms_status", actor="claude-dev")
     assert is_error is False
     assert "1 active claim(s)" in text
-    assert "a.py — @claude-dev (parser)" in text
+    assert "a.py: @claude-dev (parser)" in text
     assert "collisions prevented: 1" in text
 
 
