@@ -55,6 +55,7 @@ from . import taskcode as _taskcode
 from . import taskview as _taskview
 from . import resolve as _resolve
 from . import scope as _scope
+from . import tree as _tree
 from . import state as _state
 
 USAGE = """Usage: comms-graph <command>
@@ -1546,11 +1547,41 @@ def _cmd_check_staged(flags: dict) -> int:
             blocked.append((canon, conflicts[0]))
 
     if not blocked:
-        # Safe even when we could not identify the caller: nothing staged is
-        # claimed by ANYBODY, so there is no question of whose it is.
+        # "Nothing staged is claimed by anybody else" was the whole answer, and
+        # it passed a commit carrying a staged DELETION left behind by an agent
+        # that had already released. The check was true and the deletion
+        # shipped: unclaimed is not the same as yours.
+        survey = _tree.attribute(_tree.read(root), st)
+        foreign = ([] if unidentified
+                   else _tree.foreign_staged_deletions(survey, actor))
+        if foreign:
+            _err(f"BLOCKED: {len(foreign)} staged deletion(s) remove files the log "
+                 "ties to somebody else.")
+            for a in foreign:
+                _err(f"  {a.change.path} — last {a.basis} by @{a.actor}")
+            _err("  You are about to commit somebody else's removal. Unstage it, "
+                 "or confirm with them that it was meant to go:")
+            for a in foreign:
+                _err(f"    git restore --staged -- "
+                     f"{shlex.quote(':(literal)' + a.change.path)}")
+            return EXIT_CONFLICT
+
         n = len(staged)
         print(f"check --staged: {n} staged path{'s' if n != 1 else ''} checked, "
               f"none held by anybody else.")
+        # Said out loud rather than passed over. These are the paths the log
+        # knows nothing about, which after a compaction or a run of shell
+        # heredoc edits is most of them, and a guard that stays silent about
+        # what it could not check reads as a guard that checked everything.
+        unknown = [a for a in survey.staged if not a.known]
+        if unknown:
+            was = "is" if len(unknown) == 1 else "are"
+            print(f"  {len(unknown)} of them {was} claimed by nobody, so nothing "
+                  "was verified about who wrote them:")
+            for a in unknown[:12]:
+                print(f"    {a.change.path}  {a.change.how()}")
+            if len(unknown) > 12:
+                print(f"    ... and {len(unknown) - 12} more")
         return EXIT_OK
 
     if unidentified:
@@ -2629,8 +2660,26 @@ def _cmd_board(argv: list[str]) -> int:
     _warn_if_ephemeral(log_file)
     st = _read_state(log_file)
     claims = sorted(st.claims.values(), key=lambda c: c.ts)
+
+    # The tree, not just the log. "No active claims" was measured saying the
+    # repo was quiet while git status showed fifteen changed files, four of
+    # which appear nowhere in the log at all. A board that reports the absence
+    # of declarations as the absence of work is worse than no board, because it
+    # is believed.
+    survey = _tree.survey(root, st)
+    head = _tree.headline(survey)
+
     if not claims:
-        print("no active claims in this repo")
+        if head:
+            print("no active claims in this repo, but the tree is not quiet:")
+            print(f"  {head}")
+            for line in _tree.lines(survey):
+                print(line)
+        else:
+            print("no active claims in this repo"
+                  + (" and no uncommitted changes" if survey.readable else ""))
+            if not survey.readable:
+                print(f"  {head or survey.unavailable}")
         return EXIT_OK
     print(f"active claims ({len(claims)}):")
     for claim in claims:
@@ -2644,6 +2693,14 @@ def _cmd_board(argv: list[str]) -> int:
         # thing you had to take on faith.
         tag = f"  ({getattr(claim, 'task', '') or 'no task'})"
         print(f"  {claim.scope}  @{claim.actor}  {when}  [{claim.id}]{tag}{intent}{mark}")
+
+    # And what is actually changed on disk, which is a different question. A
+    # claim is a statement of intent; this is the evidence.
+    if head:
+        print()
+        print(head + ":")
+        for line in _tree.lines(survey):
+            print(line)
     return EXIT_OK
 
 

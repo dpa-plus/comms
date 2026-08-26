@@ -640,6 +640,39 @@ lists every peer-owned staged path and prints literal-path recovery commands:
 Run them to remove files from the commit without discarding their working-tree
 changes, then inspect the staged diff again.
 
+**Exit 0 is not a certificate.** It says nothing staged is claimed by somebody
+else, and unclaimed is not the same as yours. The check now says out loud how
+many staged paths nobody has claimed, because that is what it could NOT verify.
+Read that number. If it is most of the commit, you are committing work whose
+authorship nothing here established, and `git diff --cached` is the only thing
+that will tell you what is in it.
+
+It does refuse one specific case outright: a **staged deletion** of a file the
+log ties to another actor. That is the shape of a real incident. An agent staged
+a deletion and released its claim; the next `git add -A` swept the deletion into
+somebody else's commit, and the guard passed it because the file was by then
+unclaimed. If this fires, do not force past it. Either unstage the deletion or
+confirm with the other agent that it was meant to go.
+
+## What the Tree Says vs What the Log Was Told
+
+`comms-graph board` now reports **both**: the claims agents declared, and what
+`git status` says is actually changed on disk. Read the second one.
+
+They come apart constantly, and the gap is the interesting part:
+
+- Files changed with **no claim on them at all**. Normal after a context
+  compaction, and normal whenever edits go through a shell heredoc or a codegen
+  script, which the PreToolUse hook cannot see. It means nobody, including you,
+  has any record of who wrote them.
+- Files somebody **released and left uncommitted**. The change is still sitting
+  there and is now nobody's responsibility.
+
+Before you start on a file, "no active claims" is not the all-clear it looks
+like. It only ever meant nobody filed a declaration. Check whether the file is
+dirty; if it is and nothing explains why, ask in a note before editing it rather
+than after.
+
 ## Findings
 
 ```bash
