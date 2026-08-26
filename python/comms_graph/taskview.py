@@ -57,6 +57,25 @@ class TaskViewResult:
     cycles: int
 
 
+def _state_words(t: Any) -> str:
+    """Where this task stands, in words a non-engineer can read.
+
+    Shared by the boxes in the graph and the cards below it, so a task cannot
+    describe itself one way in the picture and another way in the list.
+    """
+    if t.phase == "doing" and t.doers:
+        return "@" + ", @".join(t.doers)
+    if t.phase == "review":
+        return "waiting to be checked"
+    if t.phase == "closed":
+        return ("checked by @" + t.verified_by) if t.verified_by else "done"
+    if t.phase == "blocked":
+        return "waiting on " + ", ".join(t.blocked_by[:2]) if t.blocked_by else "blocked"
+    if t.phase == "cycle":
+        return "in a dependency loop"
+    return "nobody on it"
+
+
 def _node_label(t: Any) -> str:
     """What the box says, and it is read at a glance or not at all.
 
@@ -70,21 +89,13 @@ def _node_label(t: Any) -> str:
     sitting there" are the two states worth telling apart from across a room.
     """
     title = (t.title or "").strip() or t.id
-    if len(title) > 38:
-        title = title[:37] + "…"
+    if len(title) > 52:
+        # Cut at a space, not mid-word: "messages we cannot tru…" reads as a
+        # rendering fault, "messages we cannot…" reads as an abbreviation.
+        head = title[:52].rsplit(" ", 1)[0]
+        title = (head or title[:51]) + "…"
 
-    if t.phase == "doing" and t.doers:
-        state = "@" + ", @".join(t.doers)
-    elif t.phase == "review":
-        state = "waiting to be checked"
-    elif t.phase == "closed":
-        state = ("checked by @" + t.verified_by) if t.verified_by else "done"
-    elif t.phase == "blocked":
-        state = "waiting on " + ", ".join(t.blocked_by[:2]) if t.blocked_by else "blocked"
-    elif t.phase == "cycle":
-        state = "in a dependency loop"
-    else:
-        state = "nobody on it"
+    state = _state_words(t)
     if len(state) > 38:
         state = state[:37] + "…"
 
@@ -238,7 +249,28 @@ _PAGE = """<!doctype html>
      2120 px) and painted nothing at all. 100dvh is definite on its own. */
   #wrap {{ display: grid; grid-template-columns: minmax(0, 1fr) 290px;
     height: 100dvh; max-height: 100dvh; }}
-  #graph {{ min-width: 0; min-height: 0; height: 100%; overflow: hidden; }}
+  /* The left column STACKS: the drawn graph on top, the tasks that join to
+     nothing as cards underneath. See the comment above the split in render() —
+     feeding unconnected tasks to a hierarchical layout is what produced the
+     single illegible column this replaces. */
+  #gcol {{ display: flex; flex-direction: column; min-width: 0; min-height: 0; }}
+  #graph {{ flex: 1 1 auto; min-width: 0; min-height: 0; overflow: hidden; }}
+  #graph.gone {{ display: none; }}
+  #loose {{ flex: 0 1 auto; overflow-y: auto; border-top: 1px solid #2a2a4e;
+    background: #12121f; padding: 12px 16px 16px; max-height: 55%; }}
+  /* Nothing is drawn above it, so it takes the pane instead of hugging a border
+     that has no picture on the other side. */
+  #graph.gone + #loose {{ border-top: none; flex: 1 1 auto; max-height: none; }}
+  .lgrid {{ display: grid; gap: 10px;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }}
+  .lcard {{ border: 1px solid #2a2a4e; border-left-width: 3px; border-radius: 5px;
+    background: #191927; padding: 9px 11px; min-width: 0; }}
+  .lcard .lt {{ font-weight: 600; overflow-wrap: anywhere; }}
+  .lcard .ls {{ color: #8890b0; font-size: 11.5px; margin-top: 3px; }}
+  .lcard .lid {{ color: #5d6486; font-size: 10.5px; margin-top: 5px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }}
+  .lhead {{ font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
+    color: #8890b0; margin: 0 0 9px; }}
   #side {{ border-left: 1px solid #2a2a4e; background: #16162b; overflow-y: auto; padding: 14px 16px; }}
   h1 {{ font-size: 13px; margin: 0 0 2px; letter-spacing: .04em; text-transform: uppercase; color: #cfd8ff; }}
   .headline {{ font-weight: 600; margin-bottom: 12px; }}
@@ -257,6 +289,7 @@ _PAGE = """<!doctype html>
      unconnected boxes arrived with no way to know why. */
   .warn {{ background: #3a1d1b; border: 1px solid #f28b82; color: #f6b0aa;
     padding: 8px 10px; border-radius: 5px; margin: 10px 0; }}
+  .warn.info {{ background: #1b2338; border-color: #3d4c74; color: #b7c4e6; }}
   /* A SIBLING of #graph, not a child. vis-network replaces the contents of its
      container on construction, so anything inside #graph is destroyed the
      moment the picture is drawn — the notice was in the HTML, absent from the
@@ -269,7 +302,7 @@ _PAGE = """<!doctype html>
     font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; }}
 </style>
 <div id="wrap">
-  <div id="graph"></div>
+  <div id="gcol"><div id="graph"></div>{loose_block}</div>
   {warning}
   <div id="side">
     <h1>Task graph</h1>
@@ -292,12 +325,14 @@ _PAGE = """<!doctype html>
   </div>
 </div>
 <script>
+// Only the tasks an edge actually touches. Everything else is a card in
+// #loose — a hierarchical layout has nothing to say about a node with no
+// edges, and asking it anyway is what drew them as one unreadable column.
 const NODES = {nodes_json};
 const EDGES = {edges_json};
 const container = document.getElementById('graph');
 if (NODES.length === 0) {{
-  container.innerHTML = '<div style="display:grid;place-items:center;height:100%;color:#8890b0">'
-    + 'Nothing declared yet. An agent adds one with <code>comms-graph task add &lt;id&gt;</code>.</div>';
+  container.classList.add('gone');
 }} else {{
   const network = new vis.Network(container,
     {{ nodes: new vis.DataSet(NODES), edges: new vis.DataSet(EDGES) }},
@@ -314,13 +349,13 @@ if (NODES.length === 0) {{
         // chain can be followed without working out which end is which.
         // sortMethod 'directed' is what makes the layering respect the edges.
         hierarchical: {{ enabled: true, direction: 'LR', sortMethod: 'directed',
-                         levelSeparation: 210, nodeSpacing: 130, treeSpacing: 170 }},
+                         levelSeparation: 250, nodeSpacing: 145, treeSpacing: 190 }},
       }},
       // Physics off entirely: hierarchical layout is deterministic, and letting
       // a simulation settle afterwards would move nodes between regenerations.
       physics: false,
       interaction: {{ hover: true, tooltipDelay: 120, zoomSpeed: 0.35, navigationButtons: false }},
-      nodes: {{ shape: 'box', margin: 10, widthConstraint: {{ maximum: 190 }},
+      nodes: {{ shape: 'box', margin: 11, widthConstraint: {{ maximum: 230 }},
                 shapeProperties: {{ borderRadius: 4 }} }},
       edges: {{ smooth: {{ type: 'cubicBezier', forceDirection: 'horizontal', roundness: 0.45 }} }},
     }});
@@ -331,7 +366,36 @@ if (NODES.length === 0) {{
   // zero-height box and then never redrawn — the page looked completely empty
   // with no error, and the canvas element itself reported the right dimensions
   // afterwards, which made it look like a data problem rather than a timing one.
-  const settle = () => {{ network.redraw(); network.fit({{ animation: false }}); }};
+  // vis-network's fit() zooms OUT to fit a large graph but will not zoom IN
+  // past scale 1, so a handful of nodes rendered postage-stamp-sized in the
+  // middle of an empty canvas, labels and all. Its maxZoomLevel option does not
+  // lift that here, so the scale is computed from the node box instead. 2.2 is
+  // where the box borders start to look heavy.
+  const MAX_IN = 2.2;
+  const settle = () => {{
+    network.redraw();
+    network.fit({{ animation: false }});
+    if (network.getScale() >= MAX_IN) return;
+    const pos = network.getPositions();
+    const ids = Object.keys(pos);
+    if (!ids.length) return;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const id of ids) {{
+      const p = pos[id];
+      if (p.x < x0) x0 = p.x; if (p.x > x1) x1 = p.x;
+      if (p.y < y0) y0 = p.y; if (p.y > y1) y1 = p.y;
+    }}
+    // getPositions returns centres, not boxes, so pad by roughly one node plus
+    // breathing room — without it the outermost boxes are clipped by the edge.
+    const w = (x1 - x0) + 300, h = (y1 - y0) + 170;
+    const cw = container.clientWidth, ch = container.clientHeight;
+    if (!cw || !ch) return;
+    const want = Math.min(cw / w, ch / h, MAX_IN);
+    if (want > network.getScale()) {{
+      network.moveTo({{ scale: want, position: {{ x: (x0 + x1) / 2, y: (y0 + y1) / 2 }},
+                       animation: false }});
+    }}
+  }};
   // Synchronously first. requestAnimationFrame alone was not enough: a browser
   // throttles rAF when the page is not actively painting — a background tab, an
   // embedded preview pane — so the callback never ran and the canvas stayed
@@ -353,6 +417,22 @@ if (NODES.length === 0) {{
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(settle, 120);
   }});
+  // A window 'resize' never fires for the case that actually breaks this: the
+  // flex box resolving its height AFTER the timeouts above have run. settle()
+  // then read clientHeight 0, bailed out, and left the graph at fit()'s scale
+  // with no error — reproduced in headless Chrome, where the whole three-call
+  // sequence lands before layout. ResizeObserver watches the box itself, so the
+  // picture is re-fitted the moment it actually has a size to fit into.
+  if (window.ResizeObserver) {{
+    let last = 0;
+    new ResizeObserver(() => {{
+      const now = container.clientWidth * 100000 + container.clientHeight;
+      if (now === last) return;   // observers also fire on our own redraw
+      last = now;
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(settle, 60);
+    }}).observe(container);
+  }}
 }}
 </script>
 """
@@ -362,6 +442,41 @@ def render(state: Any, output_path: str | Path, generated: str = "") -> TaskView
     """Write the task graph to ``output_path``."""
     nodes, edges, summary = build(state)
     tasks = getattr(state, "tasks", {}) or {}
+
+    # A hierarchical layout has nothing to say about a node with no edges: every
+    # one of them lands on level 0, so they stack into a single column, and
+    # fit() then shrinks that tall thin column until the labels are gone. That
+    # is exactly what the board was showing — 17 empty boxes and no way to read
+    # any of them.
+    #
+    # So only the connected part is drawn. Tasks that join to nothing are a
+    # LIST, because that is what they are, and a list can be read.
+    joined = {e["from"] for e in edges} | {e["to"] for e in edges}
+    drawn = [n for n in nodes if n["id"] in joined]
+    loose = [tasks[n["id"]] for n in nodes if n["id"] not in joined and n["id"] in tasks]
+
+    if loose:
+        cards = []
+        for t in sorted(loose, key=lambda t: (t.phase != "doing", t.phase != "ready", t.id)):
+            border, fill, _ = _PHASE_STYLE.get(t.phase, _PHASE_STYLE[_task.PHASE_READY])
+            cards.append(
+                f'<div class="lcard" style="border-left-color:{border};background:{fill}"'
+                f' title="{html.escape(_tooltip(t, []))}">'
+                f'<div class="lt">{html.escape((t.title or "").strip() or t.id)}</div>'
+                f'<div class="ls">{html.escape(_state_words(t))}</div>'
+                f'<div class="lid">{html.escape(t.id)}</div></div>'
+            )
+        head = (f"On their own — {len(loose)} task(s) nothing waits on"
+                if drawn else f"{len(loose)} task(s), none connected to another")
+        loose_block = (f'<div id="loose"><div class="lhead">{head}</div>'
+                       f'<div class="lgrid">{"".join(cards)}</div></div>')
+    elif not nodes:
+        loose_block = ('<div id="loose"><div class="lhead">Nothing declared yet</div>'
+                       '<div class="muted">An agent adds one with '
+                       '<code>comms-graph task add &lt;id&gt; --title "what it is, '
+                       'in plain words"</code>.</div></div>')
+    else:
+        loose_block = ""
 
     legend_rows = []
     for phase, (border, fill, meaning) in _PHASE_STYLE.items():
@@ -403,14 +518,16 @@ def render(state: Any, output_path: str | Path, generated: str = "") -> TaskView
     # there. Measured on the real store: 8 tasks, 0 task_edge events, ever. Say
     # so, and say what would change it, rather than presenting a column of boxes
     # as though the layout meant something.
+    # Nothing is broken when no edges exist, so this is stated, not alarmed
+    # about. It used to be red, over an empty canvas, next to a column of boxes
+    # nobody could read — three separate ways of implying a fault that was not
+    # there.
     if not edges and nodes:
-        warning = ('<div class="warn">No dependencies have been declared, so these '
-                   f'{len(nodes)} task(s) are independent — nothing here waits on '
-                   'anything else. The column is not an ordering.<br>'
+        warning = ('<div class="warn info">Nobody has said any of these tasks waits on '
+                   'another, so there is no graph to draw yet. They are listed below.<br>'
                    'An agent connects two with '
                    '<code>comms-graph task edge &lt;first&gt; &lt;second&gt; '
-                   '--kind consumes --provides "what the second one uses"</code>, '
-                   'and then this becomes a graph worth looking at.</div>')
+                   '--kind consumes --provides "what the second one uses"</code>.</div>')
     else:
         warning = ""
     if summary["cycles"]:
@@ -426,7 +543,8 @@ def render(state: Any, output_path: str | Path, generated: str = "") -> TaskView
         blocked_block=blocked_block,
         review_block=review_block,
         legend="".join(legend_rows) or '<div class="empty">Nothing to show yet.</div>',
-        nodes_json=_json_for_script(nodes),
+        nodes_json=_json_for_script(drawn),
+        loose_block=loose_block,
         edges_json=_json_for_script(edges),
         generated=html.escape(generated or "now"),
     )

@@ -2078,3 +2078,58 @@ def test_restating_a_task_without_review_turns_the_requirement_off():
 
     evs.append(ev("task", "p", {"task": "t"}))
     assert phases(cstate.fold(evs)) == {"t": "closed"}
+
+
+def test_tasks_that_join_to_nothing_are_listed_not_drawn(tmp_path, monkeypatch):
+    """A hierarchical layout puts every edgeless node on level 0, so they stack
+    into one column and fit() then shrinks it until no label can be read. That
+    is what the board actually showed: seventeen empty boxes. Only the connected
+    part goes to the picture; the rest is a list, which can be read."""
+    from comms_graph import taskview
+
+    repo = _repo(tmp_path, monkeypatch)
+    for tid in ("a", "b", "alone-one", "alone-two"):
+        _cli(repo, "task", "add", tid, "--as", "alpha",
+             "--title", f"Title for {tid}", session="sA")
+    _cli(repo, "task", "edge", "a", "b", "--as", "alpha", "--kind", "consumes",
+         "--provides", "the thing b uses", session="sA")
+
+    from comms_graph import cli as _c
+    st = _c._read_state(_c._store(_c._repo_root(str(repo)), create=False)[0])
+    out = tmp_path / "tasks.html"
+    taskview.render(st, out)
+    page = out.read_text()
+
+    import json, re
+    drawn = json.loads(re.search(r"const NODES = (\[.*?\]);", page, re.S).group(1)
+                       .replace("\\u003c", "<").replace("\\u003e", ">")
+                       .replace("\\u0026", "&"))
+    assert {n["id"] for n in drawn} == {"a", "b"}, drawn
+
+    # And the two with no edges are readable cards, with their titles on them.
+    assert page.count('class="lcard"') == 2, page.count('class="lcard"')
+    assert "Title for alone-one" in page
+    assert "Title for alone-two" in page
+
+
+def test_a_graph_with_no_edges_at_all_draws_no_canvas(tmp_path, monkeypatch):
+    """With nothing connected there is no graph to draw, and an empty canvas
+    above a list is worse than the list alone."""
+    from comms_graph import taskview
+
+    repo = _repo(tmp_path, monkeypatch)
+    for tid in ("x", "y", "z"):
+        _cli(repo, "task", "add", tid, "--as", "alpha", "--title", f"Do {tid}",
+             session="sA")
+
+    from comms_graph import cli as _c
+    st = _c._read_state(_c._store(_c._repo_root(str(repo)), create=False)[0])
+    out = tmp_path / "tasks.html"
+    taskview.render(st, out)
+    page = out.read_text()
+
+    assert "const NODES = [];" in page, "the canvas was fed nodes it cannot lay out"
+    assert page.count('class="lcard"') == 3
+    # Stated, not alarmed about: nothing here is broken.
+    assert "warn info" in page
+    assert "no graph to draw yet" in page

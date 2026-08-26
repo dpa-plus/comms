@@ -2567,6 +2567,9 @@ def _cmd_plan(argv: list[str]) -> int:
 TASK_USAGE = """Usage: comms-graph task <command>
 
   add <id> --as <actor> [--title "..."] [--size S|M|L]   (a rough scale, not a gate)
+        --title is what people read on the board: plain English, no file or
+        function names, no jargon, short enough to say out loud. The id is
+        just what you type.
                         [--review]        somebody else must check it to close
                         [--probe]         a diagnostic; kept out of derived neighbours
                         [--check <name>]... [--ref "tracker:PROJ-1234"]
