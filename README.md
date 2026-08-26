@@ -11,7 +11,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/dpa-plus/comms.svg)](https://pkg.go.dev/github.com/dpa-plus/comms)
 [![License](https://img.shields.io/badge/license-MIT-0f766e)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.25+-0f766e?logo=go&logoColor=white)](go.mod)
-[![Single binary](https://img.shields.io/badge/runtime-single%20static%20binary-0f766e)](#how-it-actually-runs-on-your-machine)
+[![No daemon](https://img.shields.io/badge/runtime-a%20file%20on%20disk-0f766e)](#how-it-actually-runs-on-your-machine)
 [![No daemon](https://img.shields.io/badge/no-daemon%20%C2%B7%20no%20server-0f766e)](#how-it-actually-runs-on-your-machine)
 
 </div>
@@ -22,7 +22,7 @@
   <img src="assets/dashboard.png" alt="The comms dashboard: team roster, active claims, findings, notes, and one continuous persistent history." width="900">
 </p>
 
-<p align="center"><em>The unified dashboard (<code>comms ui</code>) — every project and the complete append-only history in one tab. Pick a project to focus the view; sessions remain context labels instead of separate histories.</em></p>
+<p align="center"><em>The board (<code>comms-graph ui</code>): what just happened, who is holding which files right now, the tasks with the files each one touches, and every project on the machine down the left. Everything on it is read out of the append-only log.</em></p>
 
 ---
 
@@ -58,7 +58,9 @@ Before an agent edits a file it **claims** it. Before it forgets a decision it r
 
 ## How it actually runs on your machine
 
-The most important thing to understand: **comms is not a server.** There's no daemon, no background process, no network service, no database to install. It is **one small, self-contained Go binary** (~10 MB) sitting on your `PATH`.
+The most important thing to understand: **comms is not a server.** There's no daemon, no background process, no network service, no database to install. It's a command-line tool on your `PATH` that appends to a file.
+
+There are two builds of it and they share one log, so you can run either: the Go binary (`comms`), and the Python build (`comms-graph`), which adds the task graph and the code map. See [Two implementations, one log](#two-implementations-one-log).
 
 **Everything is files.** State lives in two places:
 
@@ -117,12 +119,32 @@ The dashboard (`comms ui`) is simply a **live read-only view** of that same log.
 ## The live dashboard
 
 ```bash
-COMMS_ACTOR=human-you comms ui   # http://127.0.0.1:7878 — every project, one tab
+COMMS_ACTOR=human-you comms-graph ui   # http://127.0.0.1:7878 — every project, one tab
 ```
 
-> **Set `COMMS_ACTOR` to run it as an operator.** The dashboard's write actions — **Release** a claim, **Remove** (retire) a crashed agent, **End** a session — are attributed to you, so they only appear when `COMMS_ACTOR` is set to a real operator name (e.g. `human-you`; the bare names `eli/claude/codex/agent/user` are reserved). Run `comms ui` with it unset and the dashboard is **read-only** and those buttons stay hidden — set it and they appear.
+It opens on **what just happened**, newest first, with the things that need
+somebody pulled to the top. Around it: who is holding which files right now, the
+roster of who is actually here, the tasks with the files each one touches, and
+every project on this machine down the left side.
 
-`comms ui` is **unified by default**: it shows *every* comms project on this machine in one window. A **Projects sidebar** on the left lists each project (and its sessions); click one and the whole dashboard — team roster, active claims (stale ones flagged), the **work graph**, recent findings and notes, and the continuous history — scopes to it. Run it **once** and watch all your agents across every repo, switching between them in the same tab. No starting a UI per project, and agents never have to "open" anything — they just write to their logs, which this one dashboard already sees.
+**It reads. It does not write** — with exactly one exception. The log is appended
+under a lock, through a fold that enforces the rules, and a dashboard writing
+around either would be a second writer with none of those guarantees. So the only
+button that changes anything is **Release**, which frees a claim somebody else is
+holding, and it goes through the same lock and appends the same event the CLI
+does. It asks for a reason and refuses without one, because the release is
+recorded under your name permanently and "who freed this and why" is the only
+question anybody asks afterwards.
+
+> **Start it with `COMMS_ACTOR` set** (e.g. `human-you`). Without an actor the
+> board refuses to release at all: a release with no author is worse than no
+> release, because the ground is gone and the log cannot say who took it.
+
+It is **unified by default**: one window for every comms project on the machine. The **Projects** rail lists them and clicking one scopes the whole view. It lists real projects only — a store whose directory has been deleted, or which lives in a temp folder, is not a project, and before that filter existed two real projects sat among 213 that were not.
+
+The **Roster** shows who is here, meaning the last hour, plus anyone holding a claim whatever their age — a stale claim is the one thing on the board that needs a person, and hiding its holder would hide the only name that can free it. Agents take a fresh name each session, so everyone who has ever said hello is a much longer and much less useful list; it is one click away.
+
+Run it **once** and watch every repo. Agents never open anything — they write to their logs, which this board already sees.
 
 The **work graph** shows the tasks in the selected project: an arrow means the
 task it points at comes afterwards, and tasks joined to nothing sit apart from
@@ -138,8 +160,15 @@ Every snapshot carries the server's **front-end build fingerprint**, and the pag
 
 It **opens your browser automatically** when run interactively (`--no-open` to suppress). On macOS you can also double-click a **Comms Dashboard** launcher instead of using the terminal. The header shows the active **session name** (the name agents use, e.g. `acme-build`) next to the repo.
 
+**Which dashboard the flags belong to.** The push/reload behaviour and the flags above are the **Go** build's
+`comms ui`, which is still here and still works:
+
 - `comms ui --repo /path/to/repo` — scope to a single repo (no sidebar).
 - `comms ui --demo` — explore with sample data (read-only; writes nothing real).
+
+The Python board is `comms-graph ui [--port 7878] [--host 127.0.0.1] [--graph <graph.json>]`. It has no
+`--demo` and no `--repo`; scope it by running it from the repo, or name one with the global
+`comms-graph --repo <path> ui`. Both read the same log, so it does not matter much which is open.
 
 ### Run the dashboard as a login service (macOS)
 
@@ -271,6 +300,47 @@ launchctl kickstart -k "gui/$(id -u)/plus.dpa.comms-ui"  # if installed as a log
 - **Opt-in, not enforced.** comms suggests and records; it doesn't block your editor. A `PreToolUse` hook (`comms check`) can warn before an agent touches a claimed path, and `comms check --staged` can stop a commit when its Git index contains another actor's claimed files.
 
 More in [`docs/DESIGN.md`](docs/DESIGN.md) and [`docs/PROTOCOL.md`](docs/PROTOCOL.md).
+
+---
+
+## What the graph adds
+
+The log answers *who is touching what*. It cannot answer *what is this work, where
+does it live, and is any of it connected* — those are questions about the code and
+the plan, not about the last five minutes. Two graphs answer them, and both are
+built from things the agents were already doing.
+
+**The task graph is built out of claims.** An agent declares a task, then claims
+files with `--task <id>`. That flag is the only bookkeeping in the whole tool that
+is not derived for you, and it is one word on a command you were running anyway.
+In return the board can open a task and show what it is, whether it is finished,
+whether somebody *other than the author* checked it, and the exact files it
+touched — including the ones already released, because a task that forgets its
+files when the work ends answers "what did this change?" with "nothing".
+
+Tasks connect to each other too. An edge says one task comes after another and
+what the later one consumes from the earlier, so `comms-graph brief <task>` hands
+the next agent the decisions the previous one made instead of letting it re-decide
+them differently.
+
+**The code map is built by [graphify](https://pypi.org/project/graphifyy/).** It
+reads the repository into a graph of files, symbols and the edges between them, so
+a claim can also report what sits *next to* the ground you just took — the callers,
+the importers, the tests. Run it once per repo:
+
+```bash
+graphify extract . --code-only     # local AST, no API key
+```
+
+Two honest limits, both measured rather than assumed. The map misses between a
+third and a half of the file pairs that really do change together, so **silence
+from it is weak evidence, not a clear signal**. And of the pairs it does flag,
+well under half turn out to matter — it is a prompt to look, never a verdict.
+Anything it has not indexed (SQL migrations, for instance, without the optional
+parser) reports "no connections" when the truth is "not looked at".
+
+The two graphs meet on the board: a task knows its files, and the code map knows
+what those files touch.
 
 ---
 
