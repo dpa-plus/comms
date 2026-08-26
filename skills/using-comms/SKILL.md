@@ -222,6 +222,34 @@ whole decomposition, then claim with `--task <slug>`.
 A question you answer by reading is not a task. Anything you are going to edit
 is.
 
+### The title is what a person reads. Write it for them.
+
+**`--title` is a short sentence of plain English that a non-technical reader
+understands, and it is always English even when the codebase, the tickets and the
+conversation are in another language.** It is the only line about your work that
+someone outside the code will ever see: the board shows it, the task graph puts it
+in the box, and the detail panel leads with it. Everything technical goes in the
+description, the notes, the checks and the files, where it belongs.
+
+Say what the work does for whoever uses the software, not what you will type:
+
+| Write this | Not this |
+| --- | --- |
+| "Round money the same way everywhere" | "money-rounding refactor in `toCents`" |
+| "Stop double refunds when a retry happens" | "refund idempotency key on webhook replay" |
+| "Reject payment messages we cannot trust" | "HMAC sig verify for stripe webhooks" |
+| "Let a customer see their past orders" | "orders history endpoint + list view" |
+| "Find why the nightly report got slow" | "profile `nightly_report` regression" |
+
+Rules of thumb: no file names, no function names, no acronyms the reader would
+have to look up, no abbreviations, and no German (or any other language) even on
+a project whose code and commits are German. Start with a verb, keep it under
+about ten words, and read it back asking whether somebody who has never seen the
+repository would know what changes for them when it is done.
+
+The **slug** is a separate thing: short, lowercase, hyphenated, and only ever an
+id you type on the command line. It is not the name anybody reads.
+
 This is a rule, not a suggestion, and it is stated as one deliberately. When it
 was phrased as "put it in the graph when work is big enough", agents skipped it:
 across 4,356 real claims exactly one carried a task. Nothing was broken — the
@@ -253,7 +281,8 @@ if anything is wrong — an unknown endpoint, a duplicate edge, a dependency cyc
 For one task at a time, or to extend a plan that already exists:
 
 ```bash
-COMMS_ACTOR=claude-dev comms-graph task add auth-api --title "Session create / refresh / revoke" \
+COMMS_ACTOR=claude-dev comms-graph task add auth-api \
+  --title "Let people stay signed in without signing in again" \
   --size L --check test --ref tracker:PROJ-1234
 COMMS_ACTOR=claude-dev comms-graph task edge db-schema auth-api --kind consumes \
   --provides "sessions table; uuid PKs, no cuid"
