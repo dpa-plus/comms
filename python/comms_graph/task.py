@@ -160,6 +160,17 @@ class Task:
     #: `task done` closes everything else. Reviewing is still possible on any
     #: task; it is being REQUIRED that is now a choice.
     needs_review: bool = False
+    #: Declared as a probe: a diagnostic, a spike, a throwaway that produced
+    #: nothing. Excluded from derived neighbours.
+    #:
+    #: This is a cost of the "every request that will change files gets a task"
+    #: rule, and it compounds: an agent made a task purely to reproduce a bug in
+    #: this tool, and it now sits in the graph permanently as a three-file
+    #: neighbour of that agent's real work, outranking a genuine one-file
+    #: neighbour. The harder people test, the more of it accumulates. A probe is
+    #: still a task — it is claimed, it is auditable — it is just not evidence
+    #: about where the real work meets.
+    probe: bool = False
     #: "independent" when the verifier's vendor differs from the doer's,
     #: "same-family" otherwise. Verified and verified-by-something-with-the-same-
     #: blind-spots are different claims and should not read alike.
@@ -346,6 +357,7 @@ def apply_task(tasks: dict[str, Task], ev: Any, string_of, int_of, ref_list) -> 
     # Absent on every task written before this existed, which folds to
     # False — those tasks stop demanding a review nobody was giving them.
     needs_review = bool(ev.data.get("review"))
+    probe = bool(ev.data.get("probe"))
     if checks:
         added = [c for c in checks if c not in t.checks]
         t.checks = checks
@@ -372,6 +384,7 @@ def apply_task(tasks: dict[str, Task], ev: Any, string_of, int_of, ref_list) -> 
     # without --review turns the requirement off. That is the same rule the
     # other fields follow and not a special case.
     t.needs_review = needs_review
+    t.probe = probe
     t.updated_at = ev.ts
     t.last_activity = ev.ts
 

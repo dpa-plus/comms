@@ -1758,6 +1758,11 @@ def _task_add(argv: list[str]) -> int:
     # waiting for a reviewer who was never coming.
     if "review" in flags:
         data["review"] = True
+    # A probe is a task you made to find something out, not to change something.
+    # It stays claimable and auditable; it simply stops being evidence about
+    # where the real work meets.
+    if "probe" in flags:
+        data["probe"] = True
 
     with _lock.file_lock(lock_file) as handle:
         broken = handle.compromised()
@@ -1773,6 +1778,8 @@ def _task_add(argv: list[str]) -> int:
     print(f"TASK {slug}" + (f"  {data.get('title')}" if data.get("title") else ""))
     if checks:
         print(f"  must pass before done: {', '.join(checks)}")
+    if data.get("probe"):
+        print("  a probe — it will not show up as a neighbour of real work")
     if data.get("review"):
         print("  needs somebody else to check it before it closes")
     else:
@@ -2347,7 +2354,8 @@ def _cmd_brief(argv: list[str]) -> int:
                 v = (d or {}).get(k)
                 return v if isinstance(v, str) else ""
             files, actors = _taskcode.files_from_log(_log.read(log_file), _sof)
-            links = _taskcode.link(graph, st.tasks, files, root, actors)
+            me = (flags.get("as") or os.environ.get("COMMS_ACTOR", "")).strip()
+            links = _taskcode.link(graph, st.tasks, files, root, actors, me)
             rel = (links.get(slug) or {}).get("related") or []
             if rel:
                 print("  meets in the code (nobody declared these):")
@@ -2514,6 +2522,7 @@ TASK_USAGE = """Usage: comms-graph task <command>
 
   add <id> --as <actor> [--title "..."] [--size S|M|L]   (a rough scale, not a gate)
                         [--review]        somebody else must check it to close
+                        [--probe]         a diagnostic; kept out of derived neighbours
                         [--check <name>]... [--ref "tracker:PROJ-1234"]
   edge <from> <to> --as <actor> [--kind consumes|sequence]
                                 [--provides "..."]      <to> comes AFTER <from>
