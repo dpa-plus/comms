@@ -85,6 +85,12 @@ This closes two measured failures, both of which read as an all-clear:
   departed agent. The check was true on its own terms, the file was unclaimed,
   and the deletion shipped. A staged deletion of another actor's ground is now
   refused.
+* An agent committed a translation file while another agent **held the claim on
+  it**, and seventeen of the holder's in-flight keys shipped inside somebody
+  else's commit. `check --staged` would have refused that by name. Nobody ran
+  it, because running it was a sentence in a document rather than a thing that
+  happens. `comms-graph guard install` wires it into git's `pre-commit` hook, and
+  the board says when a repo has a log and no guard.
 
 **Task is the one that changed the shape of the thing.** A claim says who is on a
 file; a task says what the work is, and tagging your claims to it (`--task
@@ -295,7 +301,8 @@ comms brief <slug>                            # what you inherit before starting
 comms claim "<scope>" --task <slug> --intent "..."   # tagging a claim is what puts you on a task
 comms check <path>                            # PreToolUse hook (also: --stdin-json); exits 2 to block
 comms mcp                                     # serve the same verbs as MCP tools over stdio
-comms check --staged                         # pre-commit guard: block peer-claimed staged paths
+comms check --staged                         # commit guard: block peer-claimed staged paths
+comms-graph guard install                    # make it run on every commit, automatically
 comms status [--json]
 comms log [--actor X] [--since 1h] [--scope path] [--type list] [--category cat]
 comms note [--priority] "<=200-char FYI>"
@@ -340,7 +347,7 @@ launchctl kickstart -k "gui/$(id -u)/plus.dpa.comms-ui"  # if installed as a log
 - **Append-only + `flock`.** Writes are serialized by a per-repo file lock; the log is never rewritten, so history and audit are free.
 - **Recoverable by design.** Blank lines are skipped, a torn final line is ignored, duplicate event IDs are dropped, so a half-written line never breaks a read.
 - **Enforced, not suggested, if you wire the hook.** Nothing installs itself. But a `PreToolUse` hook running `comms-graph check --stdin-json` REFUSES an Edit or Write on somebody else's ground: it exits 2, which is the only code Claude Code treats as "block this tool call". It fails closed, and it spells paths the way the filesystem does, so two agents cannot hold one file under two capitalisations of its name.
-- **The hook cannot see Bash.** An edit made with `sed`, a heredoc or a one-liner never reaches it, and in agent auto-modes Bash is the documented default, so this is the normal case rather than a corner. Measured on one real session: ~35 edits, the hook fired zero times. `comms-graph check --staged` in a git `pre-commit` hook is the backstop that a heredoc cannot argue with, and it refuses a commit whose index holds another actor's claimed files.
+- **The hook cannot see Bash.** An edit made with `sed`, a heredoc or a one-liner never reaches it, and in agent auto-modes Bash is the documented default, so this is the normal case rather than a corner. Measured on one real session: ~35 edits, the hook fired zero times. `comms-graph guard install` is the backstop that a heredoc cannot argue with: it wires `check --staged` into git's `pre-commit` hook, and a commit whose index holds another actor's claimed files is refused.
 
 More in [`docs/DESIGN.md`](docs/DESIGN.md) and [`docs/PROTOCOL.md`](docs/PROTOCOL.md).
 
