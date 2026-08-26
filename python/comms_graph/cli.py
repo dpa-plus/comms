@@ -1668,13 +1668,32 @@ def _cmd_check_inner(argv: list[str]) -> int:
 
     holder = conflicts[0]
     when = holder.ts.isoformat().replace("+00:00", "Z")
+    # WHO WE THINK YOU ARE changes what this message can honestly say. With no
+    # actor and no session that resolves, the answer is not "somebody else holds
+    # this" — we do not know that. It was saying exactly that, and naming the
+    # caller as the holder in the next line: "Holder: @you ... Do not edit ground
+    # you were refused." An agent read that about a file it had just claimed and
+    # believed it was locked out of its own work.
+    #
+    # It still blocks, because failing closed is right when identity cannot be
+    # established. But it says which problem it has.
+    unidentified = actor == "\x00not-a-real-actor"
     _err(f"BLOCKED: {rel_text} is claimed.")
     _err(f"  Holder:  @{holder.actor}")
     _err(f"  Claim:   {holder.id}")
     if holder.intent:
         _err(f'  Intent:  "{holder.intent}"')
     _err(f"  Since:   {when}")
-    _err("  Ask them, or claim something narrower. Do not edit ground you were refused.")
+    if unidentified:
+        _err("  comms could not work out who you are, so it cannot tell whether "
+             "this claim is yours.")
+        _err("  If it is: set COMMS_ACTOR, or pass --as <actor>. If the pre-edit "
+             "hook is doing the asking,")
+        _err("  run `comms-graph hello --as <actor>` in this session so the log "
+             "can recognise it.")
+    else:
+        _err("  Ask them, or claim something narrower. Do not edit ground you "
+             "were refused.")
     return EXIT_BLOCK
 
 
@@ -1732,6 +1751,12 @@ def _task_add(argv: list[str]) -> int:
     checks = [c.strip() for c in _repeated(argv, "check") if c.strip()]
     if checks:
         data["checks"] = checks
+    # --review asks for a second pair of eyes; without it `task done` closes the
+    # task. Opt-in because an always-on gate that nobody serves is a queue, not a
+    # quality bar: measured on real work, four of eight tasks sat in `review`
+    # waiting for a reviewer who was never coming.
+    if "review" in flags:
+        data["review"] = True
 
     with _lock.file_lock(lock_file) as handle:
         broken = handle.compromised()
@@ -1747,6 +1772,10 @@ def _task_add(argv: list[str]) -> int:
     print(f"TASK {slug}" + (f"  {data.get('title')}" if data.get("title") else ""))
     if checks:
         print(f"  must pass before done: {', '.join(checks)}")
+    if data.get("review"):
+        print("  needs somebody else to check it before it closes")
+    else:
+        print("  closes when you run `task done` — add --review if it needs checking")
     return EXIT_OK
 
 
@@ -1882,8 +1911,16 @@ def _task_done(argv: list[str]) -> int:
         if greeting is not None:
             events.insert(0, greeting)
         _log.append_batch(log_file, events)
-    print(f"DONE {slug} by @{actor} — awaiting review")
-    print("  Somebody else has to verify it before anything after it unblocks.")
+    # What actually happened depends on whether this task asked to be checked.
+    # Announcing "awaiting review" on a task that just closed is the kind of
+    # contradiction that makes people stop reading the output.
+    if getattr(st.tasks.get(slug), "needs_review", False):
+        print(f"DONE {slug} by @{actor} — awaiting review")
+        print("  Somebody else has to verify it before anything after it unblocks.")
+    else:
+        print(f"DONE {slug} by @{actor} — closed")
+        print("  It did not ask for a review, so this finishes it. Anything "
+              "waiting on it is now free.")
     return EXIT_OK
 
 
@@ -2233,8 +2270,11 @@ def _cmd_brief(argv: list[str]) -> int:
     if t.did and not t.verified_by:
         # Only while it really is awaiting one. Emitting this whenever a doer is
         # recorded meant every CLOSED task announced it was awaiting review in
-        # the same breath as naming its verifier.
-        bits.append(f"awaiting review of @{t.did}'s work")
+        # the same breath as naming its verifier — and now that review is opt-in,
+        # a task that never asked for one is finished, not waiting.
+        bits.append(f"awaiting review of @{t.did}'s work"
+                    if getattr(t, "needs_review", False)
+                    else f"finished by @{t.did}")
     if t.verified_by:
         bits.append(f"verified by @{t.verified_by} ({t.independence})")
     if t.rejections:
@@ -2299,7 +2339,7 @@ def _cmd_plan(argv: list[str]) -> int:
     source = flags.get("from")
     if not source:
         _err("error: plan needs --from <file.json>")
-        _err('  {"tasks": [{"id": "api", "title": "...", "checks": ["test"]}],')
+        _err('  {"tasks": [{"id": "api", "title": "...", "checks": ["test"], "review": true}],')
         _err('   "edges": [{"from": "api", "to": "ui", "kind": "interface", "provides": "..."}]}')
         return EXIT_USAGE
     actor = _actor(flags)
@@ -2343,6 +2383,11 @@ def _cmd_plan(argv: list[str]) -> int:
         slug = _slug_or_exit(str(item.get("id") or ""))
         declared.add(slug)
         data: dict = {"task": slug}
+        # A plan can ask for review per task, the same way `task add --review`
+        # does. Without this a decomposition could not express "this one needs
+        # checking" at all, which is exactly where it matters most.
+        if item.get("review"):
+            data["review"] = True
         for key in ("title", "size", "ref"):
             if item.get(key):
                 data[key] = str(item[key])
@@ -2420,6 +2465,7 @@ def _cmd_plan(argv: list[str]) -> int:
 TASK_USAGE = """Usage: comms-graph task <command>
 
   add <id> --as <actor> [--title "..."] [--size S|M|L]   (a rough scale, not a gate)
+                        [--review]        somebody else must check it to close
                         [--check <name>]... [--ref "tracker:PROJ-1234"]
   edge <from> <to> --as <actor> [--kind consumes|sequence]
                                 [--provides "..."]      <to> comes AFTER <from>
@@ -2485,7 +2531,13 @@ def _cmd_board(argv: list[str]) -> int:
         when = claim.ts.isoformat().replace("+00:00", "Z")
         mark = " <- you" if me and claim.actor == me else ""
         intent = f'  "{claim.intent}"' if claim.intent else ""
-        print(f"  {claim.scope}  @{claim.actor}  {when}  [{claim.id}]{intent}{mark}")
+        # The task tag, because an agent cannot otherwise check its own work.
+        # The whole case for `--task` is that the board can then show a task's
+        # files — and the CLI printed everything about a claim EXCEPT whether it
+        # was tagged, so the one thing you would want to verify was the one
+        # thing you had to take on faith.
+        tag = f"  ({getattr(claim, 'task', '') or 'no task'})"
+        print(f"  {claim.scope}  @{claim.actor}  {when}  [{claim.id}]{tag}{intent}{mark}")
     return EXIT_OK
 
 
