@@ -2233,7 +2233,7 @@ body {
 /* ── The top rail ──
    This was 163px of chrome before a single row of content: an 89px header
    carrying two filesystem paths, and under it a 74px band that was 78% empty
-   background — 312px of tiles stretched across 1425. Both are now one 46px
+   background: 312px of tiles stretched across 1425. Both are now one 46px
    line. The paths answer "is this the right checkout" once and then never
    again, so they moved into the title of the name that already answers it. The
    counts moved into the headings of the two panels that render the things
@@ -2288,7 +2288,7 @@ h1 {
   text-transform: uppercase;
 }
 /* Alarms are the only reason a permanent strip up here earns its pixels, so
-   they are the only FILLED shapes on it — everything else is text on the
+   they are the only FILLED shapes on it: everything else is text on the
    surface. All three nodes exist at all times and only toggle hidden, so one
    appearing cannot move a sibling or change the rail's height by a pixel;
    the alert wash is an inset shadow for the same reason, never a border. */
@@ -2403,7 +2403,7 @@ main {
   display: grid;
   grid-template-columns: minmax(260px, 300px) minmax(680px, 1fr) minmax(300px, 360px);
   /* The history row is BOUNDED. With auto it sized to its content, and the
-     content is every event in the log — a 52,000-pixel document whose scrollbar
+     content is every event in the log: a 52,000-pixel document whose scrollbar
      thumb was a few pixels tall, with the panels you actually watch stranded at
      the top of it. The panel already scrolls itself; it just needed a height. */
   grid-template-rows: minmax(560px, 62vh) auto minmax(360px, 48vh);
@@ -2677,7 +2677,7 @@ th {
   padding: 14px;
 }
 /* The roster column is narrow, so the actor name + meta take the FULL width and
-   the row actions sit on their own line beneath them — never overlapping the
+   the row actions sit on their own line beneath them: never overlapping the
    text or spilling past the row. They stay visible (matching the always-on
    Release buttons in the Claims panel) and wrap if the column gets tight. */
 .session-row > div:first-child { min-width: 0; }
@@ -2744,7 +2744,7 @@ body.unified main {
 
 /* ── Active claims, grouped by whose work it is and why ──
    One agent editing eight files for one reason is ONE piece of work, and on the
-   old cards that reason was the same long sentence printed eight times — the
+   old cards that reason was the same long sentence printed eight times: the
    panel's dominant mass carrying almost no information, while the paths you were
    actually scanning for got squeezed into a scrollbar. Print the reason once and
    list the paths under it. */
@@ -2968,7 +2968,7 @@ body.unified main {
 // Build the page booted with. servePage replaces the token with the running
 // server's fingerprint; every snapshot reports the server's current one. When
 // they diverge the server was redeployed under this open tab, so reload to pull
-// the new shell — the SSE stream only refreshes data, never the page itself.
+// the new shell: the SSE stream only refreshes data, never the page itself.
 const BOOT_BUILD = '__COMMS_BUILD_ID__';
 function maybeReloadForBuild(data) {
   const b = data && data.build;
@@ -2995,7 +2995,7 @@ const SUN_ICON = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" st
 const MOON_ICON = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>';
 function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
-  // Icon-only toggle: show the icon for the mode you'd switch TO — a sun while
+  // Icon-only toggle: show the icon for the mode you'd switch TO: a sun while
   // dark, a moon while light.
   el('theme').innerHTML = theme === 'dark' ? SUN_ICON : MOON_ICON;
   el('theme').setAttribute('aria-label', theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode');
@@ -3028,13 +3028,13 @@ let historyRenderLimit = HISTORY_PAGE_SIZE;
 // v0.2.1 replaced the per-session log selector with one continuous History. Drop
 // the key it stored so it does not linger forever in every existing browser.
 try { localStorage.removeItem('selectedSessionID'); } catch (e) {}
-// History arrives incrementally: /api/status — and the frame that primes a newly
-// connected EventSource — carry every row, and each later push carries only what
+// History arrives incrementally: /api/status: and the frame that primes a newly
+// connected EventSource: carry every row, and each later push carries only what
 // was appended since. We keep the merged log here so the filter still runs over
 // EVERY row, and reconcile against events_total: if a push was coalesced away and
 // we are short, refetch the complete snapshot once. That is what lets a push cost
 // what changed without ever silently losing an audit row.
-// history-merge:begin — extracted verbatim and executed by TestUIHistoryMergeLogic.
+// history-merge:begin: extracted verbatim and executed by TestUIHistoryMergeLogic.
 let historyEvents = [];
 let historySeen = new Set();
 let historyResyncing = false;
@@ -3044,7 +3044,7 @@ function mergeHistory(data) {
   historyMergeSeq++;
   const incoming = data.events || [];
   // A complete frame may REPLACE what we hold only when nothing merged while it
-  // was in flight — load() stamps that. The /api/status body we fetch to recover
+  // was in flight: load() stamps that. The /api/status body we fetch to recover
   // can lose the race with a delta that arrives before it resolves, and replacing
   // wholesale with that older body would drop rows we had already merged.
   //
@@ -3066,7 +3066,7 @@ function mergeHistory(data) {
     // Newest first. Compare parsed instants, never the RFC3339 strings: Go trims
     // trailing zeros from fractional seconds, so "…:00.5Z" sorts before "…:00Z"
     // lexicographically while being the later instant. The id only breaks a
-    // same-millisecond tie so the rendered order stays stable across merges — it
+    // same-millisecond tie so the rendered order stays stable across merges: it
     // is NOT a causal ordering, which is why state.Fold refuses to sort by ULID.
     if (added) historyEvents.sort((a, b) => {
       const d = Date.parse(b.ts) - Date.parse(a.ts);
@@ -3079,12 +3079,12 @@ function mergeHistory(data) {
   // Resync at most once per distinct total, so a server that legitimately reports
   // fewer rows than we hold (a repository whose log went unreadable) cannot turn
   // the reconciliation into a refetch on every single push. The total is recorded
-  // only once the recovery actually succeeded — marking it up front would let a
+  // only once the recovery actually succeeded: marking it up front would let a
   // failed fetch permanently suppress the retry for rows we are still missing.
   if (typeof total === 'number' && total !== historyEvents.length && !historyResyncing && historyResyncedTotal !== total) {
     historyResyncing = true;
     load()
-      // "Handled" means we actually agree with that total now — not merely that the
+      // "Handled" means we actually agree with that total now: not merely that the
       // request came back. A recovery can resolve yet only be able to union, because
       // a pushed frame merged while it was in flight and its body is no longer
       // provably current. Recording the total then would suppress every later
@@ -3118,7 +3118,7 @@ function renderProjectList(data) {
     cls: (totalActive || totalClaims) ? 'live' : ''
   });
   for (const p of projects) {
-    // Reflect ANY recent activity, not just named sessions + open claims — a
+    // Reflect ANY recent activity, not just named sessions + open claims: a
     // project used without a named session (or whose claims are all released)
     // still has findings/notes/completed work and must not look dead.
     const act = (p.active_comms_sessions || []).length;
@@ -3248,7 +3248,7 @@ function applySnapshot(data) {
   const unified = isUnified(data);
   document.body.classList.toggle('unified', unified);
   // Self-heal a stale project selection (project gone, or no longer unified).
-  // Only unified mode can judge whether the selected project still exists — in
+  // Only unified mode can judge whether the selected project still exists: in
   // single-repo mode project_sessions is empty for every project, so clearing
   // here would wipe the operator's sidebar selection on any comms ui --repo run.
   if (isUnified(data) && selectedProjectHash && !(data.project_sessions || []).some(p => p.repo_hash === selectedProjectHash)) {
@@ -3259,7 +3259,7 @@ function applySnapshot(data) {
   latestView = view;
   // Header reflects the selected project (or the all-projects roll-up).
   const sel = unified && selectedProjectHash ? (data.project_sessions || []).find(p => p.repo_hash === selectedProjectHash) : null;
-  // Show the active comms-session name(s) in the header — that's the name
+  // Show the active comms-session name(s) in the header: that's the name
   // agents use ("acme-build"), so it must not be hidden behind the repo
   // name. Only when a single project is in focus (not the merged all view).
   const repoLabel = sel ? sel.repo_name : data.project.name;
@@ -3276,7 +3276,7 @@ function applySnapshot(data) {
   el('sessions').innerHTML = renderRows(view.sessions, s => {
     // The handle goes on the meta line, not beside the label. In a 220px column
     // a label plus a handle wrapped mid-hyphen ("@claude-" / "backend"), and
-    // base_name is just the handle with its suffix cut off — the same name a
+    // base_name is just the handle with its suffix cut off: the same name a
     // third time. Label on top, handle where the other identifiers already are.
     const title = s.label ? esc(s.label) : '@' + esc(s.actor);
     // With no label the handle is already the heading, so the meta line starts
@@ -3289,15 +3289,15 @@ function applySnapshot(data) {
     // endpoint then uses the local repo) and the row's own repo otherwise.
     const n = s.claim_count || 0;
     const rowRepo = rosterRepo || s.repo_hash || '';
-    const rel = (rosterReleaseAll.enabled && n > 0) ? '<button class="small primary" type="button" data-release-actor="' + esc(s.actor) + '" data-release-repo="' + esc(rowRepo) + '" data-release-count="' + n + '" title="Release all ' + n + ' claim(s) held by @' + esc(s.actor) + ' at once — frees the files; keeps them on the team">Release ' + n + '</button>' : '';
-    const rm = rosterRetire.enabled ? '<button class="small danger" type="button" data-retire-actor="' + esc(s.actor) + '" data-retire-repo="' + esc(rowRepo) + '" title="Remove @' + esc(s.actor) + ' from the team — releases their claims; history is kept">Remove</button>' : '';
+    const rel = (rosterReleaseAll.enabled && n > 0) ? '<button class="small primary" type="button" data-release-actor="' + esc(s.actor) + '" data-release-repo="' + esc(rowRepo) + '" data-release-count="' + n + '" title="Release all ' + n + ' claim(s) held by @' + esc(s.actor) + ' at once: frees the files; keeps them on the team">Release ' + n + '</button>' : '';
+    const rm = rosterRetire.enabled ? '<button class="small danger" type="button" data-retire-actor="' + esc(s.actor) + '" data-retire-repo="' + esc(rowRepo) + '" title="Remove @' + esc(s.actor) + ' from the team: releases their claims; history is kept">Remove</button>' : '';
     const acts = (rel || rm) ? '<div class="roster-act">' + rel + rm + '</div>' : '';
     // Liveness: every event an agent emits is a passive heartbeat (silent_for is
     // the age since its last one). A held lock + silence past the stale window is
     // the crash signal worth flagging, so the operator knows WHO to Release.
     const silent = s.silent_for || '';
     const activity = (!silent || silent === 'now') ? 'active' : ('silent ' + esc(silent));
-    const dead = s.likely_dead ? ' <span class="pill dead" title="Holds ' + n + ' claim(s) and silent ' + esc(silent) + ' — looks crashed. Release frees its files for the rest of the team.">likely dead</span>' : '';
+    const dead = s.likely_dead ? ' <span class="pill dead" title="Holds ' + n + ' claim(s) and silent ' + esc(silent) + ': looks crashed. Release frees its files for the rest of the team.">likely dead</span>' : '';
     return '<div class="row session-row' + (s.likely_dead ? ' dead-row' : '') + '"><div><div class="actor">' + title + (s.leader ? ' <span class="pill leader">leader</span>' : '') + dead + '</div><div class="meta">' + who + esc(s.hostname || 'unknown host') + ' · ' + activity + '</div>' + (s.session_name ? '<div class="meta">in session: ' + esc(s.session_name) + '</div>' : '') + '</div>' + acts + '</div>';
   },
     'No active sessions in the last 4h.');
@@ -3322,7 +3322,7 @@ function applySnapshot(data) {
   renderClaims(data, view);
   el('findings').innerHTML = renderRows(view.findings, f => {
     const refs = (f.refs || []).map(r => {
-      // Always escape — refs are agent-controllable text from the log. Compute the
+      // Always escape: refs are agent-controllable text from the log. Compute the
       // escaped label once so the only string reaching innerHTML is safe.
       const label = r.kind === 'path' ? esc(r.value) : (esc(r.kind) + ':' + esc(r.value));
       return '<span class="ref-pill" title="' + esc(r.kind) + '">' + label + '</span>';
@@ -3591,7 +3591,7 @@ async function retireActor(actor, repoHash) {
 async function releaseActorClaims(actor, repoHash, count) {
   const n = (count && Number(count) > 0) ? Number(count) : 0;
   const many = n ? ('all ' + n + ' active claim' + (n === 1 ? '' : 's')) : 'all active claims';
-  const result = window.prompt('Release ' + many + ' held by @' + actor + '?\n\nThis frees those files for other agents at once (handy when an agent dies holding many locks). @' + actor + ' stays on the team — use Remove if you also want them off the roster.', 'agent died; bulk-released claims via UI');
+  const result = window.prompt('Release ' + many + ' held by @' + actor + '?\n\nThis frees those files for other agents at once (handy when an agent dies holding many locks). @' + actor + ' stays on the team: use Remove if you also want them off the roster.', 'agent died; bulk-released claims via UI');
   if (result === null) return;
   const res = await fetch('/api/claim/release-all', {
     method: 'POST',

@@ -139,7 +139,7 @@ def resolve(graph, scope, root: str | Path | None = None) -> Resolution:
     """
     res = Resolution()
     if graph is None:
-        res.miss_reason = "no map has been built for this project yet — run `graphify extract`"
+        res.miss_reason = "no map has been built for this project yet, run `graphify extract`"
         return res
 
     path = _norm(getattr(scope, "path", "") or "")
@@ -154,7 +154,7 @@ def resolve(graph, scope, root: str | Path | None = None) -> Resolution:
         # them is how a typo gets mistaken for an isolated file.
         on_disk = (Path(root) / path).exists() if root else None
         if on_disk is False:
-            res.miss_reason = f"no file named {path!r} — check the spelling"
+            res.miss_reason = f"no file named {path!r}, check the spelling"
         elif on_disk is True:
             res.miss_reason = (
                 f"{path} is not in the map (unsupported language, ignored, or the map is stale)"
@@ -204,7 +204,7 @@ def resolve(graph, scope, root: str | Path | None = None) -> Resolution:
             if close:
                 res.miss_reason = (
                     f"{path} has no symbol named {anchor!r}, but it does have "
-                    f"{close[0]!r} — names are matched exactly, including case"
+                    f"{close[0]!r}: names are matched exactly, including case"
                 )
                 return res
         if not hits:

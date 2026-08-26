@@ -78,7 +78,7 @@ func WriteConflict(w io.Writer, c Conflict) {
 	// attempted scope may be a comma-joined batch, which is not a valid --steal
 	// claim target), and quote the full claim ID (a short prefix can be ambiguous).
 	if c.StaleAfter > 0 && raw >= c.StaleAfter {
-		fmt.Fprintf(w, "\n@%s's claim is STALE (idle %s, stale after %s) — its holder is presumed gone.\n", primaryActor, formatDuration(since), formatDuration(c.StaleAfter))
+		fmt.Fprintf(w, "\n@%s's claim is STALE (idle %s, stale after %s): its holder is presumed gone.\n", primaryActor, formatDuration(since), formatDuration(c.StaleAfter))
 		fmt.Fprintf(w, "You may steal a stale claim directly (no --reason needed):\n")
 		fmt.Fprintf(w, "  comms claim %q --intent %q --steal %s\n",
 			EscapeScope(primary.Scope.String()), EscapeScope(intentOr(c.AttemptedIntent, "<your-intent>")), EscapeScope(primary.ID))

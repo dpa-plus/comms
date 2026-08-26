@@ -142,7 +142,7 @@ def contact(
     report = ContactReport()
 
     if graph is None:
-        report.note = "no map for this project yet, so only exact overlaps are known — run `graphify extract`"
+        report.note = "no map for this project yet, so only exact overlaps are known. Run `graphify extract`"
         return report
     if getattr(mine, "miss_reason", None):
         # Loud, not silent. A name that matched nothing must never read as "clear".
@@ -154,7 +154,7 @@ def contact(
     if scope_count > MAX_SCOPES:
         report.note = (
             f"this job names {scope_count} separate scopes, more than the {MAX_SCOPES} this can "
-            f"usefully reason about — split the job, or claim fewer places at once"
+            f"usefully reason about: split the job, or claim fewer places at once"
         )
         return report
 
@@ -212,7 +212,7 @@ def contact(
     report.unplaced = unplaced
     if not report.touches:
         report.note = (
-            "nobody else is on this or next to it — though the map misses roughly a third of "
+            "nobody else is on this or next to it, though the map misses roughly a third of "
             "real couplings, so this is not a guarantee"
         )
     return report
@@ -235,7 +235,7 @@ def render(report: ContactReport) -> str:
         # So the admission goes above the summary, and the summary stops
         # claiming something it does not know.
         for u in report.unplaced:
-            lines.append(f"  NOT ON THE MAP — {u}; rebuild with `graphify extract` to see it")
+            lines.append(f"  NOT ON THE MAP: {u}; rebuild with `graphify extract` to see it")
         if report.unplaced:
             lines.append(
                 "  Cannot say whether anyone is near you: "
@@ -247,18 +247,18 @@ def render(report: ContactReport) -> str:
     same = [t for t in report.touches if t.kind == "same"]
     near = [t for t in report.touches if t.kind == "near"]
     if same:
-        lines.append("  SAME GROUND — somebody else has claimed this exact thing:")
+        lines.append("  SAME GROUND: somebody else has claimed this exact thing:")
         for t in same:
             lines.append(f"    @{t.other_actor} holds {t.other_scope}  ({t.their_label})")
     if near:
-        lines.append("  NEARBY — worth a look before you start, not a conflict:")
+        lines.append("  NEARBY: worth a look before you start, not a conflict:")
         for t in near:
             via = f" [{t.relation}]" if t.relation else ""
             conf = f" {t.confidence.lower()}" if t.confidence else ""
             lines.append(
-                f"    {t.my_label} —{via}{conf}→ {t.their_label}, held by @{t.other_actor} ({t.other_scope})"
+                f"    {t.my_label} -{via}{conf}-> {t.their_label}, held by @{t.other_actor} ({t.other_scope})"
             )
         lines.append("    (the map flags more pairs than really change together; and it misses some)")
     for u in report.unplaced:
-        lines.append(f"  NOT ON THE MAP — {u}; rebuild with `graphify extract` to see it")
+        lines.append(f"  NOT ON THE MAP: {u}; rebuild with `graphify extract` to see it")
     return "\n".join(lines)

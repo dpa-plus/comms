@@ -678,7 +678,7 @@ func emitTaskSummary(st *state.State) {
 	fmt.Printf("TASKS (%d open, %d closed)\n", len(review)+len(ready)+len(doing)+len(blocked)+len(cycles), len(closed))
 	for _, t := range review {
 		fmt.Printf("  VERIFY  %-16s %s\n", t.ID, t.Title)
-		fmt.Printf("          done by @%s — needs someone else\n", t.Did)
+		fmt.Printf("          done by @%s: needs someone else\n", t.Did)
 	}
 	for _, t := range ready {
 		fmt.Printf("  READY   %-16s %s\n", t.ID, t.Title)
@@ -694,10 +694,10 @@ func emitTaskSummary(st *state.State) {
 		fmt.Printf("  %d waiting on work that has not been verified yet\n", len(blocked))
 	}
 	for _, t := range cycles {
-		fmt.Printf("  CYCLE   %-16s depends on itself — the plan needs fixing\n", t.ID)
+		fmt.Printf("  CYCLE   %-16s depends on itself: the plan needs fixing\n", t.ID)
 	}
 	if n := len(st.RefusedTaskStates); n > 0 {
-		fmt.Printf("  %d refused transition(s) — see `comms task show`\n", n)
+		fmt.Printf("  %d refused transition(s): see `comms task show`\n", n)
 	}
 }
 

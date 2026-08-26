@@ -16,7 +16,7 @@ This drops `comms` into `$GOBIN` (typically `~/go/bin/` or `~/.local/bin/`). Mak
 work, prefer stable readable actors per live assistant role, such as
 `claude-dev`, `codex-dev`, and `human-eli`. A generic name shared across all
 your sessions (just `eli` or `claude`) is rejected by default because it breaks
-the conflict model — `comms check` would treat every other live agent's claim
+the conflict model: `comms check` would treat every other live agent's claim
 as "held by same actor" and wave through edits.
 
 If you use Claude or Codex from desktop apps and want opt-in coordination,
@@ -250,10 +250,10 @@ block from `examples/settings.json.snippet`:
 ```
 
 Note the **nested `hooks` array**. A flat `{"matcher", "type", "command"}` does not
-match the settings schema and is ignored without an error — the hook simply never
+match the settings schema and is ignored without an error: the hook simply never
 runs. Earlier versions of this document showed the flat form.
 
-The SessionStart hook announces the session and shows recent activity. The PreToolUse hook calls `comms check` with the tool input JSON on stdin — if another actor holds the file you're about to edit, the hook exits 2, which is the code Claude Code treats as a block, and the conflict report on stderr goes back to the model.
+The SessionStart hook announces the session and shows recent activity. The PreToolUse hook calls `comms check` with the tool input JSON on stdin: if another actor holds the file you're about to edit, the hook exits 2, which is the code Claude Code treats as a block, and the conflict report on stderr goes back to the model.
 
 ## 5. Claude Code skill
 
@@ -305,4 +305,4 @@ comms status
 go install github.com/dpa-plus/comms/cmd/comms@latest
 ```
 
-There's no migration step — the on-disk format is stable.
+There's no migration step: the on-disk format is stable.

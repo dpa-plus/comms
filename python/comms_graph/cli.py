@@ -645,7 +645,7 @@ def _single_scope_or_exit(positional: list[str], verb: str) -> str:
     if len(positional) > 1:
         _err(f"error: {verb} takes one scope, but {len(positional)} were given: "
              + ", ".join(repr(p) for p in positional))
-        _err(f"  Claim them one at a time — earlier versions kept only {positional[0]!r} "
+        _err(f"  Claim them one at a time: earlier versions kept only {positional[0]!r} "
              "and silently dropped the rest.")
         sys.exit(EXIT_USAGE)
     scope_str = positional[0]
@@ -729,7 +729,7 @@ def _parse_scope_or_exit(raw: str) -> _scope.Scope:
 
 def _render_conflicts(conflicts: list, scope_str: str) -> str:
     lines = [
-        "CLAIM CONFLICT — not recorded. Somebody else already holds this ground.",
+        "CLAIM CONFLICT: not recorded. Somebody else already holds this ground.",
         f"  you asked for: {scope_str}",
     ]
     for claim in conflicts:
@@ -830,11 +830,11 @@ def _cmd_claim_many(positional: list[str], flags: dict) -> int:
                     }))
                 except Exception:
                     pass
-            _err(f"CLAIM CONFLICT — nothing was recorded. {len(blocked)} of "
+            _err(f"CLAIM CONFLICT: nothing was recorded. {len(blocked)} of "
                  f"{len(scopes)} scopes are held by somebody else:")
             for scope_str, holder in blocked:
                 extra = f'  "{holder.intent}"' if holder.intent else ""
-                _err(f"  {scope_str} — @{holder.actor}{extra}")
+                _err(f"  {scope_str}: @{holder.actor}{extra}")
             _err("  The batch is all-or-nothing, so your other scopes are still "
                  "free. Narrow the set, or agree with them who takes what.")
             return EXIT_CONFLICT
@@ -956,7 +956,7 @@ def _cmd_claim(argv: list[str]) -> int:
                     _err("  Blocking you: "
                          + ", ".join(f"{c.id} (@{c.actor} on {c.scope})" for c in conflicts))
                 else:
-                    _err("  Nothing is blocking you here — claim it without --steal.")
+                    _err("  Nothing is blocking you here: claim it without --steal.")
                 return EXIT_USAGE
             reason = (flags.get("reason") or "").strip()
             if not reason:
@@ -1062,7 +1062,7 @@ def _cmd_claim(argv: list[str]) -> int:
     # Everything from here is advisory and needs no lock.
     print(f"CLAIMED {scope} by @{actor}  (id {event.id})")
     if claim_data.get("steals"):
-        print(f"  TAKEN FROM @{stolen_from_actor} — their claim {claim_data['steals']} is ended.")
+        print(f"  TAKEN FROM @{stolen_from_actor}: their claim {claim_data['steals']} is ended.")
         print("  Recorded as a steal under your name, with your reason. If they come")
         print("  back and re-claim it, they will be told the same way you were.")
     advice = _advice(root, flags.get("graph"), scope, others)
@@ -1100,7 +1100,7 @@ def _staleness_note(root: Path, map_path: Path, rel_path: str) -> str:
         target = root / rel_path
         if target.is_file() and target.stat().st_mtime > map_mtime:
             notes.append(
-                "  OUT OF DATE — " + rel_path + " changed after the map was built, "
+                "  OUT OF DATE: " + rel_path + " changed after the map was built, "
                 "so what follows may describe code that is no longer there."
             )
     except OSError:
@@ -1111,7 +1111,7 @@ def _staleness_note(root: Path, map_path: Path, rel_path: str) -> str:
             age = int((newest - map_mtime) // 3600)
             when = (str(age) + "h") if age >= 1 else "under an hour"
             notes.append(
-                "  OUT OF DATE — the map is older than the newest code in this repo "
+                "  OUT OF DATE: the map is older than the newest code in this repo "
                 "(by " + when + "); rebuild with `graphify extract . --code-only`."
             )
     return "\n".join(notes)
@@ -1220,7 +1220,7 @@ def _cmd_release(argv: list[str]) -> int:
                 st, log_file, actor, target, flags.get("reason", "").strip())
         mine = st.active_claims_by_actor(actor)
         if not mine:
-            print(f"nothing to release — @{actor} holds no claims here")
+            print(f"nothing to release: @{actor} holds no claims here")
             return EXIT_OK
         if not target:
             chosen = mine
@@ -1289,7 +1289,7 @@ def _slug_or_exit(raw: str, what: str = "task id") -> str:
     if not _SLUG_RE.match(slug):
         _err(f"error: {what} {raw!r} is not a slug")
         _err("  Lowercase letters, digits and hyphens, up to 32 characters, "
-             "starting with a letter or digit — e.g. auth-api.")
+             "starting with a letter or digit. For example: auth-api.")
         sys.exit(EXIT_USAGE)
     return slug
 
@@ -1429,7 +1429,7 @@ def _cmd_ui(argv: list[str]) -> int:
                               graph_file=flags.get("graph"))
     except OSError as exc:
         _err(f"error: cannot listen on {host}:{port}: {exc.strerror or exc}")
-        _err("  Something else is probably already using it — try --port 7879.")
+        _err("  Something else is probably already using it: try --port 7879.")
         return EXIT_ERROR
 
     print(f"comms board on http://{host}:{port}  (ctrl-c to stop)")
@@ -1464,7 +1464,7 @@ def _cmd_check(argv: list[str]) -> int:
     except SystemExit:
         raise
     except BaseException as exc:  # noqa: BLE001 — deliberately everything
-        _err(f"check: refusing to answer — {type(exc).__name__}: {exc}")
+        _err(f"check: refusing to answer: {type(exc).__name__}: {exc}")
         _err("  comms could not establish that this path is free, so it is not "
              "saying that it is.")
         return EXIT_BLOCK
@@ -1569,7 +1569,7 @@ def _cmd_check_staged(flags: dict) -> int:
             _err(f"BLOCKED: {len(foreign)} staged deletion(s) remove files the log "
                  "ties to somebody else.")
             for a in foreign:
-                _err(f"  {a.change.path} — last {a.basis} by @{a.actor}")
+                _err(f"  {a.change.path}: last {a.basis} by @{a.actor}")
             _err("  You are about to commit somebody else's removal. Unstage it, "
                  "or confirm with them that it was meant to go:")
             for a in foreign:
@@ -1604,7 +1604,7 @@ def _cmd_check_staged(flags: dict) -> int:
         _err("check --staged: cannot establish who is committing, so it cannot "
              "tell your own claims from somebody else's.")
         for rel_text, holder in blocked:
-            _err(f"  {rel_text} — claimed by @{holder.actor}")
+            _err(f"  {rel_text}: claimed by @{holder.actor}")
         _err("  Run `comms-graph hello` in this session so the log knows you, or "
              "pass --as <actor>, or set COMMS_ACTOR.")
         return EXIT_BLOCK
@@ -1620,7 +1620,7 @@ def _cmd_check_staged(flags: dict) -> int:
     _err(f"BLOCKED: {len(blocked)} staged file(s) are claimed by somebody else.")
     for rel_text, holder in blocked:
         intent = f'  "{holder.intent}"' if holder.intent else ""
-        _err(f"  {rel_text} — @{holder.actor}{intent}")
+        _err(f"  {rel_text}: @{holder.actor}{intent}")
     _err("  Unstage them, or agree with the holder before committing their work:")
     for rel_text, _holder in blocked:
         # :(literal) so a path containing *, ? or [ ] is treated as the name it
@@ -1751,7 +1751,7 @@ def _cmd_tasks(argv: list[str]) -> int:
     generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     res = _taskview.render(st, out, generated=generated)
     if res.task_count == 0:
-        print("no tasks declared yet — the page will say so")
+        print("no tasks declared yet: the page will say so")
     print(f"wrote {res.output_path}")
     print(f"  {res.task_count} task(s), {res.edge_count} edge(s)"
           + (f", {res.blocked} blocked" if res.blocked else "")
@@ -1821,11 +1821,11 @@ def _task_add(argv: list[str]) -> int:
     if checks:
         print(f"  must pass before done: {', '.join(checks)}")
     if data.get("probe"):
-        print("  a probe — it will not show up as a neighbour of real work")
+        print("  a probe: it will not show up as a neighbour of real work")
     if data.get("review"):
         print("  needs somebody else to check it before it closes")
     else:
-        print("  closes when you run `task done` — add --review if it needs checking")
+        print("  closes when you run `task done`: add --review if it needs checking")
     return EXIT_OK
 
 
@@ -1965,10 +1965,10 @@ def _task_done(argv: list[str]) -> int:
     # Announcing "awaiting review" on a task that just closed is the kind of
     # contradiction that makes people stop reading the output.
     if getattr(st.tasks.get(slug), "needs_review", False):
-        print(f"DONE {slug} by @{actor} — awaiting review")
+        print(f"DONE {slug} by @{actor}: awaiting review")
         print("  Somebody else has to verify it before anything after it unblocks.")
     else:
-        print(f"DONE {slug} by @{actor} — closed")
+        print(f"DONE {slug} by @{actor}: closed")
         print("  It did not ask for a review, so this finishes it. Anything "
               "waiting on it is now free.")
     return EXIT_OK
@@ -2051,17 +2051,17 @@ def _task_review(argv: list[str]) -> int:
                 # already let go, and the remedy it named (submit your half)
                 # would have made them a real co-author of work they had
                 # finished with.
-                _err(f"error: self-review — @{actor} has worked on this task")
+                _err(f"error: self-review: @{actor} has worked on this task")
                 _err("  You took ground tagged to it, so the check has to come from "
                      "somebody who did not. Rejecting it with --fail is still yours to do.")
             elif by_submission:
-                _err(f"error: self-review — @{actor} cannot verify work done by @{whom}")
+                _err(f"error: self-review: @{actor} cannot verify work done by @{whom}")
                 _err("  Verification only means something from somebody with different "
                      "blind spots.")
             else:
                 # Neither name matched: the bar came from the session. Say that,
                 # rather than asserting work this name did not do.
-                _err(f"error: self-review — @{actor} is the same agent as @{whom}")
+                _err(f"error: self-review: @{actor} is the same agent as @{whom}")
                 _err("  You are running in the session that did this work. A different "
                      "name is not a different set of blind spots.")
             # Everyone the gate bars, not just everyone who SUBMITTED. Holding
@@ -2075,7 +2075,7 @@ def _task_review(argv: list[str]) -> int:
                       + list(getattr(t, "workers", [])) if x}
             if len(barred) > 1:
                 _err("  Everyone who has worked this task is barred, so it needs somebody "
-                     "who has not touched it — or reject it with --fail, which you may do.")
+                     "who has not touched it, or reject it with --fail, which you may do.")
                 _err("  If there IS nobody else, --acknowledge-self-review records it as "
                      "yours: the board will show it as self-acknowledged, never as verified.")
             return EXIT_CONFLICT
@@ -2114,7 +2114,7 @@ def _task_review(argv: list[str]) -> int:
                     why = getattr(r, "reason", "") or ""
                     break
             _err(f"error: {slug} was NOT " + ("verified" if passed else "rejected")
-                 + " — the log refused it" + (f": {why}" if why else "."))
+                 + ": the log refused it" + (f": {why}" if why else "."))
             return EXIT_CONFLICT
     if passed and acknowledged and is_author:
         print(f"SELF-SIGNED {slug} by @{actor} (work by @{t.did})")
@@ -2129,7 +2129,7 @@ def _task_review(argv: list[str]) -> int:
         landed = _read_state(log_file).tasks.get(slug)
         indep = getattr(landed, "independence", "") if landed else ""
         print(f"VERIFIED {slug} by @{actor} (work by @{t.did})"
-              + (f" — {indep}" if indep else ""))
+              + (f": {indep}" if indep else ""))
         if indep == "same-family":
             print("  Same model family as the author, so it shares their blind spots.")
             print("  A different family checking this would be worth more.")
@@ -2282,7 +2282,7 @@ def _cmd_next(argv: list[str]) -> int:
     _, log_file, _lockf = _task_runtime(flags)
     st = _read_state(log_file)
     if not st.tasks:
-        print("no tasks declared yet — add one with `comms-graph task add <id>`")
+        print("no tasks declared yet: add one with `comms-graph task add <id>`")
         return EXIT_OK
 
     ready = _task.ready_tasks(st.tasks)
@@ -2293,7 +2293,7 @@ def _cmd_next(argv: list[str]) -> int:
         if not blocked and not cycles and st.tasks and all(
             t.phase == _task.PHASE_CLOSED for t in st.tasks.values()
         ):
-            print(f"all {len(st.tasks)} task(s) are closed — the plan is finished.")
+            print(f"all {len(st.tasks)} task(s) are closed: the plan is finished.")
             return EXIT_OK
         print("nothing is startable by you right now.")
         if blocked:
@@ -2309,13 +2309,13 @@ def _cmd_next(argv: list[str]) -> int:
         # Review first, deliberately. A task sitting in review blocks everything
         # after it, so an idle agent picking up new work instead of clearing a
         # review is how a plan stalls with everybody busy.
-        print("WAITING ON YOUR REVIEW — these block whatever comes after them:")
+        print("WAITING ON YOUR REVIEW: these block whatever comes after them:")
         for t in mine_to_review:
             print(f"  {t.id}  {t.title}".rstrip())
             print(f"    done by @{t.did}" + (f"; notes: {t.notes[-1]}" if t.notes else ""))
             print(f"    comms-graph task review {t.id} --pass --as {actor}")
     if ready:
-        print("READY — nothing upstream is outstanding:")
+        print("READY: nothing upstream is outstanding:")
         for t in ready:
             held = ""
             print(f"  {t.id}  {t.title}{held}".rstrip())
@@ -2397,9 +2397,9 @@ def _cmd_brief(argv: list[str]) -> int:
             # one person who most needs to know it was approved by its author.
             mark = ""
             if up is not None and up.independence == "self-acknowledged":
-                mark = f" — signed off by @{up.verified_by} themselves, not independently reviewed"
+                mark = f": signed off by @{up.verified_by} themselves, not independently reviewed"
             print(f"    {e.from_} ({state}) [{e.kind}]"
-                  + (f" — provides: {e.provides}" if e.provides else "")
+                  + (f": provides: {e.provides}" if e.provides else "")
                   + mark)
             if up and up.notes:
                 for note in up.notes[-3:]:
@@ -2465,7 +2465,7 @@ def _cmd_brief(argv: list[str]) -> int:
                     more = r["shared"] - len(r.get("via") or [])
                     if more > 0:
                         where += f", +{more} more"
-                    print(f"    {r['task']} — {r['shared']} shared "
+                    print(f"    {r['task']}: {r['shared']} shared "
                           f"{'file' if r['shared'] == 1 else 'files'}{mark}")
                     if where:
                         print(f"        via {where}")
@@ -2646,10 +2646,10 @@ def _release_somebody_elses(st, log_file, actor: str, target: str, reason: str) 
     held = st.claim_by_id(target)
     if held is None:
         _err(f"error: no active claim with id {target!r}")
-        _err("  --force takes a claim id, not a path — a path can match more than you meant.")
+        _err("  --force takes a claim id, not a path: a path can match more than you meant.")
         return EXIT_USAGE
     if held.actor == actor:
-        _err(f"error: {target} is your own claim — release it without --force")
+        _err(f"error: {target} is your own claim: release it without --force")
         return EXIT_USAGE
     _log.append(log_file, _tagged(st, actor, _log.TYPE_RELEASE, None, {
         "refs": [held.id],

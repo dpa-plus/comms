@@ -29,7 +29,7 @@ round a claim by changing the case of a letter.
 
 **Claim before the first WRITE, not before the first edit you notice.** A
 generator counts. `npm run i18n -- set` counts. A codegen step, a formatter you
-point at one file, a script that rewrites a JSON file — all writes. An agent
+point at one file, a script that rewrites a JSON file: all writes. An agent
 here wrote three keys into a shared `messages/de.json` through an i18n command,
 claimed the file forty minutes later when it got to the tests, and in between a
 peer committed the whole file inside an unrelated change. Nothing was violated:
@@ -37,7 +37,7 @@ at that moment nobody held it. Nothing broke either, which was luck. That agent
 would have said it was following the rule right up until it read the log.
 
 **The hook only sees Edit and Write.** If you change a file with `sed -i`, a
-heredoc, `tee`, or a Python one-liner inside Bash, nothing checks it — and in
+heredoc, `tee`, or a Python one-liner inside Bash, nothing checks it, and in
 auto mode Bash is the documented default, so this is the normal case, not a
 corner. Measured on a real session: ~35 edits, every one through Bash, the hook
 fired zero times, and two agents' changes were swept into each other's commits.
@@ -79,7 +79,7 @@ needs it again.
 
 Three things changed on 2026-08-21 and are new to you:
 
-- `claim a b c --intent "..."` takes several scopes **atomically** — all of them
+- `claim a b c --intent "..."` takes several scopes **atomically**: all of them
   or none, so you never end up holding half a task boundary.
 - `check --staged` refuses a commit whose index touches somebody else's claimed
   files, and prints the exact `git restore --staged` / `git rm --cached` line to
@@ -110,8 +110,8 @@ Do not use generic names like `eli`, `claude`, `codex`, `agent`, or `user`.
 
 `--model` and `--vendor` are optional (they fall back to `$COMMS_MODEL` and
 `$COMMS_VENDOR`) but say them anyway. comms uses the vendor to record whether a
-verification was `independent` — checked by something from a different maker than
-the agent that did the work — or `same-family`. "Verified" and "verified by
+verification was `independent`: checked by something from a different maker than
+the agent that did the work, or `same-family`. "Verified" and "verified by
 something with the same blind spots" are different claims, and only the log can
 tell them apart later.
 
@@ -139,15 +139,15 @@ see both.
 ## Operator UI
 
 The user watches coordination in a local board: `comms-graph ui` (`--port`,
-`--host`, `--graph`). It opens on the activity stream — what happened, newest
-first, with the events that need somebody bunched at the top — plus a Projects
+`--host`, `--graph`). It opens on the activity stream: what happened, newest
+first, with the events that need somebody bunched at the top, plus a Projects
 rail listing every comms store on this machine, the roster, the task graph, and
 counts for this repo.
 
 **The board is read-only.** It serves `GET` and nothing else: there are no
 buttons that release a claim, end a session or retire an actor, and no mutation
 endpoints to call. Coordination is changed only through the CLI, by the agent
-that owns the work. That is deliberate — the log is written under a lock through
+that owns the work. That is deliberate: the log is written under a lock through
 a fold that enforces the rules, and a dashboard that could write would be a
 second writer with none of those guarantees.
 
@@ -182,10 +182,10 @@ COMMS_ACTOR=claude-dev comms-graph session join "session name" --label "Claude D
 **Never override `HOME`** (e.g. `HOME=/tmp comms …`). comms stores its event log
 under `$HOME/Library/Application Support/comms/`, so changing `HOME` silently
 forks every claim/finding/note into a throwaway log that the shared dashboard
-and other agents never see — coordination breaks with no error. To escape a
+and other agents never see: coordination breaks with no error. To escape a
 protected working directory use `cd /tmp` (changes the *cwd*, not `HOME`) and
 point at the repo with `--repo`/`COMMS_REPO`; leave `HOME` untouched. comms now
-prints a warning when its store resolves under a temp dir — if you see it, drop
+prints a warning when its store resolves under a temp dir: if you see it, drop
 the `HOME=` and re-run your `hello`/`session join`/`claim`.
 
 Prefer moving long-running/background-service repos to `~/code/<project>` so
@@ -193,7 +193,7 @@ agents and launchd jobs avoid macOS protected-folder access problems.
 
 Coordination is changed through the CLI only, by the agent that owns the work.
 The board serves GET and has no mutation endpoints, so there is nothing to click
-even if asked — see Operator UI above for what `/api/status` returns.
+even if asked: see Operator UI above for what `/api/status` returns.
 
 To end one named session from the CLI:
 
@@ -214,14 +214,14 @@ COMMS_ACTOR=claude-dev comms-graph session retire claude-7e4c --reason "renamed 
 Leadership is auto-assigned to the first active actor and only gates `--priority`
 notes/findings; ignore it unless the user explicitly asks you to set a leader
 (`comms-graph session lead`). When asked to remove an actor, do not say "I can't delete
-old actors" — `session retire` removes them from the active view while preserving
+old actors": `session retire` removes them from the active view while preserving
 the append-only audit log.
 
 ## Working the Task Graph
 
 **Every request that will change files gets a task, created before the first
 claim, and every claim for it carries `--task <slug>`.** Not "when the work is
-big enough" — when you are asked to change something. Declare it with
+big enough": when you are asked to change something. Declare it with
 `comms-graph task add <slug> --title "..."`, or `comms-graph plan --from` for a
 whole decomposition, then claim with `--task <slug>`.
 
@@ -258,14 +258,14 @@ id you type on the command line. It is not the name anybody reads.
 
 This is a rule, not a suggestion, and it is stated as one deliberately. When it
 was phrased as "put it in the graph when work is big enough", agents skipped it:
-across 4,356 real claims exactly one carried a task. Nothing was broken — the
+across 4,356 real claims exactly one carried a task. Nothing was broken: the
 instruction was soft, and soft instructions lose to hard ones every time.
 
 **What the tag buys, concretely.** The board lists every task and opens one on a
 click, and what it shows there is built from your claims: the files the task
 touches, who holds each, and which are already released. That list exists only
 because the claims were tagged. Untagged, the task shows "No files are tagged to
-this task" and the person watching has to ask you where the work is — which is
+this task" and the person watching has to ask you where the work is, which is
 the question the tool is supposed to have already answered.
 
 It costs one flag on a command you were running anyway, and it is the only
@@ -282,7 +282,7 @@ COMMS_ACTOR=claude-dev comms-graph tasks        # draws the graph to HTML
 ```
 
 `comms-graph plan` appends the whole decomposition in one write and rejects it entirely
-if anything is wrong — an unknown endpoint, a duplicate edge, a dependency cycle.
+if anything is wrong: an unknown endpoint, a duplicate edge, a dependency cycle.
 
 For one task at a time, or to extend a plan that already exists:
 
@@ -297,14 +297,14 @@ COMMS_ACTOR=claude-dev comms-graph task edge db-schema auth-api --kind consumes 
 The edge `--kind` is load-bearing, not a label, and there are two of them.
 `consumes` means the later task uses something the earlier one produces, so
 reworking the earlier one flags it for a recheck. `sequence` is ordering only
-and propagates nothing. Say what is consumed in `--provides` — that is the text
+and propagates nothing. Say what is consumed in `--provides`: that is the text
 `comms-graph brief` hands to whoever picks the next task up.
 
 (`interface` and `artifact` are still accepted and mean `consumes`. They were
 two words for one behaviour, which made every edge a choice between synonyms.)
 
 **One task, one agent at a time.** If somebody else is holding ground tagged to
-a task, take a different one — or split it so you each have your own piece to be
+a task, take a different one, or split it so you each have your own piece to be
 checked. You are not blocked from working in parallel: you take different files,
 which is what the file lock is for. What you cannot do is share a task, because
 then one review covers work that is not all there yet.
@@ -340,7 +340,7 @@ COMMS_ACTOR=claude-dev comms-graph task done auth-api --check test=pass \
 
 `done` does **not** close the task, and nothing downstream moves until it is
 verified. Write the notes as decisions and their reasons, not a summary of the
-diff — the arguable choices are what a reviewer needs and what travels to whoever
+diff: the arguable choices are what a reviewer needs and what travels to whoever
 picks up the next task.
 
 ```bash
@@ -354,7 +354,7 @@ COMMS_ACTOR=codex-dev comms-graph task review auth-api --fail \
 a green tick: the next agent builds against that interface on the strength of it
 and has no way to tell a real check from a glance. Put the method in the verdict
 where your build takes it (`--pass --evidence "ran the suite, 14 pass"`), and in
-a note on the task where it does not — the build installed today refuses
+a note on the task where it does not: the build installed today refuses
 `--evidence` on `--pass`, because it pairs that flag with `--finding` for the
 failure path.
 
@@ -363,7 +363,7 @@ Rules the tool enforces, so do not plan around them:
 - **You cannot verify your own work.** A role suffix does not help; `claude-dev/review`
   is still `claude-dev`.
 - **Declared checks must pass** before work can even reach review.
-- **A finding must be checkable** — an input that breaks it, a line that contradicts
+- **A finding must be checkable**: an input that breaks it, a line that contradicts
   the spec, a case the tests miss. The rule on the other side is "if the reason is
   real, fix it, whoever gave it", and an opinion cannot be acted on that way.
 - **One verdict.** Do not iterate to agreement with the author; escalate to a third
@@ -377,12 +377,12 @@ report its own verdict.
 The operator's dashboard shows the same graph: an arrow means the task it points
 at comes afterwards, and tasks joined to nothing are drawn apart. Work waiting for
 a verifier surfaces as a red **to verify** chip on the top rail, and a plan that
-can never finish as a **dependency cycle** chip — both visible without opening
+can never finish as a **dependency cycle** chip: both visible without opening
 anything. You do not need to look at it. Keep the log honest and it follows.
 
 ### Where the real context lives
 
-A task can carry `--ref tracker:PROJ-1234` — a pointer to wherever the real
+A task can carry `--ref tracker:PROJ-1234`: a pointer to wherever the real
 context lives. comms stores it verbatim and never resolves it; `comms-graph brief`
 prints it back and stops there. Reading it is your job: the ticket system that
 owns that reference is the one that knows how, and comms taking a dependency on
@@ -404,7 +404,7 @@ of how rather than a list of verbs.
 
 **They are joined by your claims.** A claim tagged `--task <slug>` puts a file on
 a task. The map already knows how that file reaches other files. So comms can
-say which *tasks* meet in the code — derived, not typed — and the board shows it
+say which *tasks* meet in the code: derived, not typed, and the board shows it
 on a task as **MEETS IN THE CODE**, with the count of places the two share.
 
 That is worth stating plainly because it is the difference between the two
@@ -415,7 +415,7 @@ map alone, nobody knows which work the connections belong to.
 
 **Read them as different kinds of claim.** A declared edge is a judgement about
 order and it blocks: the successor waits. A code connection is a fact with no
-direction — these two pieces of work touch the same neighbourhood — and it blocks
+direction: these two pieces of work touch the same neighbourhood, and it blocks
 nothing. It is a reason to go and look, or to talk to whoever holds the other
 task, before you find out by collision.
 
@@ -426,12 +426,12 @@ The map runs at roughly a third to a half recall on this kind of codebase, so
 **Know which kinds it sees, not just the number.** A flat recall figure hides the
 shape of what is missing, and the shape is what tells you when to stop trusting
 it. Counted on this repository's map: 2169 `contains`, 1323 `imports`, 792
-`calls`, 731 `imports_from` — and no edge kind for one component rendering
+`calls`, 731 `imports_from`, and no edge kind for one component rendering
 another. The extractor sees `foo()` and does not see `<Foo />`.
 
 In a React codebase that is not a gap at the margin, it is the structure. A
 component whose body renders five children reports degree 3, and its two edges
-are `cn()` and a colour helper — the connections that join everything to
+are `cn()` and a colour helper: the connections that join everything to
 everything and inform least. The children exist as nodes; the edge from their
 only caller does not. So the map is keeping the noise and dropping the signal
 exactly where the signal lives.
@@ -450,7 +450,7 @@ than proven, from a controlled pair: a call made from inside a NAMED function wa
 extracted, and a call to a sibling helper made from inside
 `auftraege.flatMap((auftrag) => …)` was not, leaving that helper with no inbound
 caller at all. If a call needs a named enclosing scope to hang off, then every
-call inside a callback loses its caller — and on server code `.map`, `.flatMap`,
+call inside a callback loses its caller, and on server code `.map`, `.flatMap`,
 `prisma.$transaction(async (tx) => …)`, express handlers and every `onSuccess`
 are anonymous, so that is most of them.
 
@@ -463,22 +463,22 @@ callers, on components and on server code, for two different reasons.
 recall and reads the same. The map is built from code: a JSON catalogue, a
 config file, a SQL migration has no symbols and no imports, so it is simply
 absent. In this repo the single highest-traffic shared file is
-`frontend/messages/de.json` — the one most likely to be edited by two agents at
-once — and it can never appear as a shared file. An agent lost work to exactly
+`frontend/messages/de.json`: the one most likely to be edited by two agents at
+once, and it can never appear as a shared file. An agent lost work to exactly
 that file while its task showed no relevant neighbours. Treat catalogue, config
 and migration files as invisible here and coordinate them by claiming, not by
 looking for a connection that cannot exist.
 
 **The map is only as fresh as the last extract.** It does not update itself. A
 map several commits old reports line numbers that have moved and misses
-connections added since, and it does so confidently — which is worse than having
+connections added since, and it does so confidently, which is worse than having
 none, because a wrong answer and a right one look identical. The board shows the
 map's age and warns past a day. If what you are reading matters, re-run
 `graphify extract . --code-only` first.
 
 **Where this is worth reading, and where it is not.** Measured by the agents
 using it: for the author of both sides of a connection it is confirmation, not
-information — you already know. It earns its place when you are about to touch a
+information: you already know. It earns its place when you are about to touch a
 file you did NOT write and cannot know who is downstream of it right now. The
 code map gives you the fan-out; the claims give you which of those are in
 somebody's open task. Neither half is the feature; the join is.
@@ -500,7 +500,7 @@ comms-graph board                 # who holds what, and under which task
 graphify explain "<symbol>"       # what your ground connects to in the code
 ```
 
-If the board says your task meets another one, read that task before you edit —
+If the board says your task meets another one, read that task before you edit:
 whoever holds it is working in the same neighbourhood, and that is exactly the
 collision claims cannot prevent on files neither of you has claimed yet.
 
@@ -509,13 +509,13 @@ collision claims cannot prevent on files neither of you has claimed yet.
 ## Navigating the Code
 
 If the repo has a graphify map (`graphify-out/graph.json`), it can answer some
-questions far more cheaply than reading files — and others far worse than `rg`.
+questions far more cheaply than reading files, and others far worse than `rg`.
 The split is not a matter of taste; it was measured on this codebase.
 
 **Grep to find. graphify to expand. Never graphify to find.**
 
 `rg` locates a symbol. Once you have its name, graphify tells you what connects
-to it — which is the part grep cannot do without a manual fan-out.
+to it, which is the part grep cannot do without a manual fan-out.
 
 **The two forms answer different questions and only one of them gives you
 callers.** `explain <symbol>` returns what that symbol calls and what contains
@@ -523,12 +523,12 @@ it; it does NOT reliably return its callers, including plain same-file calls.
 `explain <file>` returns the files that import it, and is complete. So if the
 question is "who depends on this", ask for the FILE. Measured against `rg` on a
 real change: the file form matched grep exactly, and its per-symbol precision is
-what makes it worth running before a signature change — nine files imported the
+what makes it worth running before a signature change: nine files imported the
 module, only three imported the symbol being changed.
 
 ```bash
 graphify explain "<symbol>"                    # its CALLEES and what contains it
-graphify explain "path/to/file.ts"             # its IMPORTERS — who depends on it
+graphify explain "path/to/file.ts"             # its IMPORTERS: who depends on it
 graphify affected "<node-id>"                  # transitive blast radius
 graphify god-nodes                             # the hubs, when you are new here
 ```
@@ -542,7 +542,7 @@ a caller in `scripts/` that a `src/`-scoped grep missed.
 hops, and two hops from anything in a React or Next.js repo reaches a helper
 like `cn()` with 180+ edges, so the neighbourhood explodes. Asked where bank
 transactions get matched to rent, it reported 951 nodes, truncated to 77, and
-ranked the correct function **72nd** — below `Button`, `DialogTitle` and a
+ranked the correct function **72nd**: below `Button`, `DialogTitle` and a
 Tailwind classname helper. `rg -n "export (async )?function match" src/`
 answered the same question in one line. Every "where is X" question we tried
 went the same way.
@@ -558,14 +558,14 @@ went the same way.
   encrypted at rest behind a refresh lock.
 - **Prisma models and SQL migrations are not in the graph at all.** A
   `schema.prisma` with 33 models contributes zero nodes. So `affected` on
-  anything data-model-shaped returns *"No affected nodes found"* — which is a
+  anything data-model-shaped returns *"No affected nodes found"*, which is a
   confident false negative, not an error. Answer those with `rg`.
 
 **The map does not know when it is stale.** There is no timestamp, no commit sha
 and no file hashes in it, and nothing warns you. Move a function and it still
 reports the old line; DELETE a function and it still reports the function. If
-the code has changed since the map was built — and in a long or unattended run
-it has — rebuild first:
+the code has changed since the map was built, and in a long or unattended run
+it has: rebuild first:
 
 ```bash
 graphify update .        # ~5s for 550 files, no LLM, no network
@@ -591,13 +591,13 @@ COMMS_ACTOR=claude-dev comms-graph claim "src/auth.ts#validateToken" --intent "t
 If the pre-edit hook is installed, this is enforced rather than advisory: an
 Edit or Write to a path somebody else holds is stopped before it happens, and
 the refusal is written to the log. `comms-graph status` reports the running total as
-COLLISIONS PREVENTED — the only number that shows the tool is doing its job.
+COLLISIONS PREVENTED: the only number that shows the tool is doing its job.
 
 The hook works out which actor you are from your agent session, recorded when
 you ran `comms-graph hello`. You do not need `COMMS_ACTOR` exported into the
 environment for it, and it will not mistake your own claim for somebody else's.
 
-Claim several scopes for one task in a single call — each gets its own claim
+Claim several scopes for one task in a single call: each gets its own claim
 event under the shared `--intent`, and the batch is all-or-nothing (if any
 scope conflicts, nothing is claimed):
 
@@ -624,7 +624,7 @@ active:
 COMMS_ACTOR=claude-dev comms-graph release 01JX2Q3Y7W 01JX2Q4A8K --result "committed together"
 ```
 
-**On a task switch — or when you stop for the day — sweep all your claims** so
+**On a task switch, or when you stop for the day: sweep all your claims** so
 nothing is left locked behind an idle or dead session:
 
 ```bash
@@ -697,7 +697,7 @@ Category cheat sheet:
 - `decision` means an architectural choice, source of truth, or ownership boundary.
 - `gotcha` means a persistent trap future agents should remember.
 
-Capture durable knowledge the moment you learn it — findings persist and are what
+Capture durable knowledge the moment you learn it: findings persist and are what
 the next session actually reads:
 
 - Log a `gotcha` the instant something surprises you or wastes your time (a
@@ -708,7 +708,7 @@ the next session actually reads:
 
 Use `comms-graph note` ONLY for transient, addressed FYIs. If you catch yourself
 writing a note that explains how the system works or who owns what, it is a
-`decision` or a `gotcha` — log it as a finding so it does not age out of view:
+`decision` or a `gotcha`: log it as a finding so it does not age out of view:
 
 ```bash
 COMMS_ACTOR=claude-dev comms-graph note "@codex-dev heads-up: Prisma migration lands next session"
@@ -718,7 +718,7 @@ COMMS_ACTOR=claude-dev comms-graph note "@codex-dev heads-up: Prisma migration l
 
 `comms-graph mcp` serves the same verbs as MCP tools over stdio: `comms_check`,
 `comms_claim`, `comms_release`, `comms_status`, `comms_note`, `comms_find`. If
-your host has it configured, prefer the tools — they are in front of you every
+your host has it configured, prefer the tools: they are in front of you every
 turn, whereas this skill only loads when somebody types its name.
 
 The tools write the same events to the same log as the CLI, so a session using
@@ -756,7 +756,7 @@ COMMS_ACTOR=claude-dev comms-graph lesson verify-data-before-ui --edit
 If `comms-graph claim` exits 1, it is blocked by another actor's active claim. The
 `BLOCKED` output tells you whether that claim is **STALE** and what to do.
 
-**A claim goes stale after 1 hour of being idle** — its holder is presumed gone
+**A claim goes stale after 1 hour of being idle**: its holder is presumed gone
 (crashed, out of quota, or moved on). You may steal a stale claim **directly**,
 with no user confirmation and no `--reason` (the staleness is the justification):
 
@@ -765,7 +765,7 @@ COMMS_ACTOR=claude-dev comms-graph claim "src/foo.ts" --intent "<your intent>" -
 ```
 
 If the blocking claim is **not yet stale** (held < 1h), the holder may still be
-working — do **not** steal it. Surface the conflict to the user; only steal with
+working: do **not** steal it. Surface the conflict to the user; only steal with
 their confirmation, which still requires a `--reason`:
 
 ```bash
@@ -780,8 +780,8 @@ COMMS_ACTOR=claude-dev comms-graph note "@claude-3a1f can I take src/foo.ts when
 
 **A refused edit is the tool working. Do not find another way to make it.** Not a
 shell command instead of the editor, not a different actor name, not a subagent
-sent to do it for you. Two agents in a supervised run did exactly this — one
-scripted the write, one re-exported `COMMS_ACTOR` — and both produced the silent
+sent to do it for you. Two agents in a supervised run did exactly this: one
+scripted the write, one re-exported `COMMS_ACTOR`, and both produced the silent
 double-edit the claim existed to prevent. Say what you were blocked on, and stop.
 
 ## Failure Modes
@@ -798,7 +798,7 @@ disagree about what the numbers mean.
 - `comms-graph check --staged` blocked: **exit 1**. That one feeds a git pre-commit
   hook, where any non-zero aborts the commit.
 - System error (unreadable log, missing directory): **exit 2**. On the hook path
-  that shares a code with "blocked", deliberately — if comms cannot read the log
+  that shares a code with "blocked", deliberately: if comms cannot read the log
   it cannot prove the path is clear, so stopping is the safe direction.
 
 ## What This Skill Does Not Do

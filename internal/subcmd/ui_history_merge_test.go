@@ -130,8 +130,8 @@ const dupes = () => historyEvents.length - new Set(historyEvents.map(e => e.id))
   await settle(); await settle();
   out.no_extra_fetch = loadCalls === before;
 
-  // 8. A recovery that resolved but left us still short — it could only union,
-  //    because a frame merged while it was in flight — must NOT be recorded as
+  // 8. A recovery that resolved but left us still short: it could only union,
+  //    because a frame merged while it was in flight: must NOT be recorded as
   //    handled, or the count we never reconciled is suppressed forever.
   reset();
   historyEvents = [ev('x', '2026-08-19T12:00:00Z')];
@@ -199,7 +199,7 @@ func TestUIHistoryMergeLogic(t *testing.T) {
 		{"matching_total_load_calls", float64(0), "a matching total must never trigger a fetch"},
 	} {
 		if got[c.key] != c.want {
-			t.Errorf("%s = %v, want %v — %s", c.key, got[c.key], c.want, c.why)
+			t.Errorf("%s = %v, want %v: %s", c.key, got[c.key], c.want, c.why)
 		}
 	}
 }

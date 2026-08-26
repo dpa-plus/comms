@@ -460,7 +460,7 @@ def measure(
     say = (lambda m: print(m, file=sys.stderr)) if verbose else (lambda m: None)
 
     if graph is None:
-        raise CalibrationError("no map for this project — run `graphify update .` first")
+        raise CalibrationError("no map for this project: run `graphify update .` first")
 
     tracked = {_norm(p) for p in _git(root, "ls-files").splitlines() if p.strip()}
     if not tracked:
@@ -469,7 +469,7 @@ def measure(
     files, align = align_paths(graph, tracked)
     if not files:
         raise CalibrationError(
-            "the map and the repository share no file paths — the graph was probably "
+            "the map and the repository share no file paths: the graph was probably "
             "built from a different directory than the one being calibrated"
         )
 
@@ -498,7 +498,7 @@ def measure(
     if not usable:
         raise CalibrationError(
             f"none of the last {cstats['scanned']} commits touched two or more files that "
-            f"are both in the map — nothing to calibrate on"
+            f"are both in the map: nothing to calibrate on"
         )
     picked = usable if len(usable) <= sample else rng.sample(usable, sample)
 
@@ -752,7 +752,7 @@ def render(m: dict, ok: bool, reasons: list[str]) -> str:
     s, f, c, b = m["signal"], m["files"], m["commits"], m["buckets"]
     L: list[str] = []
     L.append("")
-    L.append(f"CONTACT-WARNING CALIBRATION — {m['repo']}")
+    L.append(f"CONTACT-WARNING CALIBRATION: {m['repo']}")
     L.append("=" * 72)
     if m.get("scrambled"):
         L.append("  ** NEGATIVE CONTROL RUN: file-to-map correspondence deliberately shuffled.")
@@ -818,13 +818,13 @@ def render(m: dict, ok: bool, reasons: list[str]) -> str:
     L.append(
         f"  In real use a flag would be right about {s['precision_in_the_wild']:.0%} of the time "
         f"(worst case in this sample: {s['precision_worst_case']:.0%}), because only "
-        f"{s['co_change_prior']:.2%} of ALL file pairs in this repo ever change together — "
+        f"{s['co_change_prior']:.2%} of ALL file pairs in this repo ever change together: "
         f"{s['co_change_prior_tested']:.1%} among the busy files tested here. That is the honest "
         f"precision: a prompt to look, never a verdict."
     )
     L.append("")
     L.append("  Everything above is the OPTIMISTIC case: the agent claimed exactly the symbol")
-    L.append("  that mattered. Claimed as a whole file instead — what people usually type —")
+    L.append("  that mattered. Claimed as a whole file instead, which is what people usually type.")
     fg = m["by_grain"]["file"]
     L.append(
         f"  the same repository gives {fg['flag_rate_co_changed']:.1%} vs "
@@ -846,7 +846,7 @@ def render(m: dict, ok: bool, reasons: list[str]) -> str:
         # would be as dishonest as saying "yes".
         unknown_only = len(reasons) == 1 and reasons[0].startswith("not enough evidence")
         L.append(
-            "  CANNOT SAY YET — do not enable on this evidence."
+            "  CANNOT SAY YET: do not enable on this evidence."
             if unknown_only
             else "  DO NOT ENABLE the contact warning on this project."
         )
@@ -907,7 +907,7 @@ def main(argv: list[str] | None = None) -> int:
     gpath = Path(a.graph) if a.graph else root / "graphify-out" / "graph.json"
     if not gpath.exists():
         print(
-            f"error: no map at {gpath}. Run `graphify update {root}` first — calibration "
+            f"error: no map at {gpath}. Run `graphify update {root}` first: calibration "
             f"needs the map it is calibrating.",
             file=sys.stderr,
         )

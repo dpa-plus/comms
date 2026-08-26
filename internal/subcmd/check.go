@@ -60,9 +60,9 @@ If a staged path is claimed by another actor, comms reports every conflict and
 prints exact commands to unstage those paths without discarding their changes.
 
 Exit codes:
-  0 — path clear, or held by same actor
-  1 — blocked (stderr contains structured conflict info)
-  2 — system error (broken log, etc.)
+  0: path clear, or held by same actor
+  1: blocked (stderr contains structured conflict info)
+  2: system error (broken log, etc.)
 
 Use --stdin-json to read Claude Code's PreToolUse JSON payload from stdin
 instead of taking a positional path argument.`,

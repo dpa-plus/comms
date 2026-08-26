@@ -88,7 +88,7 @@ func TestRefusedClaimIsRecordedInTheLog(t *testing.T) {
 	}
 	data, _ := found["data"].(map[string]interface{})
 	if data["holder"] != "peer-agent" {
-		t.Errorf("blocked event holder = %v, want peer-agent — without it you cannot tell who you collided with", data["holder"])
+		t.Errorf("blocked event holder = %v, want peer-agent: without it you cannot tell who you collided with", data["holder"])
 	}
 	if data["intent"] != "my work" {
 		t.Errorf("blocked event intent = %v, want the refused claim's intent", data["intent"])
@@ -280,7 +280,7 @@ func TestHookAllowsEditsWhereThereIsNoRepositoryToCoordinate(t *testing.T) {
 			if ee, ok := err.(*exec.ExitError); ok {
 				code = ee.ExitCode()
 			}
-			t.Errorf("%s: exit %d, want 0 — a hook that blocks here makes the tool unusable", tc.name, code)
+			t.Errorf("%s: exit %d, want 0: a hook that blocks here makes the tool unusable", tc.name, code)
 		}
 	}
 }

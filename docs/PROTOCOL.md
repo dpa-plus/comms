@@ -2,7 +2,7 @@
 
 ## Event log format
 
-The log is JSONL — one event per line, append-only.
+The log is JSONL: one event per line, append-only.
 
 ```jsonl
 {"ts":"2026-05-22T14:30:00Z","id":"01HZ...","actor":"claude-dev","type":"hello","data":{"base_name":"claude","label":"Claude Dev","hostname":"dev-macbook","tty":"/dev/ttys003"}}
@@ -17,7 +17,7 @@ Common fields:
 | ------- | ------ | ------------------------------------------------------------------ |
 | `ts`    | string | RFC3339 UTC, always normalized to UTC regardless of caller TZ.     |
 | `id`    | string | ULID (26 chars, time-prefixed, monotonic).                         |
-| `actor` | string | Validated COMMS_ACTOR. Per-session — never per-user.               |
+| `actor` | string | Validated COMMS_ACTOR. Per-session: never per-user.               |
 | `type`  | string | One of: `hello`, `claim`, `release`, `note`, `finding`, `task`, `task_edge`, `task_state`. Readers skip types they do not know; writers never emit one. |
 | `scope` | array  | Optional. Only set on `claim` (and informational on `release`).    |
 | `data`  | object | Type-specific bag; all keys optional unless noted below.           |
@@ -72,7 +72,7 @@ On an arbitrated steal, additional fields appear:
   }
 }
 ```
-The reducer interprets `steals` as "the referenced claim becomes inactive at THIS event's timestamp". Single atomic event — no separate release record.
+The reducer interprets `steals` as "the referenced claim becomes inactive at THIS event's timestamp". Single atomic event: no separate release record.
 
 ### `release`
 ```json
@@ -169,7 +169,7 @@ Body is ≤200 Unicode runes (scalar values).
 ### `task`
 
 Declares a node of the work graph, or restates one that exists. A restatement
-edits the description only — re-titling verified work does not reopen it.
+edits the description only: re-titling verified work does not reopen it.
 
 ```json
 {"data": {"task": "auth-api", "title": "Build session create / refresh / revoke",
@@ -178,7 +178,7 @@ edits the description only — re-titling verified work does not reopen it.
 
 | Field    | Notes |
 | -------- | ----- |
-| `task`   | Slug: 2-32 chars, `[a-z][a-z0-9-]*`. Chosen to be SAID — quoted between agents, typed into a claim. Deliberately not a ULID: on a real store 99.5% of ULIDs share their 6-char short prefix. |
+| `task`   | Slug: 2-32 chars, `[a-z][a-z0-9-]*`. Chosen to be SAID: quoted between agents, typed into a claim. Deliberately not a ULID: on a real store 99.5% of ULIDs share their 6-char short prefix. |
 | `title`  | Written as an instruction, not a label. Required on first declaration. |
 | `size`   | `S`, `M` or `L`. |
 | `slots`  | How many agents may work it at once. Default 1. |
@@ -203,7 +203,7 @@ recheck of successors that CONSUME from it, and leaves successors that merely
 follow it alone. `provides` is what travels to whoever picks up `to`.
 
 Edges are their own events so any agent can add one at the moment it discovers
-the dependency — the only moment it is actually known. An edge whose endpoints
+the dependency: the only moment it is actually known. An edge whose endpoints
 are not both declared is ignored by the reducer; `comms plan` and `comms task
 edge` reject it up front.
 
@@ -225,8 +225,8 @@ Moves a task along its two steps.
 `state` is `done`, `verified` or `rejected`. The reducer REFUSES a transition
 rather than trusting the writer, and keeps the refusal:
 
-- `done` — refused unless every declared check is reported `pass`.
-- `verified` / `rejected` — refused when the actor is the agent who did the work.
+- `done`: refused unless every declared check is reported `pass`.
+- `verified` / `rejected`: refused when the actor is the agent who did the work.
   A role suffix does not help: `claude-dev/review` is recognized as `claude-dev`.
 - `rejected` clears the doer and returns the task to open work. The graph is not
   redrawn; the findings travel with it.
@@ -287,14 +287,14 @@ Canonical form is POSIX, repo-relative, no `.` or `..` segments.
 
 Two scopes overlap if and only if BOTH:
 
-1. Their **path globs** could match a common path — segment-aware string intersection. `**` matches zero or more segments; `*` matches exactly one.
+1. Their **path globs** could match a common path: segment-aware string intersection. `**` matches zero or more segments; `*` matches exactly one.
 2. Their **anchors** overlap, per:
    - Both line ranges → numeric intersection (closed intervals).
    - Both symbols → case-sensitive equality.
    - Mixed (line + symbol) → pessimistic overlap.
    - Either whole-file (no `#` anchor) → always overlap.
 
-The path overlap is computed purely as a string operation — `comms` never globs against the real filesystem.
+The path overlap is computed purely as a string operation: `comms` never globs against the real filesystem.
 
 ## Repo identity
 
@@ -310,7 +310,7 @@ log.
 
 ## Concurrency
 
-Every mutating command acquires an exclusive `flock(2)` on `<logdir>/.lock` before reading the log + appending. The lock releases when the process exits — including `kill -9`. We never spawn child processes while holding the lock (since the child would inherit the FD and deadlock).
+Every mutating command acquires an exclusive `flock(2)` on `<logdir>/.lock` before reading the log + appending. The lock releases when the process exits: including `kill -9`. We never spawn child processes while holding the lock (since the child would inherit the FD and deadlock).
 
 ## UI API
 
@@ -356,7 +356,7 @@ loses repository-qualified identity.
 
 Session views (`current_session`, `active_comms_sessions[]`, `comms_sessions[]`,
 and their per-project equivalents under `project_sessions[]`) carry their
-summary counts — `event_count`, `claim_count`, `finding_count`, `note_count` —
+summary counts (`event_count`, `claim_count`, `finding_count`, `note_count`)
 but no longer carry an `events` array. Since History became one continuous list,
 a per-session copy was a duplicate of rows already present at the top level and
 roughly a fifth of the payload. Selecting a project or typing in the event filter
@@ -365,8 +365,8 @@ or truncated.
 
 ### Incremental history over SSE
 
-`/api/status` — and the first frame a newly connected `/api/events` client
-receives — always carry the complete history. Every later SSE frame carries only
+`/api/status`, and the first frame a newly connected `/api/events` client
+receives: always carry the complete history. Every later SSE frame carries only
 the rows appended since the previous frame and sets `events_delta: true`; the
 client merges them by event `id` into the log it already holds, so its filter
 still runs over every row. This keeps a push proportional to what changed rather
@@ -379,13 +379,13 @@ than to the size of the whole append-only log.
 
 The delta boundary is inclusive: rows sharing the watermark timestamp are
 repeated rather than risked, since the client merges by `id`. Frame delivery
-coalesces — a client that has not drained the previous frame has it replaced —
+coalesces, so a client that has not drained the previous frame has it replaced,
 so `events_total` is the recovery mechanism: a client holding fewer rows than
 `events_total` refetches `/api/status` once and is whole again.
 
 `/api/status` also includes `task_board`: the work graph for the selected
 project, already laid out. Nodes carry `x`/`y`/`w`/`h` and edges carry a `d` path
-string, so the page draws rather than computes. It is populated per project —
+string, so the page draws rather than computes. It is populated per project:
 the all-projects view has none, because a dependency between two repositories is
 not something comms models. `too_large` is set instead of a layout once a graph
 passes the point where a picture stops being comprehension.

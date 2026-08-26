@@ -44,7 +44,7 @@ _PHASE_STYLE = {
     _task.PHASE_REVIEW:  ("#8ab4f8", "#1b2b45", "waiting to be verified"),
     _task.PHASE_BLOCKED: ("#9aa0b4", "#22222f", "waiting on something unverified"),
     _task.PHASE_CLOSED:  ("#4a5568", "#191922", "verified and closed"),
-    _task.PHASE_CYCLE:   ("#f28b82", "#3a1d1b", "in a dependency loop — unreachable"),
+    _task.PHASE_CYCLE:   ("#f28b82", "#3a1d1b", "in a dependency loop: unreachable"),
 }
 
 
@@ -103,7 +103,7 @@ def _node_label(t: Any) -> str:
 
 
 def _tooltip(t: Any, edges: list) -> str:
-    lines = [f"{t.id} — {t.phase}"]
+    lines = [f"{t.id}: {t.phase}"]
     if t.title:
         lines.append(t.title)
     if t.doers:
@@ -243,14 +243,14 @@ _PAGE = """<!doctype html>
   html, body {{ margin: 0; background: #0f0f1a; color: #e8eaf2;
     font: 13px/1.5 ui-sans-serif, -apple-system, Segoe UI, Roboto, sans-serif; }}
   /* Viewport units, not percentages. A percentage height only resolves against a
-     parent with a definite height, and vis sizes its canvas to fill this box —
+     parent with a definite height, and vis sizes its canvas to fill this box :
      so a chain of 100% heights let the canvas drive the container that was
      supposed to be driving IT. The canvas grew on every redraw (2036 -> 2072 ->
      2120 px) and painted nothing at all. 100dvh is definite on its own. */
   #wrap {{ display: grid; grid-template-columns: minmax(0, 1fr) 290px;
     height: 100dvh; max-height: 100dvh; }}
   /* The left column STACKS: the drawn graph on top, the tasks that join to
-     nothing as cards underneath. See the comment above the split in render() —
+     nothing as cards underneath. See the comment above the split in render() :
      feeding unconnected tasks to a hierarchical layout is what produced the
      single illegible column this replaces. */
   #gcol {{ display: flex; flex-direction: column; min-width: 0; min-height: 0; }}
@@ -284,7 +284,7 @@ _PAGE = """<!doctype html>
   .blocked-on {{ color: #f0c274; font-family: ui-monospace, Menlo, monospace; }}
   .empty {{ color: #8890b0; padding: 24px 0; }}
   /* Over the canvas, not inside the panel beside it. The board hides that panel
-     to give the picture the whole pane, which is right — but it was taking the
+     to give the picture the whole pane, which is right: but it was taking the
      one line that explains what you are looking at with it, so a column of
      unconnected boxes arrived with no way to know why. */
   .warn {{ background: #3a1d1b; border: 1px solid #f28b82; color: #f6b0aa;
@@ -292,7 +292,7 @@ _PAGE = """<!doctype html>
   .warn.info {{ background: #1b2338; border-color: #3d4c74; color: #b7c4e6; }}
   /* A SIBLING of #graph, not a child. vis-network replaces the contents of its
      container on construction, so anything inside #graph is destroyed the
-     moment the picture is drawn — the notice was in the HTML, absent from the
+     moment the picture is drawn: the notice was in the HTML, absent from the
      DOM, and invisible for exactly that reason. */
   #wrap > .warn {{ position: absolute; z-index: 5; left: 16px; top: 12px;
     margin: 0; max-width: 720px; font-size: 12.5px; line-height: 1.45;
@@ -313,11 +313,11 @@ _PAGE = """<!doctype html>
     {legend}
     <div class="sec">Edges</div>
     <div class="row"><span style="flex:none;width:26px;border-top:2px solid #8a93ad"></span>
-      <span class="muted">consumes — reworking the source puts the target back in question</span></div>
+      <span class="muted">consumes: reworking the source puts the target back in question</span></div>
     <div class="row"><span style="flex:none;width:26px;border-top:1px dashed #4d5468"></span>
-      <span class="muted">ordering only — reworking the source does not touch the target</span></div>
+      <span class="muted">ordering only: reworking the source does not touch the target</span></div>
     <div class="note">An arrow means somebody DECLARED that the target comes after the
-      source. Unlike the code map, this order was written down, not inferred — which is
+      source. Unlike the code map, this order was written down, not inferred: which is
       why this picture has arrows and that one does not.</div>
     <div class="note">A task unblocks what follows it when it is <strong>verified</strong>
       by somebody other than whoever did it, not when it is marked done.</div>
@@ -326,7 +326,7 @@ _PAGE = """<!doctype html>
 </div>
 <script>
 // Only the tasks an edge actually touches. Everything else is a card in
-// #loose — a hierarchical layout has nothing to say about a node with no
+// #loose: a hierarchical layout has nothing to say about a node with no
 // edges, and asking it anyway is what drew them as one unreadable column.
 const NODES = {nodes_json};
 const EDGES = {edges_json};
@@ -339,8 +339,8 @@ if (NODES.length === 0) {{
     {{
       layout: {{
         // improvedLayout is a Kamada-Kawai pre-positioning pass that runs before
-        // the real layout. On this graph it gave up — "could not be positioned by
-        // this version of the improved layout algorithm" — and left every node
+        // the real layout. On this graph it gave up: "could not be positioned by
+        // this version of the improved layout algorithm", and left every node
         // without coordinates, so the canvas rendered completely empty with no
         // error. It is pointless here regardless: hierarchical layout assigns
         // every position itself, so the pre-pass has nothing to contribute.
@@ -363,7 +363,7 @@ if (NODES.length === 0) {{
   //
   // vis sizes its canvas at construction. Inside a CSS grid the cell's height is
   // not final at the moment the script runs, so the canvas was created against a
-  // zero-height box and then never redrawn — the page looked completely empty
+  // zero-height box and then never redrawn: the page looked completely empty
   // with no error, and the canvas element itself reported the right dimensions
   // afterwards, which made it look like a data problem rather than a timing one.
   // vis-network's fit() zooms OUT to fit a large graph but will not zoom IN
@@ -386,7 +386,7 @@ if (NODES.length === 0) {{
       if (p.y < y0) y0 = p.y; if (p.y > y1) y1 = p.y;
     }}
     // getPositions returns centres, not boxes, so pad by roughly one node plus
-    // breathing room — without it the outermost boxes are clipped by the edge.
+    // breathing room: without it the outermost boxes are clipped by the edge.
     const w = (x1 - x0) + 300, h = (y1 - y0) + 170;
     const cw = container.clientWidth, ch = container.clientHeight;
     if (!cw || !ch) return;
@@ -397,8 +397,8 @@ if (NODES.length === 0) {{
     }}
   }};
   // Synchronously first. requestAnimationFrame alone was not enough: a browser
-  // throttles rAF when the page is not actively painting — a background tab, an
-  // embedded preview pane — so the callback never ran and the canvas stayed
+  // throttles rAF when the page is not actively painting: a background tab, an
+  // embedded preview pane: so the callback never ran and the canvas stayed
   // blank with no error anywhere. A straight call always happens; the timeout
   // afterwards catches the case where the grid had not resolved its height yet.
   settle();
@@ -420,7 +420,7 @@ if (NODES.length === 0) {{
   // A window 'resize' never fires for the case that actually breaks this: the
   // flex box resolving its height AFTER the timeouts above have run. settle()
   // then read clientHeight 0, bailed out, and left the graph at fit()'s scale
-  // with no error — reproduced in headless Chrome, where the whole three-call
+  // with no error: reproduced in headless Chrome, where the whole three-call
   // sequence lands before layout. ResizeObserver watches the box itself, so the
   // picture is re-fitted the moment it actually has a size to fit into.
   if (window.ResizeObserver) {{
@@ -466,7 +466,7 @@ def render(state: Any, output_path: str | Path, generated: str = "") -> TaskView
                 f'<div class="ls">{html.escape(_state_words(t))}</div>'
                 f'<div class="lid">{html.escape(t.id)}</div></div>'
             )
-        head = (f"On their own — {len(loose)} task(s) nothing waits on"
+        head = (f"On their own: {len(loose)} task(s) nothing waits on"
                 if drawn else f"{len(loose)} task(s), none connected to another")
         loose_block = (f'<div id="loose"><div class="lhead">{head}</div>'
                        f'<div class="lgrid">{"".join(cards)}</div></div>')
@@ -486,7 +486,7 @@ def render(state: Any, output_path: str | Path, generated: str = "") -> TaskView
             f'<div class="row"><span class="dot" style="background:{fill};'
             f'box-shadow:0 0 0 2px {border}"></span>'
             f'<span><span class="slug">{phase}</span> '
-            f'<span class="muted">— {html.escape(meaning)}</span></span></div>'
+            f'<span class="muted">: {html.escape(meaning)}</span></span></div>'
         )
 
     blocked = sorted((t for t in tasks.values() if t.phase == _task.PHASE_BLOCKED),
@@ -507,7 +507,7 @@ def render(state: Any, output_path: str | Path, generated: str = "") -> TaskView
     if in_review:
         rows = "".join(
             f'<div class="row"><span class="slug">{html.escape(t.id)}</span>'
-            f'<span class="muted">done by @{html.escape(t.did)} — needs somebody else</span></div>'
+            f'<span class="muted">done by @{html.escape(t.did)}: needs somebody else</span></div>'
             for t in in_review
         )
         review_block = (f'<div class="sec">Waiting on review</div>{rows}'

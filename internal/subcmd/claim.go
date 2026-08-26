@@ -33,7 +33,7 @@ func NewClaimCmd() *cobra.Command {
 		Short: "Open exclusive claims on one or more scopes",
 		Long: `Open an exclusive claim on each scope. A scope is path[#anchor] (POSIX path,
 optional line range L<n>-<m> or symbol name). Pass several scopes to claim a
-whole task's worth of files in one call — each gets its own claim event under
+whole task's worth of files in one call: each gets its own claim event under
 the shared --intent, and the batch is all-or-nothing: if ANY scope conflicts
 with another actor's active claim, nothing is claimed.
 
@@ -52,7 +52,7 @@ next-command to run.`,
 	}
 	cmd.Flags().StringVar(&intent, "intent", "", "one-line description of the change you're making (required)")
 	cmd.Flags().StringVar(&task, "task", "", "the task slug this edit belongs to; what puts you on that task and takes you off it when you release")
-	cmd.Flags().StringVar(&stealID, "steal", "", "claim ID to displace; must overlap the claimed scope. --reason is required only when it is still active — a stale claim (idle >=1h) is stolen without one")
+	cmd.Flags().StringVar(&stealID, "steal", "", "claim ID to displace; must overlap the claimed scope. --reason is required only when it is still active: a stale claim (idle >=1h) is stolen without one")
 	cmd.Flags().StringVar(&stealReason, "reason", "", "justification for stealing a still-active claim (auto-filled for a stale one); printed in the audit trail")
 	return cmd
 }
@@ -93,7 +93,7 @@ func runClaim(scopeRaw, intent, stealID, stealReason, task string) error {
 		// (the displaced claim isn't in ConflictsFor, so no conflict fires) and
 		// Fold would delete an unrelated holder's claim on a file you never touched.
 		if !overlap.Scopes(target.Scope, scope) {
-			Fatalf(2, "claim: --steal %s targets %s, which does not overlap the scope you are claiming (%s) — steal the claim blocking THIS scope",
+			Fatalf(2, "claim: --steal %s targets %s, which does not overlap the scope you are claiming (%s). Steal the claim blocking THIS scope",
 				short(target.ID), target.Scope.String(), scope.String())
 		}
 		// Idle means "the agent holding this has gone quiet", NOT "this claim is
@@ -112,7 +112,7 @@ func runClaim(scopeRaw, intent, stealID, stealReason, task string) error {
 				stealReason = fmt.Sprintf("prior claim stale: @%s idle %s (stale after %s)", target.Actor, idle.Round(time.Minute), shortAge(staleClaimAfter))
 				autoStale = true
 			} else {
-				Fatalf(2, "claim: @%s's claim is still active (held %s; stale after %s) — stealing it requires --reason. A stale claim (idle >= %s) can be stolen without one.",
+				Fatalf(2, "claim: @%s's claim is still active (held %s; stale after %s): stealing it requires --reason. A stale claim (idle >= %s) can be stolen without one.",
 					target.Actor, shortAge(idle), shortAge(staleClaimAfter), shortAge(staleClaimAfter))
 			}
 		}

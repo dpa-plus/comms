@@ -14,7 +14,7 @@ func TestValidateLabel(t *testing.T) {
 	}{
 		{"empty ok", "", false},
 		{"plain ok", "Claude Dev", false},
-		{"unicode ok", "Cläude — Dev ✨", false},
+		{"unicode ok", "Cläude. Dev ✨", false},
 		{"max length ok", strings.Repeat("x", maxLabelRunes), false},
 		{"newline rejected", "Claude\nFAKE: line", true},
 		{"carriage return rejected", "Claude\rDev", true},

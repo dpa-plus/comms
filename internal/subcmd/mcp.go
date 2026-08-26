@@ -324,7 +324,7 @@ func mcpClaim(actorName, path, intent, task string) (interface{}, *rpcError) {
 
 func mcpRelease(actorName, result string) (interface{}, *rpcError) {
 	if result == "" {
-		return text("result is required — say what came of the work", true), nil
+		return text("result is required: say what came of the work", true), nil
 	}
 	rt, rerr := openMCP(actorName, true)
 	if rerr != nil {
@@ -367,7 +367,7 @@ func mcpStatus(actorName string) (interface{}, *rpcError) {
 	}
 	sort.Slice(claims, func(i, j int) bool { return claims[i].TS.Before(claims[j].TS) })
 	for _, c := range claims {
-		fmt.Fprintf(&b, "  %s — @%s (%s)\n", c.Scope.String(), c.Actor, c.Intent)
+		fmt.Fprintf(&b, "  %s: @%s (%s)\n", c.Scope.String(), c.Actor, c.Intent)
 	}
 	if n := len(rt.State.Blocked); n > 0 {
 		fmt.Fprintf(&b, "collisions prevented: %d\n", n)

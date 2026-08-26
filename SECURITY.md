@@ -10,7 +10,7 @@ do not bind it to a routable address.
 
 ## Reporting a vulnerability
 
-Please report security issues **privately** — do not open a public issue for a
+Please report security issues **privately**: do not open a public issue for a
 suspected vulnerability.
 
 - Use GitHub's private vulnerability reporting: the **Security** tab →

@@ -65,7 +65,7 @@ func TestReleaseAllClaimsForActorFreesEveryClaimButKeepsActor(t *testing.T) {
 		}
 	}
 	if rt.State.Claims[otherClaim] == nil {
-		t.Fatalf("other actor's claim was released — release-all must be scoped to one actor")
+		t.Fatalf("other actor's claim was released: release-all must be scoped to one actor")
 	}
 	// Unlike retire, the actor is NOT removed from the roster.
 	if rt.State.Sessions["codex-dead"] == nil {
