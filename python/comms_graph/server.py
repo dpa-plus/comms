@@ -1225,6 +1225,23 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 .hintent { color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .htask { color: var(--ink-4); flex: none; }
 .hid { color: var(--ink-4); font-size: 10.5px; flex: none; opacity: .75; }
+/* Grouped by agent: one row per agent, its files quiet underneath. */
+.arow { display: flex; align-items: baseline; gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-2) 3px; font-size: 12.5px; }
+.arow.quiet { background: var(--amber-wash); }
+.acount { color: var(--ink-3); flex: none; }
+.afiles { padding: 0 0 var(--sp-1) 0; }
+.afrow { display: flex; align-items: baseline; gap: var(--sp-1);
+  padding: 1px var(--sp-2) 1px calc(var(--sp-2) * 2); font-size: 11.5px; }
+.afpath { color: var(--ink-4); overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; flex: 1 1 auto; }
+.afrel { flex: none; font-size: 10px; padding: 0 5px; color: var(--ink-4);
+  border-color: transparent; opacity: 0; transition: opacity .12s; }
+.afrow:hover .afrel { opacity: 1; }
+.afrel:hover { color: var(--red); border-color: var(--red-line); }
+.arow .rel { flex: none; font-size: 10.5px; padding: 0 7px; color: var(--ink-3);
+  border-color: var(--line-2); }
+.arow .rel:hover { color: var(--red); border-color: var(--red-line); background: var(--red-wash); }
 /* Visible without hovering. Hover-to-reveal was the first version and it fails
    the actual complaint — "I don't see where I can release their claims" — since
    an affordance you have to find by accident is one you do not know exists.
@@ -1486,17 +1503,48 @@ function renderNow() {
   if (!cs.length) {
     h += '<div class="nowband-empty">Nobody is holding any ground right now.</div>';
   } else {
-    cs.forEach(function (c) {
-      h += '<div class="hrow' + (c.quiet ? " quiet" : "") + '">';
-      h += '<span class="hactor mono">' + esc(c.actor) + "</span>";
-      h += '<span class="hpath mono">' + esc(shortPath(c.scope)) + "</span>";
-      h += '<span class="hintent">' + esc(c.intent || "") + "</span>";
-      if (c.task) { h += '<span class="htask mono">' + esc(c.task) + "</span>"; }
+    // BY AGENT, not by file. One agent holding eight files produced eight
+    // near-identical rows — same name, same truncated intent, same task, eight
+    // opaque claim ids — and the question somebody actually arrives with is not
+    // "which files" but "is that agent still alive, and if not, free its
+    // ground". A list of files cannot be acted on. A list of agents can.
+    var byActor = {};
+    cs.forEach(function (c) { (byActor[c.actor] = byActor[c.actor] || []).push(c); });
+    Object.keys(byActor).sort(function (a, b) {
+      // Whoever has gone quiet first: that is the one that needs a person.
+      var qa = byActor[a].some(function (c) { return c.quiet; }) ? 0 : 1;
+      var qb = byActor[b].some(function (c) { return c.quiet; }) ? 0 : 1;
+      return qa - qb || byActor[b].length - byActor[a].length;
+    }).forEach(function (actor) {
+      var held = byActor[actor];
+      var quiet = held.some(function (c) { return c.quiet; });
+      var idle = Math.max.apply(null, held.map(function (c) { return c.idle_seconds || 0; }));
+      var intents = [], tasks = [];
+      held.forEach(function (c) {
+        if (c.intent && intents.indexOf(c.intent) === -1) { intents.push(c.intent); }
+        if (c.task && tasks.indexOf(c.task) === -1) { tasks.push(c.task); }
+      });
+      h += '<div class="arow' + (quiet ? " quiet" : "") + '">';
+      h += '<span class="hactor mono">@' + esc(actor) + "</span>";
+      h += '<span class="acount mono">' + held.length + (held.length === 1 ? " file" : " files") + "</span>";
+      if (tasks.length) { h += '<span class="htask mono">' + esc(tasks.join(", ")) + "</span>"; }
+      h += '<span class="hintent">' + esc(intents.join(" · ")) + "</span>";
       h += '<span class="grow"></span>';
-      if (c.quiet) { h += '<span class="tag amber">quiet ' + ago(c.idle_seconds) + "</span>"; }
-      h += '<span class="hid mono" title="claim id — the handle for release --force">' + esc(c.id) + "</span>";
-      h += '<button class="ghost rel" data-id="' + esc(c.id) + '" data-scope="' +
-           esc(c.scope) + '" data-actor="' + esc(c.actor) + '">Release</button>';
+      h += '<span class="rage mono' + (quiet ? " amber" : "") + '">' +
+           (quiet ? "quiet " + ago(idle) : "active") + "</span>";
+      h += '<button class="ghost rel" data-actor="' + esc(actor) + '" data-all="1">Free all ' +
+           held.length + "</button>";
+      h += "</div>";
+      // The files, quiet underneath: available without being in the way. The
+      // claim id moves to the row's tooltip — it is a handle for the CLI, not
+      // something a person reads.
+      h += '<div class="afiles">';
+      held.forEach(function (c) {
+        h += '<div class="afrow" title="claim ' + esc(c.id) + '">' +
+             '<span class="mono afpath">' + esc(shortPath(c.scope)) + "</span>" +
+             '<button class="ghost rel afrel" data-id="' + esc(c.id) + '" data-scope="' +
+             esc(c.scope) + '" data-actor="' + esc(actor) + '">free</button></div>';
+      });
       h += "</div>";
     });
   }
@@ -1518,32 +1566,61 @@ function releaseClaim(btn) {
   var id = btn.getAttribute("data-id");
   var who = btn.getAttribute("data-actor");
   var scope = btn.getAttribute("data-scope");
+  // "Free all" is the case this panel exists for: an agent died and its ground
+  // has to come back. Freeing eight files one at a time, each with its own
+  // prompt and its own typed reason, is not a workflow anybody completes.
+  var all = btn.getAttribute("data-all") === "1";
+  var ids = all
+    ? (D.claims || []).filter(function (c) { return c.actor === who; }).map(function (c) { return c.id; })
+    : [id];
+  var what = all ? ids.length + (ids.length === 1 ? " file" : " files") + " held by @" + who
+                 : scope + " from @" + who;
   var reason = window.prompt(
-    "Free " + scope + " from @" + who + "?" +
+    "Free " + what + "?" +
     "\\n\\n" +
-    "This is recorded in the log under your name, permanently. Say why:", "");
+    "This is recorded in the log under your name, permanently. Say why:",
+    all ? "session ended" : "");
   if (reason === null) { return; }
   reason = reason.trim();
   if (!reason) { alert("A reason is required — it is what the log will show."); return; }
-  btn.disabled = true; btn.textContent = "…";
-  fetch("/api/release", {
-    method: "POST", headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({id: id, reason: reason})
-  }).then(function (r) { return r.json().then(function (b) { return {ok: r.ok, body: b}; }); })
-    .then(function (res) {
+    var label = btn.textContent;
+    btn.disabled = true; btn.textContent = "…";
+    // One request per claim, sequentially. Each is its own event in the log, and
+    // a partial failure has to leave the rest freed rather than roll anything
+    // back — the log is append-only and there is nothing to undo.
+    var failed = [];
+    ids.reduce(function (prev, cid) {
+      return prev.then(function () {
+        return fetch("/api/release", {
+          method: "POST", headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({id: cid, reason: reason})
+        }).then(function (r) {
+          if (!r.ok) { return r.json().then(function (b) { failed.push(b.error || cid); }); }
+        });
+      });
+    }, Promise.resolve())
+      .then(function () {
+        // Built in steps rather than as a nested literal: two adjacent closing
+        // braces read as a Python format-string leftover, and a test guards the
+        // page against exactly that. Better to write plainer JS than to weaken
+        // a check that catches a real class of bug.
+        var err = { error: failed.join("; ") };
+        return { ok: !failed.length, body: err };
+      })
+      .then(function (res) {
       if (!res.ok) {
         alert("Not released: " + (res.body.error || "unknown error"));
-        btn.disabled = false; btn.textContent = "Release";
+        btn.disabled = false; btn.textContent = label;
         return;
       }
       // The watcher notices the append and pushes a new snapshot, so the row
       // goes on its own. Nothing is patched by hand here — the board stays a
       // view of the log rather than a thing that edits its own copy.
-      btn.textContent = "released";
+      btn.textContent = "freed";
     })
     .catch(function (e) {
       alert("Not released: " + e);
-      btn.disabled = false; btn.textContent = "Release";
+      btn.disabled = false; btn.textContent = label;
     });
 }
 
