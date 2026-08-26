@@ -6,13 +6,13 @@ process and not to the thread: two threads in one process that each open the
 lock file get two descriptions and therefore genuinely exclude each other,
 while two threads sharing one fd never contend at all. Either way a threaded
 "proof" describes a different kernel object than the one two agents on a
-laptop actually share. Same for O_APPEND atomicity — it is a property of
+laptop actually share. Same for O_APPEND atomicity: it is a property of
 concurrent write(2) calls against one inode from separate descriptions.
 
 Every test starts its workers behind a real barrier (each child announces
 readiness, then spins on a go-file) so that they are all inside the
 interesting region at the same instant instead of being serialised by
-interpreter startup, which on a cold cache is ~50ms — an eternity next to the
+interpreter startup, which on a cold cache is ~50ms: an eternity next to the
 race windows under test.
 """
 
@@ -181,7 +181,7 @@ def test_concurrent_appends_lose_no_event_and_tear_no_line(tmp_path):
     """8 processes append 150 events each, at once, and all 1200 survive intact.
 
     WHAT BREAKS IF THIS FAILS: an agent runs `comms note` or `comms claim` at
-    the same moment as another agent and one of two things happens — the event
+    the same moment as another agent and one of two things happens: the event
     is silently missing (the agent believes it announced a claim that nobody
     can see), or worse, two writes interleave inside one JSON object and
     `read()` raises CorruptLogError from that byte onward. The log is the only
@@ -191,19 +191,19 @@ def test_concurrent_appends_lose_no_event_and_tear_no_line(tmp_path):
 
     The property under test is O_APPEND itself: the offset must be chosen by
     the kernel inside the same write, not by the writer beforehand. Run
-    deliberately WITHOUT the lock, because that is the only way to test it — a
+    deliberately WITHOUT the lock, because that is the only way to test it: a
     locked version passes against an implementation with no atomicity at all.
 
     Verified discriminating rather than assumed: replacing append()'s O_APPEND
-    write with `lseek(SEEK_END)` + `pwrite` — the obvious-looking rewrite —
+    write with `lseek(SEEK_END)` + `pwrite`: the obvious-looking rewrite:
     turns this run into 289 surviving lines out of 1200, with 61 torn ones.
 
     Note what this does NOT prove, so that nobody strengthens the wrong claim:
     append()'s docstring says a buffered `open(path, "a")` would tear a line by
     flushing mid-object, and it would not. CPython's BufferedWriter flushes
     whole records and never splits one across two write(2) calls, so buffered
-    appends survive this test too. Raw os.write is still the right call — it is
-    what makes the ftruncate rollback and the fsync meaningful — but the reason
+    appends survive this test too. Raw os.write is still the right call: it is
+    what makes the ftruncate rollback and the fsync meaningful, but the reason
     is durability and all-or-nothing batching, not tearing.
     """
     procs = _spawn(tmp_path, _APPEND_UNLOCKED, 8)
@@ -265,7 +265,7 @@ def test_lock_contention_starves_nobody_and_drops_nothing(tmp_path):
     eight processes always waiting on each other is what a busy repo looks
     like. A failure here is one of three real outcomes: a worker exits with
     LockTimeoutError (an agent that could not do its work because it lost the
-    poll race too many times in a row — starvation, which the poll-based
+    poll race too many times in a row: starvation, which the poll-based
     acquire() cannot prove is impossible, only improbable), a released lock
     that stayed held (every later command hangs out its timeout), or an event
     that never reached the file. All 960 events must be present exactly once.
@@ -280,7 +280,7 @@ def test_lock_contention_starves_nobody_and_drops_nothing(tmp_path):
     assert len(ids) == len(set(ids))
     assert set(ids) == expected
 
-    # The lock must be free the moment the last holder exits — not after a
+    # The lock must be free the moment the last holder exits: not after a
     # timeout, and not never.
     handle = lock.try_acquire(tmp_path / ".lock")
     assert handle is not None, "the lock is still held after every holder exited"
@@ -321,7 +321,7 @@ def test_concurrent_large_batches_stay_whole_and_contiguous(tmp_path):
     distinct real failures show up here and nowhere else:
 
     * If the write comes back short, append_batch's retry loop issues a second
-      write(2) — which lands at whatever the end of file is by THEN, not where
+      write(2), which lands at whatever the end of file is by THEN, not where
       the first one stopped. Any batch big enough to be split that way can have
       a stranger's event wedged into the middle of a JSON object. A small batch
       never reaches the size where that is possible, which is why this one is
@@ -352,7 +352,7 @@ def test_concurrent_large_batches_stay_whole_and_contiguous(tmp_path):
     for worker, ids in enumerate(batches):
         spots = sorted(position[i] for i in ids)
         assert spots == list(range(spots[0], spots[0] + len(ids))), (
-            f"worker {worker}'s batch was interleaved with another writer's — "
+            f"worker {worker}'s batch was interleaved with another writer's: "
             f"append_batch is not the single atomic write(2) it documents"
         )
 
@@ -368,7 +368,7 @@ open(os.path.join(WORK, "held"), "w").write("1")
 # Hold until the parent says stop, NOT for a fixed number of seconds. A timed
 # hold makes the test a race between the parent's assertions and a sleep timer,
 # so a slow machine turns "the lock excluded me" into "the holder had already
-# let go" — a flake that reads like a real defect. The safety deadline only
+# let go": a flake that reads like a real defect. The safety deadline only
 # stops a stranded child from living forever.
 stop = os.path.join(WORK, "stop")
 deadline = time.monotonic() + 300
@@ -413,7 +413,7 @@ def _stop_holder(tmp_path: Path, proc) -> None:
 
 
 def test_a_held_lock_excludes_another_process(tmp_path):
-    """While one process holds the lock, another cannot take it — at all.
+    """While one process holds the lock, another cannot take it: at all.
 
     WHAT BREAKS IF THIS FAILS: everything the lock is for. The whole
     read-decide-append sequence is only safe if it is exclusive; if two agents
@@ -431,7 +431,7 @@ def test_a_held_lock_excludes_another_process(tmp_path):
     lockp = tmp_path / ".lock"
     try:
         assert lock.try_acquire(lockp) is None, (
-            "a second process took a lock that is already held — the flock is "
+            "a second process took a lock that is already held: the flock is "
             "not exclusive"
         )
         started = time.monotonic()
@@ -442,7 +442,7 @@ def test_a_held_lock_excludes_another_process(tmp_path):
         # instantly turns every ordinary overlap into a spurious error.
         assert 0.3 <= waited < 3.0, f"acquire() returned after {waited:.3f}s"
 
-        # Repeated probes must keep reporting held for as long as it is held —
+        # Repeated probes must keep reporting held for as long as it is held:
         # a lock that flickers free is worse than one that never frees.
         for _ in range(20):
             assert lock.try_acquire(lockp) is None
@@ -460,9 +460,9 @@ def test_lock_is_not_reported_held_when_nobody_holds_it(tmp_path):
     """A free lock is takeable by process after process, forever.
 
     WHAT BREAKS IF THIS FAILS: comms wedges permanently. The lock file is
-    never unlinked by design, so any state that survives a release — a
+    never unlinked by design, so any state that survives a release: a
     leftover flock on a cached descriptor, a mode the next process cannot
-    open, a stale sentinel written into the file — turns "nobody is working in
+    open, a stale sentinel written into the file: turns "nobody is working in
     this repo" into "every command times out". That failure is invisible in a
     single-process test, where the leftover belongs to the same process that
     is asking.
@@ -505,7 +505,7 @@ def test_polling_a_held_lock_thousands_of_times_leaks_no_descriptor(tmp_path):
     WHAT BREAKS IF THIS FAILS: the failure disguises itself. try_acquire opens
     the lock file before it flocks, so a miss that forgets to close leaks one
     descriptor per attempt. acquire() polls at 25ms, so a two-minute wait is
-    ~4800 attempts — past the descriptor limit — and the symptom is not "the
+    ~4800 attempts: past the descriptor limit, and the symptom is not "the
     lock is busy" but a bogus "cannot open lock file" error, or an unrelated
     open() failing somewhere else in the same process.
 
@@ -561,7 +561,7 @@ def test_sigkilled_holder_releases_the_lock(tmp_path):
     WHAT BREAKS IF THIS FAILS: one crashed or force-quit agent bricks the repo
     for every other agent, permanently, with no way out except deleting a file
     nobody documented. SIGKILL runs no `finally`, no atexit, no signal
-    handler — so nothing in Python can clean up. The only reason this works is
+    handler, so nothing in Python can clean up. The only reason this works is
     that flock ownership belongs to the open file description and the kernel
     drops it when the last descriptor closes at process teardown.
 
@@ -607,7 +607,7 @@ def test_holder_killed_mid_batch_leaves_a_readable_log(tmp_path):
     """Kill a writer while it hammers the log; what is on disk still parses.
 
     WHAT BREAKS IF THIS FAILS: the recovery story. Agents get Ctrl-C'd and
-    killed constantly, and the log is append-only truth — there is no repair
+    killed constantly, and the log is append-only truth: there is no repair
     pass. read() is documented to tolerate exactly one artefact of a killed
     writer, an unterminated final line, and nothing else. If a kill can leave a
     torn line anywhere but the very end, the log stops parsing at that point
@@ -698,7 +698,7 @@ def test_exactly_one_of_ten_racing_agents_wins_the_same_scope(tmp_path):
     """Ten processes claim one file at the same instant. One wins; nine are told why.
 
     WHAT BREAKS IF THIS FAILS: two agents edit the same file believing they
-    own it, and one of them loses their work at merge time — which is the
+    own it, and one of them loses their work at merge time, which is the
     single failure comms exists to prevent. Nothing short of real processes
     tests it: the check-then-append window is only unsafe across separate
     address spaces holding separate views of the log.
@@ -764,9 +764,9 @@ def test_racing_agents_lose_to_an_overlapping_claim_not_just_an_identical_one(tm
     WHAT BREAKS IF THIS FAILS: the more common half of the collision. Agents
     rarely type the same scope string; they type `src/api/handler.py` and
     `src/api/handler.py#handle_request`, which are different strings naming
-    overlapping code. If the exclusion is string equality — or if the overlap
+    overlapping code. If the exclusion is string equality, or if the overlap
     check runs against a stale in-memory state rather than the log as re-read
-    under the lock — both agents are told the coast is clear and both edit the
+    under the lock: both agents are told the coast is clear and both edit the
     same function.
 
     Racing them is what distinguishes this from a unit test of overlaps(): the

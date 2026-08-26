@@ -1,4 +1,4 @@
-"""NOT WIRED TO ANY COMMAND — a measurement harness, kept deliberately.
+"""NOT WIRED TO ANY COMMAND: a measurement harness, kept deliberately.
 
 Nothing imports this module and no CLI verb reaches it. Unlike ``commands.py``
 and ``tools.py`` it is not superseded: it is the harness that decided whether the
@@ -30,7 +30,7 @@ truth: two files that were really changed in the same commit really did belong
 together in one person's head. So sample real commits, treat the files they
 touched as if they had been claimed, and ask the real ``contact()`` whether it
 would have connected them. Then ask the same question of pairs that were NOT
-changed together. The number that matters is the ratio between those two rates —
+changed together. The number that matters is the ratio between those two rates:
 how much more often a flag fires on a genuinely related pair than on an unrelated
 one. One means the flag is a coin. That comparison is the whole point: a flag
 rate with no baseline cannot support the claim "better than nothing", because
@@ -76,7 +76,7 @@ from .resolve import resolve as _resolve
 _CAP = getattr(_contact_mod, "MAX_SCOPES", getattr(_contact_mod, "MAX_PLACES", 3))
 
 #: The one phrase both cap messages share. Used to detect a refusal empirically
-#: rather than by re-deriving the cap rule here — this module must measure what
+#: rather than by re-deriving the cap rule here: this module must measure what
 #: contact() does, not a copy of it that can drift out of step.
 _CAP_PHRASE = "usefully reason about"
 
@@ -93,8 +93,8 @@ DEFAULT_SAMPLE = 100
 #: habits, which is not the project.
 DEFAULT_WINDOW = 2000
 
-#: A commit touching more files than this is a sweep — a rename, a reformat, a
-#: license header — not one piece of work. Including them would manufacture
+#: A commit touching more files than this is a sweep: a rename, a reformat, a
+#: license header: not one piece of work. Including them would manufacture
 #: thousands of "co-changed" pairs that no human ever thought of together, and
 #: they would flatter or ruin the result depending on the repo's habits.
 DEFAULT_MAX_COMMIT_FILES = 12
@@ -106,7 +106,7 @@ DEFAULT_MAX_SYMBOLS = 40
 # ---- verdict thresholds ----
 
 #: The flag must fire this many times more often on a genuinely co-changed pair
-#: than on an unrelated one — measured at the LOWER end of the confidence
+#: than on an unrelated one: measured at the LOWER end of the confidence
 #: interval, so a lucky sample cannot buy a yes. 2.0 is deliberately well above
 #: 1.0 (chance): co-change is a noisy proxy for "related", and a margin that
 #: barely clears chance would not survive the noise in the proxy itself.
@@ -122,7 +122,7 @@ MIN_RECALL = 0.10
 MAX_TANGLED = 0.30
 
 #: A claim that reaches more than this share of the files under test warns about
-#: so much that its warning is close to unconditional. Chosen, not derived — it
+#: so much that its warning is close to unconditional. Chosen, not derived: it
 #: is the point at which one flag in four is noise even if every one is "true".
 TANGLE_SHARE = 0.20
 
@@ -230,7 +230,7 @@ def align_paths(graph, tracked: set[str]) -> tuple[dict[str, str], dict]:
 
     The graph records whatever path the scan walked. If the scan was rooted at a
     subdirectory, every graph path carries a prefix the git path does not, and a
-    naive string compare makes EVERY file miss — which would show up here as a
+    naive string compare makes EVERY file miss, which would show up here as a
     perfectly quiet board rather than as the plumbing error it is. So the overlap
     is measured and reported, and a suffix match is tried before giving up.
     """
@@ -243,7 +243,7 @@ def align_paths(graph, tracked: set[str]) -> tuple[dict[str, str], dict]:
         return direct, info
 
     # Suffix fallback: unique endswith match only. An ambiguous suffix is dropped
-    # rather than guessed — a wrong join is worse than a missing one here.
+    # rather than guessed: a wrong join is worse than a missing one here.
     by_suffix: dict[str, list[str]] = {}
     for g in gfiles:
         by_suffix.setdefault(g.split("/")[-1], []).append(g)
@@ -269,7 +269,7 @@ class ClaimSet:
     git_path: str
     graph_path: str
     whole: Resolution
-    #: Scope strings for single-symbol claims — the small, specific shape
+    #: Scope strings for single-symbol claims: the small, specific shape
     #: docs/COMMS.md says the warning needs to be honest.
     symbol_scopes: list[str] = field(default_factory=list)
     #: True when contact() itself refuses a whole-file claim on this file as too
@@ -349,7 +349,7 @@ def contact_map(
     tool with a flag whenever the agent would have been warned had it claimed
     exactly the right symbol, by taking the union over every symbol in the file.
     Real agents do not always pick the right symbol, so the true rate is lower.
-    ``grain="file"`` is what people actually type — one whole-file claim.
+    ``grain="file"`` is what people actually type: one whole-file claim.
 
     The same treatment is applied to co-changed and unrelated pairs alike, so the
     ratio between them stays fair whichever grain is used.
@@ -506,7 +506,7 @@ def measure(
     say(f"  universe: {len(universe_paths)} files from {len(picked)} sampled commits")
 
     # NEGATIVE CONTROL. Hand each file somebody else's slice of the map. The
-    # graph is still real, the commits are still real, the tangle is still real —
+    # graph is still real, the commits are still real, the tangle is still real:
     # only the correspondence between a file's history and its place in the map
     # is destroyed. A harness that still reports an advantage after this is
     # measuring its own plumbing, and every number it prints about a real project
@@ -561,10 +561,10 @@ def measure(
     # Precision as it would actually be experienced. Two priors, because the
     # difference between them is itself the point:
     #
-    #   * tested — among the busy files real commits touch. Sampling makes the
+    #   * tested: among the busy files real commits touch. Sampling makes the
     #     positives and negatives 50/50, which they are not, so neither of these
     #     is the sampled rate.
-    #   * repo — across every file pair in the project. This is the population a
+    #   * repo: across every file pair in the project. This is the population a
     #     claim is actually drawn from, and it is far more lopsided. Quoting
     #     precision against the tested prior would flatter the tool by roughly the
     #     ratio between the two.
@@ -688,7 +688,7 @@ def _score(
 
 
 # --------------------------------------------------------------------------
-# The verdict — five ways to say no
+# The verdict: five ways to say no
 # --------------------------------------------------------------------------
 
 

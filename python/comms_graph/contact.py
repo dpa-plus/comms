@@ -6,7 +6,7 @@ weaker than the feature it replaced.
 WHAT WAS TRIED AND REJECTED. The original idea was that the map could derive
 ORDER: if job A changes something job B leans on, A goes first. It was checked
 against three months of real changes on two projects and was right about as often
-as a coin flip — on one project the real work went the other way round most of the
+as a coin flip: on one project the real work went the other way round most of the
 time. Shipping that as a blocker would have had the board confidently telling
 people to wait for no reason, and they would have stopped believing it within a
 day. So there is no ordering here, and no blocking. See ``docs/COMMS.md``.
@@ -54,7 +54,7 @@ _RELATIONS = frozenset(
 #:
 #: This counts scopes a person named, NOT the graph nodes they resolve to. An
 #: earlier version counted resolved nodes, which meant an ordinary whole-file
-#: claim — the natural unit — resolved to one node per symbol, blew past the cap,
+#: claim: the natural unit: resolved to one node per symbol, blew past the cap,
 #: and got told to "narrow it (a file, a symbol, or a line range)". Telling
 #: somebody to narrow a file claim to a file made the feature bail out on nearly
 #: every real invocation.
@@ -67,8 +67,8 @@ class Touch:
 
     other_actor: str
     other_scope: str
-    #: "same" when both claims land on the very same node — the strong case.
-    #: "near" when they are one connection apart — the weak, advisory case.
+    #: "same" when both claims land on the very same node: the strong case.
+    #: "near" when they are one connection apart: the weak, advisory case.
     kind: str
     my_label: str
     their_label: str
@@ -83,7 +83,7 @@ class Touch:
 class ContactReport:
     touches: list[Touch] = field(default_factory=list)
     #: Set when no advice could be produced, with the reason. Never left empty
-    #: alongside an empty touch list — silence and "nothing found" must be
+    #: alongside an empty touch list: silence and "nothing found" must be
     #: distinguishable.
     note: str | None = None
     #: Other people's claims the map could not place. Reported, never dropped:
@@ -137,7 +137,7 @@ def contact(
 
     ``mine`` is a Resolution for the scope just claimed. ``others`` is an iterable
     of ``(actor, scope_string, Resolution)`` for every claim somebody else holds.
-    ``scope_count`` is how many scopes this one job named — see MAX_SCOPES.
+    ``scope_count`` is how many scopes this one job named: see MAX_SCOPES.
     """
     report = ContactReport()
 
@@ -165,8 +165,8 @@ def contact(
         if nid not in graph:
             continue
         # all_neighbors, not neighbors: on a directed graph `neighbors` yields
-        # successors only, so whoever holds the CALLEE — the one whose change
-        # breaks the caller — would be told "nobody else is on this", while the
+        # successors only, so whoever holds the CALLEE: the one whose change
+        # breaks the caller: would be told "nobody else is on this", while the
         # caller's holder saw the touch. Who got warned depended on which of them
         # ran the check, which is the opposite of what "undirected" promises.
         for nb in nx.all_neighbors(graph, nid):
@@ -181,8 +181,8 @@ def contact(
     for actor, scope_str, res in others:
         if not res or getattr(res, "miss_reason", None):
             # Somebody else's claim the map could not place is NOT nothing. The
-            # commonest case is a file created since the last extract — exactly
-            # what a parallel agent does — and silently skipping it meant the
+            # commonest case is a file created since the last extract: exactly
+            # what a parallel agent does, and silently skipping it meant the
             # all-clear printed over live work. The loud-miss rule has to apply
             # to other people's claims too, not only your own.
             unplaced.append(f"@{actor} holds {scope_str}, which is not in the map")
@@ -192,7 +192,7 @@ def contact(
                 # Only call it the same thing when both sides named it directly.
                 # Two line ranges that do not overlap can still land inside one
                 # symbol's INFERRED span, and reporting that as "claimed this
-                # exact thing" is false on its face — and contradicts the
+                # exact thing" is false on its face, and contradicts the
                 # blocking layer, which correctly does not block it.
                 exact = my_ids[p.node_id].via != "lines" and p.via != "lines"
                 report.touches.append(
@@ -226,8 +226,8 @@ def render(report: ContactReport) -> str:
         #
         # This used to print "nobody else is on this or next to it" and then,
         # underneath, the two lines admitting that two of the live claims were
-        # never actually checked. A reader who stops at the verdict — which is
-        # what a verdict is for — walks away believing the ground is clear when
+        # never actually checked. A reader who stops at the verdict, which is
+        # what a verdict is for: walks away believing the ground is clear when
         # nobody established that. Worse, unplaceable claims are usually on
         # brand-new files, which is exactly when two agents are most likely to
         # be standing on the same spot.

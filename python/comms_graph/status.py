@@ -1,4 +1,4 @@
-"""``comms status`` and ``comms log`` — the two READ surfaces.
+"""``comms status`` and ``comms log``: the two READ surfaces.
 
 Port of comms' ``internal/subcmd/status.go`` and ``internal/subcmd/log.go``.
 ``status`` answers "who is here, what is held, what has gone quiet, and how many
@@ -94,7 +94,7 @@ LOG_USAGE = """Usage: comms-graph log [options]
 ACTIVE_WINDOW = timedelta(hours=4)
 
 #: The age at which a held claim is stale: flagged STALE, its silent holder
-#: flagged likely dead, and — in the Go build — stealable without confirmation.
+#: flagged likely dead, and: in the Go build: stealable without confirmation.
 #: Exposed as ``--stale-after`` so the CLI and the dashboard can be pointed at
 #: the same threshold; a board that calls a claim stale while the steal path
 #: still calls it live is worse than no flag at all.
@@ -104,7 +104,7 @@ STALE_CLAIM_AFTER = timedelta(hours=1)
 # Go's time.ParseDuration grammar, which is what the Go build's --since accepts.
 # Deliberately NOT extended with a `d` unit: the two builds read the same log and
 # scripts get copied between them, so a window this build accepted and the Go one
-# rejected would work here and die there — with the failure landing on whoever
+# rejected would work here and die there: with the failure landing on whoever
 # inherited the script, not whoever wrote it.
 _DURATION_PART = re.compile(r"(\d+(?:\.\d*)?|\.\d+)(ns|us|µs|μs|ms|s|m|h)")
 _UNIT_SECONDS = {
@@ -198,7 +198,7 @@ def _events_or_none(log_file: Path) -> list | None:
     fold, and one error path shared by both surfaces beats two that can drift
     apart on what an unreadable store looks like.
 
-    An ABSENT log is not a failure — a repo nobody has claimed in yet honestly
+    An ABSENT log is not a failure: a repo nobody has claimed in yet honestly
     has no events. An UNREACHABLE one is: ``Path.is_file()`` answers False for a
     symlink loop and for a stray file where the store directory should be, which
     is how "we could not look" came to render as an empty, calm board.
@@ -268,7 +268,7 @@ def _mark_leader(sessions: list) -> None:
 
     An explicit leader wins; otherwise the earliest greeting does. Mutating the
     folded sessions is safe here and nowhere else: this State was built from the
-    log a few lines ago and is thrown away when the command returns — nothing
+    log a few lines ago and is thrown away when the command returns: nothing
     written to disk depends on it.
     """
     if not sessions:
@@ -283,14 +283,14 @@ def _mark_leader(sessions: list) -> None:
 def _orphan_claim_holders(st: _state.State, exclude: set[str]) -> list:
     """Roster rows for actors that hold claims but have no session at all.
 
-    An actor is orphaned when its session was deleted — a retire, or its named
-    session ended — while its process kept claiming. Without these rows the
+    An actor is orphaned when its session was deleted: a retire, or its named
+    session ended, while its process kept claiming. Without these rows the
     operator sees locks in ACTIVE CLAIMS with nobody to attribute them to, which
     reads as "claims that will not go away" and offers no one to chase.
 
     The synthetic heartbeat comes from the actor's own claim timestamps, so the
     row can still be flagged LIKELY DEAD. The session tag is kept only when every
-    orphan claim agrees on it — a mixed set has no single true answer and
+    orphan claim agrees on it: a mixed set has no single true answer and
     inventing one would misattribute a lock to a window it was never opened in.
     """
     spans: dict[str, dict] = {}
@@ -326,8 +326,8 @@ def _roster(st: _state.State, cutoff: datetime) -> list:
 
     The second set is the whole point of the roster being separate from "who is
     active". A crashed holder drops out of the activity window at exactly the
-    moment its orphaned locks most need releasing, so without it the row — and
-    the LIKELY DEAD flag that tells you to release them — disappears precisely
+    moment its orphaned locks most need releasing, so without it the row: and
+    the LIKELY DEAD flag that tells you to release them: disappears precisely
     when somebody needs it. Leader is marked among the ACTIVE set only: a dead
     agent must never be shown leading anything.
     """
@@ -507,7 +507,7 @@ def _emit_status_human(
     for claim in claims:
         named = f'   session="{claim.session_name}"' if claim.session_name else ""
         # Age and the STALE tag, because a lock opened 14h ago must not read the
-        # same as one opened 2m ago — that difference is the whole basis for
+        # same as one opened 2m ago: that difference is the whole basis for
         # deciding whether to go around somebody.
         age = now - claim.ts
         stale = "  STALE" if age >= stale_after else ""
@@ -603,7 +603,7 @@ def _emit_blocked_summary(st: _state.State, cutoff: datetime, since_raw: str) ->
         line += f", {recent} in the last {since_raw}"
     print(line)
     for b in st.blocked[-3:]:
-        # A refusal against a TASK — a self-review, a failing check — has no
+        # A refusal against a TASK: a self-review, a failing check: has no
         # scope and no holder. Rendering it through the claim sentence printed
         # "stopped from editing  (held by @)", which reads as a bug in comms
         # rather than as the rule doing its job.
@@ -623,7 +623,7 @@ def _emit_status_json(
     cutoff: datetime,
     stale_after: timedelta,
 ) -> None:
-    """The canonical machine shape. Uncapped on purpose — see ``_limit_tail``."""
+    """The canonical machine shape. Uncapped on purpose: see ``_limit_tail``."""
     out: dict = {
         "sessions": [],
         "claims": [],
@@ -775,7 +775,7 @@ def log_main(argv: list[str]) -> int:
             if (ev.data or {}).get("category") != category:
                 continue
         if as_json:
-            # The stored bytes, re-encoded canonically — the same line the Go
+            # The stored bytes, re-encoded canonically: the same line the Go
             # build would write. Piping `log --json` back into a log must not
             # change what it says.
             sys.stdout.write(ev.encode().decode("utf-8"))
@@ -828,8 +828,8 @@ def _event_touches(ev, want: _scope.Scope) -> bool:
 
     The path-ref half is not an extra: findings and notes carry their target file
     in ``data.refs`` and have an EMPTY top-level scope, so without it
-    ``log --scope <file> --type finding`` — the query an agent runs to learn a
-    file's history — returns nothing while hundreds of findings name that file.
+    ``log --scope <file> --type finding``: the query an agent runs to learn a
+    file's history: returns nothing while hundreds of findings name that file.
     """
     for raw in list(ev.scope or []) + _path_refs(ev.data):
         try:
@@ -922,7 +922,7 @@ def _print_event_human(ev, extra_scopes: list | None = None) -> None:
     """One readable row per event.
 
     Every branch renders a type this build UNDERSTANDS. The fallback exists for
-    the other case — a newer comms wrote a type we can read past but not render —
+    the other case: a newer comms wrote a type we can read past but not render:
     and prints the row rather than dropping it, so an unknown event is at least
     visible in the history instead of silently missing from it.
     """
@@ -981,7 +981,7 @@ def main(argv: list[str]) -> int:
     """Dispatch for ``status`` and ``log`` as one module.
 
     ``argv`` is everything after the verb, so the verb itself has to be the first
-    element here — this exists for a caller that has both surfaces behind one
+    element here: this exists for a caller that has both surfaces behind one
     entry point, and for the module to be runnable on its own.
     """
     verb = argv[0] if argv else ""

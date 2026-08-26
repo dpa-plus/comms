@@ -13,7 +13,7 @@ import (
 
 // Build metadata. These are overridden via -ldflags at build time (see the
 // Makefile and .goreleaser.yaml, which set -X main.Version / main.Commit /
-// main.Date). For `go install` builds — which ignore -ldflags — BuildInfo.Resolve
+// main.Date). For `go install` builds, which ignore -ldflags. BuildInfo.Resolve
 // recovers the module version and VCS revision from the embedded build info, so a
 // released binary never reports a bare "dev".
 var (

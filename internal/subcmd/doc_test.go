@@ -83,7 +83,7 @@ func TestNewEditorCommandQuotedPathWithSpaces(t *testing.T) {
 // containing multi-byte UTF-8 runes is truncated on a rune boundary, so the hint
 // shown by `comms doc --list` / `comms lesson --list` never emits invalid UTF-8.
 func TestFirstSummaryLineTruncatesOnRuneBoundary(t *testing.T) {
-	// Each "é" is 2 bytes. A line of 80 of them is 80 runes / 160 bytes — well
+	// Each "é" is 2 bytes. A line of 80 of them is 80 runes / 160 bytes: well
 	// over the 70-rune cap, and byte-slicing at [:67] would land mid-rune.
 	line := strings.Repeat("é", 80)
 	dir := t.TempDir()

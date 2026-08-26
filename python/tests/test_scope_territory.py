@@ -44,7 +44,7 @@ CORPUS = [
 def test_a_scope_survives_the_trip_through_the_log(raw):
     """IF THIS FAILS: the claim written to the append-only log is not the claim
     that was made. The event is immutable, so every future replay reads the
-    wrong territory — and the two most likely mistranslations are the dangerous
+    wrong territory, and the two most likely mistranslations are the dangerous
     ones: an anchored claim widening into a whole-file claim (blocks everyone)
     or a whole-file claim narrowing into a symbol (blocks nobody)."""
     once = parse(raw)
@@ -56,7 +56,7 @@ def test_a_scope_survives_the_trip_through_the_log(raw):
 
 def test_a_path_that_ends_in_a_backslash_does_not_eat_its_anchor():
     """IF THIS FAILS: `src/lib\\` + `#Handler` comes back from the log as a
-    WHOLE-FILE claim on a file called "src/lib#Handler" that does not exist — so
+    WHOLE-FILE claim on a file called "src/lib#Handler" that does not exist: so
     two agents can hold the same symbol and neither is told. On POSIX a
     backslash is an ordinary filename byte, so this is a real path, not a
     hypothetical one."""
@@ -89,7 +89,7 @@ def test_the_words_a_person_typed_are_kept_for_the_error_message():
 
 def test_padding_does_not_turn_a_line_range_into_a_symbol():
     """IF THIS FAILS: `a.ts#L1-5 ` (one stray space, from a shell or a copy) is
-    stored as a SYMBOL named "L1-5" — and its canonical form re-parses as a LINE
+    stored as a SYMBOL named "L1-5", and its canonical form re-parses as a LINE
     range. The same claim then means two different territories on two reads,
     which is the one thing an append-only log cannot recover from."""
     padded = parse("a.ts#L1-5 ")
@@ -124,7 +124,7 @@ def test_a_malformed_range_is_refused_not_quietly_downgraded(bad):
 @pytest.mark.parametrize(
     "hostile",
     [
-        "src/\x1b[31mred.ts",       # ESC — colour/cursor control
+        "src/\x1b[31mred.ts",       # ESC: colour/cursor control
         "src/a.ts#\x9bfoo",          # C1 CSI, one code point, same effect as ESC[
         "src/a\x00b.ts",
         "src/a.ts#drop\x07",
@@ -132,8 +132,8 @@ def test_a_malformed_range_is_refused_not_quietly_downgraded(bad):
 )
 def test_terminal_escape_sequences_never_get_into_a_claim(hostile):
     """IF THIS FAILS: a scope string carrying terminal control bytes lands in an
-    append-only log and is then echoed back — to every agent and every human who
-    runs `status` — for the life of the repository, with no way to remove it."""
+    append-only log and is then echoed back: to every agent and every human who
+    runs `status`: for the life of the repository, with no way to remove it."""
     with pytest.raises(ScopeError):
         parse(hostile)
 
@@ -143,7 +143,7 @@ def test_a_claim_cannot_name_ground_outside_the_repo(outside):
     """IF THIS FAILS: claims stop being comparable. The store is keyed per
     repository, so a path that escapes the root either collides with an
     unrelated project's territory or names something no other agent can resolve
-    — either way the overlap answer is meaningless."""
+   : either way the overlap answer is meaningless."""
     with pytest.raises(ScopeError):
         parse(outside)
 
@@ -164,14 +164,14 @@ def test_ordinary_unicode_filenames_still_work():
 @pytest.mark.parametrize("a,b", list(itertools.combinations(CORPUS, 2)))
 def test_the_answer_does_not_depend_on_who_asks_first(a, b):
     """IF THIS FAILS: whether a collision is caught depends on which agent
-    happened to run the check — so the same pair of claims is a conflict in one
+    happened to run the check, so the same pair of claims is a conflict in one
     direction and clear in the other, and both agents proceed."""
     assert overlaps(parse(a), parse(b)) == overlaps(parse(b), parse(a))
 
 
 @pytest.mark.parametrize("raw", CORPUS)
 def test_a_claim_always_conflicts_with_itself(raw):
-    """IF THIS FAILS: the exact same scope, claimed twice, is not detected — the
+    """IF THIS FAILS: the exact same scope, claimed twice, is not detected: the
     single most common collision there is, and the one users will assume works
     before they trust anything subtler."""
     assert overlaps(parse(raw), parse(raw))
@@ -187,7 +187,7 @@ def test_a_directory_claim_covers_the_files_under_it():
 
 def test_a_file_claim_does_not_leak_onto_its_neighbours():
     """IF THIS FAILS: claiming one file blocks work on files that merely share a
-    name prefix — `server.ts` blocking `server.test.ts` — so agents are refused
+    name prefix: `server.ts` blocking `server.test.ts`, so agents are refused
     ground nobody holds and stop believing refusals."""
     assert not overlaps(parse("src/api/server.ts"), parse("src/api/server.test.ts"))
     assert not overlaps(parse("src/api"), parse("src/api-v2/x.ts"))
@@ -195,7 +195,7 @@ def test_a_file_claim_does_not_leak_onto_its_neighbours():
 
 def test_the_shallow_and_recursive_globs_stay_different_claims():
     """IF THIS FAILS: `src/*` and `src/**` become synonyms, and there is then no
-    way at all to claim only the files sitting directly in a directory — every
+    way at all to claim only the files sitting directly in a directory: every
     such claim silently escalates to the whole subtree and blocks work that was
     never meant to be blocked."""
     assert overlaps(parse("src/*"), parse("src/a.ts"))
@@ -206,7 +206,7 @@ def test_the_shallow_and_recursive_globs_stay_different_claims():
 
 def test_two_globs_that_can_never_match_the_same_file_do_not_conflict():
     """IF THIS FAILS: agents working on different languages or different layers
-    block each other — the "interior literal" cases are exactly the ones a naive
+    block each other: the "interior literal" cases are exactly the ones a naive
     prefix/suffix comparison gets wrong."""
     assert not overlaps(parse("src/**/*.ts"), parse("src/**/*.py"))
     assert overlaps(parse("src/**/*.ts"), parse("src/api/server.ts"))
@@ -228,7 +228,7 @@ def test_line_ranges_are_inclusive_and_touch_at_the_edges():
 
 def test_a_whole_file_claim_swallows_every_anchor_in_that_file():
     """IF THIS FAILS: "I am rewriting this file" fails to block someone editing
-    one function inside it — the coarse claim must dominate the fine one, or
+    one function inside it: the coarse claim must dominate the fine one, or
     coarse claims are worthless."""
     whole = parse("a.ts")
     for finer in ("a.ts#charge", "a.ts#L1-10", "a.ts#L900-901"):
@@ -237,7 +237,7 @@ def test_a_whole_file_claim_swallows_every_anchor_in_that_file():
 
 def test_a_symbol_and_a_line_range_are_treated_as_possibly_the_same_place():
     """IF THIS FAILS: the check fails OPEN. This module runs before the map
-    exists — that is the point of claiming — so it cannot know whether `#charge`
+    exists: that is the point of claiming, so it cannot know whether `#charge`
     lives inside lines 10-40. The only safe answer is "maybe", and the cost of
     that pessimism is one unnecessary refusal, against the cost of two agents
     editing one function."""
@@ -245,7 +245,7 @@ def test_a_symbol_and_a_line_range_are_treated_as_possibly_the_same_place():
 
 
 def test_different_symbols_in_one_file_are_different_ground():
-    """IF THIS FAILS: symbol-level claims are pointless — two agents cannot work
+    """IF THIS FAILS: symbol-level claims are pointless: two agents cannot work
     on two functions in one file, which is the normal case in any real codebase
     and the main reason anchors exist."""
     assert not overlaps(parse("a.ts#charge"), parse("a.ts#refund"))

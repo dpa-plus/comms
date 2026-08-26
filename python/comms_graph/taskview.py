@@ -7,7 +7,7 @@ picture implying order would be the most persuasive possible way to ship that
 coin flip as a fact.
 
 Here the order is DECLARED. An agent wrote down that B comes after A. That is a
-statement somebody made, not something inferred from imports — so arrows are
+statement somebody made, not something inferred from imports, so arrows are
 honest here, and they are the whole content of the picture.
 
 The one question this has to answer at a glance is **what is blocked, and on
@@ -35,8 +35,8 @@ from . import task as _task
 
 DEFAULT_FILENAME = "tasks.comms.html"
 
-#: Phase colours. Chosen so the two that demand action — something you could
-#: start, and something waiting on YOU — are the ones that carry saturation,
+#: Phase colours. Chosen so the two that demand action: something you could
+#: start, and something waiting on YOU: are the ones that carry saturation,
 #: while closed work recedes rather than competing for attention.
 _PHASE_STYLE = {
     _task.PHASE_READY:   ("#7ad39a", "#1c3327", "startable now"),
@@ -115,7 +115,7 @@ def _tooltip(t: Any, edges: list) -> str:
     if t.verified_by:
         lines.append(f"verified by @{t.verified_by} ({t.independence or 'unknown'})")
         # What they say they ran. A person scanning the board for a task to
-        # trust needs this more than the fact of a sign-off — the fact is a
+        # trust needs this more than the fact of a sign-off: the fact is a
         # colour, the method is the reason to believe it.
         if getattr(t, "verification", ""):
             lines.append(f"  checked by: {t.verification}")
@@ -201,7 +201,7 @@ def _json_for_script(obj) -> str:
 
     json.dumps escapes quotes and backslashes; it does NOT escape ``<``. So a
     string containing ``</script>`` closes the block early and everything after
-    it is parsed as HTML — which is live script, from a value somebody else
+    it is parsed as HTML, which is live script, from a value somebody else
     wrote. Every string in here is agent-controlled: task titles, the "provides"
     text on an edge, actor names. Reproduced with a task titled
     ``</title><script>alert(3)</script>``, which executed.
@@ -243,14 +243,14 @@ _PAGE = """<!doctype html>
   html, body {{ margin: 0; background: #0f0f1a; color: #e8eaf2;
     font: 13px/1.5 ui-sans-serif, -apple-system, Segoe UI, Roboto, sans-serif; }}
   /* Viewport units, not percentages. A percentage height only resolves against a
-     parent with a definite height, and vis sizes its canvas to fill this box :
+     parent with a definite height, and vis sizes its canvas to fill this box,
      so a chain of 100% heights let the canvas drive the container that was
      supposed to be driving IT. The canvas grew on every redraw (2036 -> 2072 ->
      2120 px) and painted nothing at all. 100dvh is definite on its own. */
   #wrap {{ display: grid; grid-template-columns: minmax(0, 1fr) 290px;
     height: 100dvh; max-height: 100dvh; }}
   /* The left column STACKS: the drawn graph on top, the tasks that join to
-     nothing as cards underneath. See the comment above the split in render() :
+     nothing as cards underneath. See the comment above the split in render():
      feeding unconnected tasks to a hierarchical layout is what produced the
      single illegible column this replaces. */
   #gcol {{ display: flex; flex-direction: column; min-width: 0; min-height: 0; }}
@@ -446,7 +446,7 @@ def render(state: Any, output_path: str | Path, generated: str = "") -> TaskView
     # A hierarchical layout has nothing to say about a node with no edges: every
     # one of them lands on level 0, so they stack into a single column, and
     # fit() then shrinks that tall thin column until the labels are gone. That
-    # is exactly what the board was showing — 17 empty boxes and no way to read
+    # is exactly what the board was showing: 17 empty boxes and no way to read
     # any of them.
     #
     # So only the connected part is drawn. Tasks that join to nothing are a
@@ -514,13 +514,13 @@ def render(state: Any, output_path: str | Path, generated: str = "") -> TaskView
                         '<div class="note">Each of these blocks everything after it.</div>')
 
     # A picture of nodes with no edges is not a graph, it is a list drawn
-    # badly — and it invites the reader to look for connections that are not
+    # badly, and it invites the reader to look for connections that are not
     # there. Measured on the real store: 8 tasks, 0 task_edge events, ever. Say
     # so, and say what would change it, rather than presenting a column of boxes
     # as though the layout meant something.
     # Nothing is broken when no edges exist, so this is stated, not alarmed
     # about. It used to be red, over an empty canvas, next to a column of boxes
-    # nobody could read — three separate ways of implying a fault that was not
+    # nobody could read: three separate ways of implying a fault that was not
     # there.
     if not edges and nodes:
         warning = ('<div class="warn info">Nobody has said any of these tasks waits on '

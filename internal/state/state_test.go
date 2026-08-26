@@ -41,7 +41,7 @@ func TestFoldSessionLastSeenTracksAnyEventNotJustHello(t *testing.T) {
 		mkEvent(t, helloAt, "codex-dev", event.TypeHello, nil, map[string]interface{}{"base_name": "codex"}),
 		mkEvent(t, claimAt, "codex-dev", event.TypeClaim, []string{"src/a.ts"}, map[string]interface{}{"intent": "work"}),
 		mkEvent(t, findAt, "codex-dev", event.TypeFinding, nil, map[string]interface{}{"category": "fix", "summary": "done"}),
-		// A second actor that only ever said hello — LastSeen must equal its hello.
+		// A second actor that only ever said hello. LastSeen must equal its hello.
 		mkEvent(t, base.Add(5*time.Minute), "claude-qa", event.TypeHello, nil, map[string]interface{}{"base_name": "claude"}),
 	}
 	s := Fold(evs)
@@ -167,7 +167,7 @@ func TestFoldReleasesEveryBatchClaimedScopeAtSameTimestamp(t *testing.T) {
 
 func TestFoldExcludesHousekeepingReleasesFromCompletedFeed(t *testing.T) {
 	// Regression: session lifecycle releases (retire / leader / session-end) carry
-	// refs but are coordination admin, not finished work — they must not show up
+	// refs but are coordination admin, not finished work: they must not show up
 	// in the "recently completed" feed alongside real claim releases.
 	now := time.Now().UTC()
 	hello := mkEvent(t, now, "codex-dev", event.TypeHello, nil, map[string]interface{}{})

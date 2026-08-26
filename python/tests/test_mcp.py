@@ -1,8 +1,8 @@
 """The MCP door: same log, same refusals, and it must not fall over.
 
 Two things make this surface different from the CLI and both are tested here.
-It is a LONG-LIVED process, so anything that would exit a command — a malformed
-frame, a bad argument, a conflict — has to become an answer instead, or one bad
+It is a LONG-LIVED process, so anything that would exit a command: a malformed
+frame, a bad argument, a conflict: has to become an answer instead, or one bad
 call ends every agent's session at once. And it is the surface an agent reaches
 for on EVERY turn, so `comms_check` has to stay a pure read: the moment it takes
 a lock or creates a directory, the cost lands in front of every edit in the repo.
@@ -132,8 +132,8 @@ def test_the_handshake_advertises_all_six_tools_with_schemas(tmp_path, monkeypat
 
 def test_tool_descriptions_stay_cheap(tmp_path, monkeypatch):
     """IF THIS FAILS: every turn of every session pays for the extra prose. The
-    tool list is resident context — it is re-sent to the model on every single
-    request — so a paragraph added here is a paragraph taken off the task, a
+    tool list is resident context: it is re-sent to the model on every single
+    request, so a paragraph added here is a paragraph taken off the task, a
     thousand times over. The Go build's six sit around 1100 characters."""
     repo = _repo(tmp_path, monkeypatch)
     replies = _drive(repo, '{"jsonrpc":"2.0","id":1,"method":"tools/list"}')
@@ -207,7 +207,7 @@ def test_an_unknown_tool_is_refused_without_ending_the_loop(tmp_path, monkeypatc
 
 
 # ---------------------------------------------------------------------------
-# comms_check — the pure read
+# comms_check: the pure read
 # ---------------------------------------------------------------------------
 
 
@@ -231,7 +231,7 @@ def test_check_answers_while_somebody_else_holds_the_lock(tmp_path, monkeypatch)
     """IF THIS FAILS: every edit an agent makes waits behind whoever is mid-claim.
     check runs on every turn and reads a log it cannot corrupt by reading, so
     queueing it behind the write lock buys nothing and costs a pause in front of
-    all the work in the repo — up to the full lock timeout when a holder stalls."""
+    all the work in the repo: up to the full lock timeout when a holder stalls."""
     import time
 
     from comms_graph import lock as clock
@@ -274,7 +274,7 @@ def test_check_reports_the_holder_and_ignores_your_own_claim(tmp_path, monkeypat
 def test_check_refuses_an_unreadable_path_as_text_not_as_a_protocol_error(
         tmp_path, monkeypatch):
     """IF THIS FAILS: the model cannot see what it got wrong. A protocol error
-    is invisible to it — only tool text with isError reaches the model, and a
+    is invisible to it: only tool text with isError reaches the model, and a
     malformed scope is exactly the mistake it can fix by itself."""
     repo = _repo(tmp_path, monkeypatch)
     text, is_error = _call(repo, "comms_check", actor="claude-dev", path="a.py#L40-10")
@@ -310,7 +310,7 @@ def test_a_claim_through_the_tools_is_a_claim_to_the_cli(tmp_path, monkeypatch):
 def test_a_second_agent_is_refused_and_the_refusal_is_recorded(tmp_path, monkeypatch):
     """IF THIS FAILS: comms cannot prove it ever did anything. A prevented
     collision that leaves no trace is why a log of thousands of claims can
-    honestly report having prevented nothing — and a refusal that still records
+    honestly report having prevented nothing, and a refusal that still records
     the claim is worse: two agents both believe they hold the file."""
     repo = _repo(tmp_path, monkeypatch)
     _call(repo, "comms_claim", actor="claude-dev", path="a.py", intent="parser",
@@ -332,7 +332,7 @@ def test_a_second_agent_is_refused_and_the_refusal_is_recorded(tmp_path, monkeyp
 
 def test_a_narrower_scope_inside_a_held_file_is_still_refused(tmp_path, monkeypatch):
     """IF THIS FAILS: claiming one symbol of a file somebody holds whole reads as
-    free ground, and the two agents edit the same file at once — the overlap
+    free ground, and the two agents edit the same file at once: the overlap
     rules are the entire product."""
     repo = _repo(tmp_path, monkeypatch)
     _call(repo, "comms_claim", actor="claude-dev", path="a.py", intent="parser",
@@ -399,7 +399,7 @@ def test_missing_required_arguments_come_back_as_readable_refusals(tmp_path, mon
 
 def test_the_actor_argument_beats_the_environment(tmp_path, monkeypatch):
     """IF THIS FAILS: one server acting for several agents files all their work
-    under one name — and two agents sharing a name cannot detect a conflict
+    under one name, and two agents sharing a name cannot detect a conflict
     between them, which is the exact failure comms exists to prevent. COMMS_ACTOR
     is per PROCESS; the argument is the only thing that can be per agent."""
     repo = _repo(tmp_path, monkeypatch)
@@ -460,7 +460,7 @@ def test_control_characters_in_free_text_are_refused_and_nothing_is_written(
         tmp_path, monkeypatch):
     """IF THIS FAILS: stored text can forge output. The board prints these fields
     raw, so a newline invents a line that was never written and an ESC injects a
-    terminal escape sequence — permanently, because the log is append-only."""
+    terminal escape sequence: permanently, because the log is append-only."""
     repo = _repo(tmp_path, monkeypatch)
     text, is_error = _call(repo, "comms_note", actor="claude-dev",
                            body="all clear\n@codex-dev holds nothing")
@@ -485,8 +485,8 @@ def test_an_over_long_note_is_refused_with_its_length(tmp_path, monkeypatch):
 
 def test_a_finding_with_no_ref_is_anchored_to_what_you_hold(tmp_path, monkeypatch):
     """IF THIS FAILS: the finding is never read again. Nothing surfaces an
-    unanchored one — the only thing that surfaces a finding is somebody claiming
-    the file it is about — so it becomes a line in a log nobody greps."""
+    unanchored one: the only thing that surfaces a finding is somebody claiming
+    the file it is about, so it becomes a line in a log nobody greps."""
     repo = _repo(tmp_path, monkeypatch)
     _call(repo, "comms_claim", actor="claude-dev", path="a.py", intent="parser",
           session="agent-A")
@@ -501,7 +501,7 @@ def test_a_finding_with_no_ref_is_anchored_to_what_you_hold(tmp_path, monkeypatc
 
 def test_an_explicit_ref_is_kept_and_a_malformed_one_is_refused(tmp_path, monkeypatch):
     """IF THIS FAILS: a ref is a bare string that cannot say whether it is a
-    path, a PR or a commit — and that is the useful half of it."""
+    path, a PR or a commit, and that is the useful half of it."""
     repo = _repo(tmp_path, monkeypatch)
     _call(repo, "comms_find", actor="claude-dev", category="decision",
           summary="uuid PKs, never cuid", ref="path:src/db.py", session="agent-A")
@@ -519,7 +519,7 @@ def test_an_explicit_ref_is_kept_and_a_malformed_one_is_refused(tmp_path, monkey
 
 def test_claiming_a_file_resurfaces_what_was_learned_about_it(tmp_path, monkeypatch):
     """IF THIS FAILS: the durable half of the log is write-only. A gotcha is
-    worth recording only because it comes back at the one moment it matters —
+    worth recording only because it comes back at the one moment it matters:
     when the next agent is about to touch that file."""
     repo = _repo(tmp_path, monkeypatch)
     _call(repo, "comms_find", actor="claude-dev", category="gotcha",

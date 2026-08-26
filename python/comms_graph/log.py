@@ -1,6 +1,6 @@
 """The append-only event log: the one piece of comms state that is TRUTH.
 
-Ported from comms (Go) ``internal/event`` — ``event.go`` + ``log.go``.
+Ported from comms (Go) ``internal/event``: ``event.go`` + ``log.go``.
 
 Every event is a single line of canonical JSON in a JSONL file. The shape is
 intentionally narrow: ts + id + actor + type + optional scope + a type-specific
@@ -11,13 +11,13 @@ The log deliberately does NOT live in ``graph.json``. The map is derived and is
 rewritten whole-file on every update (and deleted outright by ``graphify
 uninstall --purge``); the log is truth and must survive both. So it gets its own
 per-machine store, keyed by a hash of the repo root, exactly where the Go comms
-keeps it — which also means this reader can open the log an installed ``comms``
+keeps it, which also means this reader can open the log an installed ``comms``
 binary has already been writing.
 
 Python 3.11 is a hard floor and not an accident: every ``ts`` in the log is
 RFC3339 with a trailing ``Z``, and ``datetime.fromisoformat`` rejects that
 before 3.11. As a bonus 3.11 also accepts Go's nanosecond fractions (it
-truncates them to microseconds) — pre-3.11 needed hand-rolled parsing for both.
+truncates them to microseconds): pre-3.11 needed hand-rolled parsing for both.
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ TYPE_FINDING = "finding"
 
 # The task graph. A task is what should happen; an edge is the order it must
 # happen in and what the later task consumes from the earlier one; a state event
-# moves a task along its two steps — do it, then a DIFFERENT agent verifies it.
+# moves a task along its two steps: do it, then a DIFFERENT agent verifies it.
 TYPE_TASK = "task"
 TYPE_TASK_EDGE = "task_edge"
 TYPE_TASK_STATE = "task_state"
@@ -55,7 +55,7 @@ TYPE_TASK_STATE = "task_state"
 # overlapping scope. It is the only moment that proves the tool did its job, and
 # for a long time it was the one moment nothing wrote down: the conflict went to
 # stderr and the process exited. That is why a store of 4,356 claims reported
-# zero collisions ever prevented — not because none were, but because a
+# zero collisions ever prevented: not because none were, but because a
 # prevented one left no trace.
 TYPE_BLOCKED = "blocked"
 
@@ -97,7 +97,7 @@ class UnknownEventTypeError(ValueError):
     refuse to emit one (see :meth:`Event.encode`). That asymmetry is the whole
     point: a build must never author a type it cannot fold, but it must survive
     meeting one. Without it, adding a tenth event type would brick every older
-    install on the machine — one unrecognised line made the read abort, so
+    install on the machine: one unrecognised line made the read abort, so
     status, log, claim, note and the pre-edit check hook all failed on that
     repository at once.
 
@@ -111,7 +111,7 @@ class CorruptLogError(Exception):
 
     Distinct from :class:`UnknownEventTypeError` on purpose: the reader skips
     the one and aborts on the other. Tolerating a newer writer is not the same
-    as tolerating a broken file — a log we cannot parse is not a log we should
+    as tolerating a broken file: a log we cannot parse is not a log we should
     silently act on.
     """
 
@@ -129,7 +129,7 @@ class CorruptLogError(Exception):
 # Go unmarshals every JSON number as float64, Python gives int for an integer
 # literal. Rather than leave callers guessing which they hold, both boundaries
 # normalise the same way: an integral float becomes an int. That direction (and
-# not the reverse) is chosen because it is what re-encoding produces anyway —
+# not the reverse) is chosen because it is what re-encoding produces anyway:
 # Go marshals float64(1) back as `1`, and Python's json writes int 1 as `1`,
 # while a float 1.0 would come out as `1.0` and change the bytes of a line that
 # round-trips. Only values that survive the trip exactly are converted: beyond
@@ -160,7 +160,7 @@ def _normalize(value: Any) -> Any:
 # body says "login->dash" lands in the log as "login->dash". We match it
 # because both writers append to the SAME file: without this, 377 of the 8,848
 # lines in a real store would be byte-different depending on which binary wrote
-# them, for no semantic difference at all — and any future dedupe or checksum
+# them, for no semantic difference at all, and any future dedupe or checksum
 # over raw lines would see two spellings of one event. Safe as a post-pass:
 # none of these characters is structural in JSON, so they can only occur inside
 # string literals. U+2028/U+2029 are in the set because Go escapes them too
@@ -202,13 +202,13 @@ def _to_utc(ts: datetime) -> datetime:
 
     The log records INSTANTS that several processes on several machines order
     against each other, so a wall-clock reading with no zone attached is not a
-    timestamp — it is a timestamp minus the one fact that makes it comparable.
+    timestamp: it is a timestamp minus the one fact that makes it comparable.
 
     WHAT WENT WRONG BEFORE (do not reintroduce): this used to read a naive
     datetime as UTC via ``replace(tzinfo=utc)``. That is the silent-wrong
     default. Every caller reaching for a timestamp writes ``datetime.now()``
     at least once, and ``datetime.now()`` is naive LOCAL time, so the event
-    landed in the log shifted by the machine's UTC offset — two hours into the
+    landed in the log shifted by the machine's UTC offset: two hours into the
     future from Berlin, eight hours into the past from California. Nothing
     failed, no line was malformed; claims simply expired early or late and
     events interleaved in the wrong causal order. Refusing the guess turns a
@@ -240,7 +240,7 @@ def _format_ts(ts: datetime) -> str:
     The year is padded EXPLICITLY rather than by ``strftime("%Y")``, which is not
     portable: glibc renders year 1 as ``1`` and BSD libc as ``0001``. That is not
     a cosmetic difference. RFC3339 requires four digits, so on Linux this
-    function used to return ``1-01-01T00:00:00Z`` — a string our own reader
+    function used to return ``1-01-01T00:00:00Z``: a string our own reader
     refuses. The zero-instant guard in ``encode`` compares the RENDERED value
     against ``0001-01-01T00:00:00Z`` on purpose (it asks "would our reader accept
     these bytes?"), and an unpadded year walked straight past it, so the one
@@ -287,7 +287,7 @@ class Event:
 
         Writers are STRICT: a type this build does not know is refused here,
         even though :func:`read` will happily skip one written by a newer build.
-        The same strictness applies to ``ts`` — see below for why that is not
+        The same strictness applies to ``ts``: see below for why that is not
         pedantry but the difference between a log and a brick.
         """
         if not self.id:
@@ -300,15 +300,15 @@ class Event:
         # WHAT WENT WRONG BEFORE (do not reintroduce): this guard read
         # `if self.ts is None`, a condition no real datetime ever trips. Go
         # guards `e.TS.IsZero()`, and Go's zero time renders as
-        # "0001-01-01T00:00:00Z" — the exact string decode() (and Go's Decode)
+        # "0001-01-01T00:00:00Z": the exact string decode() (and Go's Decode)
         # rejects as a MISSING ts. So `Event(ts=datetime.min, ...)` encoded
         # happily, appended a line, and the next read() called that line
         # corruption and aborted: one accidental zero value bricked the whole
         # log from that point on, including every good event appended after it.
         #
         # The check is therefore on the RENDERED value, not on the Python
-        # object: it asks the only question that matters — "would our own
-        # reader accept the bytes we are about to write?" — and so it catches
+        # object: it asks the only question that matters: "would our own
+        # reader accept the bytes we are about to write?", and so it catches
         # every spelling of the zero instant that reaches it at once (UTC-aware
         # datetime.min, year 1 at 01:00+01:00), where an `is` or `==` test
         # against one sentinel would catch only the spelling it names. Never
@@ -343,7 +343,7 @@ class Event:
         try:
             # allow_nan=False because NaN/Infinity are not JSON; Python would
             # otherwise emit bare `NaN`, producing a line no conforming parser
-            # (including Go's) can read back — corruption authored by us.
+            # (including Go's) can read back: corruption authored by us.
             line = json.dumps(obj, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
         except (TypeError, ValueError) as exc:
             raise ValueError(f"event: marshal: {exc}") from exc
@@ -352,7 +352,7 @@ class Event:
         # Same rule as the zero-ts guard above, applied to size: never write a
         # line we would refuse to read back. read() caps a line at
         # MAX_LINE_BYTES and calls anything longer CORRUPTION, not a skippable
-        # oddity — so without this check an oversized event was accepted by the
+        # oddity, so without this check an oversized event was accepted by the
         # writer and then bricked the log the instant it landed. Every later
         # read of that repository aborted, including the pre-edit hook, and the
         # event that did it was already on disk and unreadable. A caller that
@@ -370,7 +370,7 @@ class Event:
         """Parse one JSONL line into an Event.
 
         Raises :class:`UnknownEventTypeError` for a well-formed line of an
-        unrecognised type, and plain ``ValueError`` for anything else — the
+        unrecognised type, and plain ``ValueError`` for anything else: the
         reader needs to tell those two apart.
         """
         if isinstance(line, (bytes, bytearray)):
@@ -406,7 +406,7 @@ class Event:
         # that events already on disk heal. The log is append-only: events were
         # written with "@name" before the writer refused it, and leaving them
         # alone would leave that agent permanently unable to reach its own
-        # claims — `check` blocked it from its own files and `release --all-mine`
+        # claims: `check` blocked it from its own files and `release --all-mine`
         # said "nothing to release", which reads like success. Folding both
         # spellings to one is the only repair an append-only log allows.
         if actor.startswith("@"):
@@ -469,7 +469,7 @@ def _parse_ts(value: object) -> datetime:
 # --------------------------------------------------------------------------
 
 # Crockford base32. The alphabet ascends in ASCII, so lexicographic order over
-# the 26-character encoding equals numeric order over the 128-bit value — which
+# the 26-character encoding equals numeric order over the 128-bit value: which
 # is the only reason sorting ids by string is meaningful at all.
 _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 _MAX_MS = (1 << 48) - 1
@@ -496,7 +496,7 @@ def new_id(now: datetime | None = None) -> str:
 
     Ids minted in this process in the SAME millisecond are strictly increasing.
     That is the property the reducer leans on: plain randomness is NOT
-    monotonic — two same-millisecond ids share the 48-bit timestamp prefix but
+    monotonic: two same-millisecond ids share the 48-bit timestamp prefix but
     get independent random suffixes, so they sort in random order, which lets
     same-millisecond events (a claim and its steal/release, say) replay out of
     causal order.
@@ -560,7 +560,7 @@ def _repair_torn_tail(fd: int, size: int, target: str) -> int:
     """Drop an unterminated final line before appending after it. Returns the size.
 
     A writer killed mid-append leaves a half-written last line. read() tolerates
-    that — it warns and stops there, and every event before it is still good.
+    that: it warns and stops there, and every event before it is still good.
     The danger is what the NEXT append does to it: appending after an
     unterminated line CONCATENATES onto it, so the torn fragment and the new
     event fuse into one unparseable line in the MIDDLE of the file. That is no
@@ -570,7 +570,7 @@ def _repair_torn_tail(fd: int, size: int, target: str) -> int:
 
     Discarding the fragment is sound, and only here: the caller holds the repo
     lock, so nobody else is mid-append, and an unterminated line is by
-    definition a write that never completed — no command was ever told it
+    definition a write that never completed: no command was ever told it
     succeeded, and no reader ever counted it. Truncating to the last newline
     restores exactly the state the interrupted command started from.
 
@@ -578,13 +578,13 @@ def _repair_torn_tail(fd: int, size: int, target: str) -> int:
     with eight concurrent appenders on Linux, this loses whole events: a process
     reads the size, another appends before the ftruncate lands, and the truncate
     cuts back past complete lines it never saw. 136 of 1200 events, gone, with
-    no torn line and no duplicate to show for it — the log simply gets shorter.
+    no torn line and no duplicate to show for it: the log simply gets shorter.
     Neutering this function makes that run clean, which is how the mechanism was
     confirmed rather than guessed.
 
     It does not reproduce on macOS, so it is invisible to anyone developing
     there. Every production path holds the lock (checked call site by call
-    site), so this is a hazard for FUTURE callers, not a live fault — which is
+    site), so this is a hazard for FUTURE callers, not a live fault, which is
     exactly why ``append_batch`` takes ``repair_torn_tail`` rather than leaving
     the requirement in a docstring nothing enforces.
     """
@@ -632,12 +632,12 @@ def append_batch(
     * Every event is encoded up front, so a bad event writes nothing at all.
     * On a fault mid-write (ENOSPC, SIGINT) the file is truncated back to its
       pre-write size, so a multi-event command is all-or-nothing on disk too.
-      The rollback is only safe because the lock is held — it assumes nobody
+      The rollback is only safe because the lock is held: it assumes nobody
       else appended between our open and our failure.
 
     Note what this deliberately does NOT use: ``open(path, "a")``. That is
     O_APPEND, but it is also an 8 KiB buffered stream, so a batch larger than
-    the buffer flushes mid-object and tears a JSON line in half — and a torn
+    the buffer flushes mid-object and tears a JSON line in half, and a torn
     line is not a lost event, it is a log that stops parsing at that point. Raw
     ``os.write`` on a raw descriptor is what makes each append a single atomic
     ``write(2)`` at the current end of file.
@@ -789,7 +789,7 @@ def read(path: str | os.PathLike[str]) -> list[Event]:
                     try:
                         ev = Event.decode(text)
                     except UnknownEventTypeError:
-                        # A type we do not know is not corruption — it is a
+                        # A type we do not know is not corruption: it is a
                         # newer writer. Skip it the way a duplicate id is
                         # skipped below; everything else still aborts.
                         unknown += 1
@@ -799,7 +799,7 @@ def read(path: str | os.PathLike[str]) -> list[Event]:
                     except RecursionError as exc:
                         # A deeply nested JSON value blows the interpreter's
                         # stack inside the parser. RecursionError is not a
-                        # ValueError, so it used to escape the reader entirely —
+                        # ValueError, so it used to escape the reader entirely:
                         # and since every command folds the log, that killed
                         # them all: the pre-edit hook refused every edit in the
                         # repository, with a bare traceback and no line number.
@@ -811,8 +811,8 @@ def read(path: str | os.PathLike[str]) -> list[Event]:
                     # its seen[ev.ID] set. This is the ONLY place it happens:
                     # state.fold deliberately folds whatever it is handed, so
                     # if the reader stopped filtering here, a line that got
-                    # appended twice — a retried write, a log concatenated onto
-                    # itself, a copy-paste during recovery — would double-count
+                    # appended twice: a retried write, a log concatenated onto
+                    # itself, a copy-paste during recovery: would double-count
                     # every finding and note and replay a claim after its own
                     # release. First occurrence wins, since the log is
                     # append-only and the earliest copy is the original.
@@ -855,7 +855,7 @@ def user_data_home() -> Path:
 
     Windows raises rather than guessing a location. The Go original supports
     darwin and linux only, and inventing a third layout here would put the log
-    somewhere no ``comms`` binary looks — a store that exists but that nothing
+    somewhere no ``comms`` binary looks: a store that exists but that nothing
     else on the machine can find is worse than a clear error.
     """
     if sys.platform == "darwin":
@@ -883,7 +883,7 @@ def coordination_root(repo_root: str | os.PathLike[str]) -> str:
     two worktrees of the same repository got two disjoint logs and coordinated
     nothing at all: no block, no warning, two empty boards that both looked calm.
     Worktree-per-agent is the standard isolation pattern for running several
-    coding agents on one repository — it is this harness's own default — so the
+    coding agents on one repository: it is this harness's own default, so the
     single most likely deployment was the one where the tool silently did nothing.
 
     ``git rev-parse --git-common-dir`` is what distinguishes them: in a worktree
@@ -891,7 +891,7 @@ def coordination_root(repo_root: str | os.PathLike[str]) -> str:
     worktree's private directory. Its parent is the shared root.
 
     Falls back to the given path when git is unavailable or this is not a
-    repository — coordination inside a plain directory is still better than an
+    repository: coordination inside a plain directory is still better than an
     exception, and callers that need to know use ``is_worktree``.
     """
     root = os.path.realpath(os.path.abspath(os.fspath(repo_root)))
@@ -915,8 +915,8 @@ def coordination_root(repo_root: str | os.PathLike[str]) -> str:
 def repo_hash(repo_root: str | os.PathLike[str]) -> str:
     """First 12 hex chars of sha256 over the coordination root.
 
-    Symlinks are resolved first so that ``/tmp/x`` and ``/private/tmp/x`` — the
-    same directory on macOS — key the same store. Renaming or moving the repo
+    Symlinks are resolved first so that ``/tmp/x`` and ``/private/tmp/x``: the
+    same directory on macOS: key the same store. Renaming or moving the repo
     changes the hash and orphans the old log; that is the Go behaviour and it is
     accepted, because the alternative (an id file inside the repo) gets copied
     along with the repo and makes two checkouts share one log.
@@ -930,7 +930,7 @@ def repo_hash(repo_root: str | os.PathLike[str]) -> str:
 def store_dir(repo_root: str | os.PathLike[str]) -> Path:
     """The per-machine, NOT-committed store for this repo.
 
-    ``<data home>/comms/<repo hash>/`` — the same directory the Go comms uses,
+    ``<data home>/comms/<repo hash>/``: the same directory the Go comms uses,
     so an existing store is found rather than a second one started beside it.
     The lock file lives here too, next to the log it guards.
     """
@@ -951,7 +951,7 @@ REPO_PATH_FILENAME = "repo-path.txt"
 def write_repo_path(store: Path, repo_root: str | os.PathLike[str]) -> None:
     """Record which repo this store serves. Best effort, never fatal.
 
-    Failing to write a label must never stop a claim from being recorded —
+    Failing to write a label must never stop a claim from being recorded:
     coordination is the job, the label is a convenience for whoever reads the
     board later.
     """
@@ -971,7 +971,7 @@ def known_stores(data_home: Path | None = None) -> list[dict]:
     """Every comms store on this machine, newest activity first.
 
     A store is one repository's log. They are keyed by a hash of the repo path,
-    so the only way to name one is the label written beside it — a store with
+    so the only way to name one is the label written beside it: a store with
     no label is reported with an empty ``root`` rather than being hidden, since
     an unnamed project that is busy is exactly the one somebody wants to find.
 

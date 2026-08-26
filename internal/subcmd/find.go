@@ -89,7 +89,7 @@ func runFind(category, summary string, refs []string, priority bool) error {
 	// 52% to about 80%, which is the difference between half the gotchas being
 	// reachable and most of them.
 	//
-	// Only when the caller gave no path ref of their own — an explicit anchor is
+	// Only when the caller gave no path ref of their own: an explicit anchor is
 	// always more precise than a guess from what happens to be claimed.
 	if !hasPathRef(parsedRefs) {
 		for _, c := range rt.State.ActiveClaimsByActor(rt.Actor) {
@@ -150,7 +150,7 @@ func parseRefs(raw []string) ([]kindValue, error) {
 			return nil, fmt.Errorf("ref %q: kind or value empty", r)
 		}
 		for _, c := range kind + value {
-			// Reject C0 (<0x20), DEL (0x7f), and C1 (0x80-0x9f) — the same control
+			// Reject C0 (<0x20), DEL (0x7f), and C1 (0x80-0x9f): the same control
 			// range every other free-text field is held to (rejectControlText), so
 			// ref values can't smuggle escape bytes into the log.
 			if c < 0x20 || c == 0x7f || (c >= 0x80 && c <= 0x9f) {

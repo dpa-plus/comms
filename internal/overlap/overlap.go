@@ -12,7 +12,7 @@ package overlap
 //     - Whole-file + whole-file → conflict.
 //
 // Step 2 only runs if step 1 says paths could overlap. Anchor refinement
-// can NEVER expand an overlap — it can only shrink one.
+// can NEVER expand an overlap: it can only shrink one.
 func Scopes(a, b Scope) bool {
 	if !PathsOverlap(a.Path, b.Path) {
 		return false

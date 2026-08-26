@@ -1,11 +1,11 @@
-"""``comms-graph doc`` — the repo-local wiki.
+"""``comms-graph doc``: the repo-local wiki.
 
 Docs live at ``<repo>/.comms/docs/<slug>.md``, INSIDE the repository, and not in
 the per-machine store the event log uses. That split is the whole point. The log
 is one machine's record of who held what and is disposable; a doc is the reason
 a decision was made, so it belongs to the project, gets committed, and travels
 with a clone. A doc written into the store would be visible only to the machine
-that wrote it — which is exactly the audience that already knows.
+that wrote it, which is exactly the audience that already knows.
 
 THE READ PATH CARRIES THE WEIGHT. In real use these are 2–5KB design and
 feasibility notes that somebody opens weeks later to remember why a thing was
@@ -25,7 +25,7 @@ unbounded stretch of human time, so three things are arranged around that:
   * The editor never touches the real file. It edits a scratch copy and the
     result is installed with one atomic rename. An editor that dies mid-write
     therefore cannot leave a truncated doc where the doc was, and an abandoned
-    edit of a brand-new slug leaves no file at all — an empty stub is worse than
+    edit of a brand-new slug leaves no file at all: an empty stub is worse than
     nothing, because it shows up in ``--list`` as if somebody had written it.
 
 The event log is shared with the Go build, so the finding recorded after a save
@@ -126,7 +126,7 @@ def _sidecar_path(docs: Path, slug: str) -> Path:
 def _hint(path: Path) -> str:
     """The first line of a doc that actually says something.
 
-    Headings are skipped because a heading usually just restates the slug —
+    Headings are skipped because a heading usually just restates the slug:
     "kataster-machbarkeit" next to "Kataster Machbarkeit" tells a reader nothing
     they did not already have. The first prose line is the sentence that says
     whether this is the doc they wanted. A doc with no prose at all falls back to
@@ -202,7 +202,7 @@ def _print(root: Path, slug: str) -> int:
         text = raw.decode("utf-8")
     except UnicodeDecodeError:
         # Still print it. Somebody opened this to recover a decision, and a
-        # traceback in place of 4KB of reasoning helps nobody — but say the text
+        # traceback in place of 4KB of reasoning helps nobody, but say the text
         # has been altered, so nothing mangled gets quoted back as verbatim.
         text = raw.decode("utf-8", "replace")
         _err(f"warning: {path} is not valid UTF-8; the bad bytes print as U+FFFD.")
@@ -222,8 +222,8 @@ def _editor_command() -> list[str] | None:
 
     $VISUAL then $EDITOR then ``vi``, the order every other tool uses. The value
     is split with shell quoting rules because real settings carry arguments and
-    spaces — ``code --wait``, or a quoted "/Applications/Visual Studio
-    Code.app/.../code" — and splitting on plain whitespace would try to execute
+    spaces: ``code --wait``, or a quoted "/Applications/Visual Studio
+    Code.app/.../code", and splitting on plain whitespace would try to execute
     "/Applications/Visual". Nothing is handed to a shell; this is only tokenising.
     """
     spec = ""
@@ -255,8 +255,8 @@ def _editor_command() -> list[str] | None:
 def _stamp(path: Path, actor: str) -> None:
     """Write who holds the sidecar lock, so the next editor is told a name.
 
-    Truncating the lock file does not disturb the flock — the lock lives on the
-    open file description, not on the bytes — and a stamp we fail to write costs
+    Truncating the lock file does not disturb the flock: the lock lives on the
+    open file description, not on the bytes, and a stamp we fail to write costs
     the next editor a name, never the exclusion itself. So this never raises.
     """
     when = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -280,8 +280,8 @@ def _holder(path: Path) -> str:
 def _install(doc_path: Path, content: bytes) -> None:
     """Put `content` at `doc_path` in one step. Raises OSError on failure.
 
-    Write-then-rename rather than writing over the doc: a reader — `--list`, a
-    grep, the other agent — must never catch the file half written, and a failure
+    Write-then-rename rather than writing over the doc: a reader: `--list`, a
+    grep, the other agent: must never catch the file half written, and a failure
     partway through must leave the previous version exactly as it was. The
     temporary lands in the same directory because rename is only atomic within
     one filesystem, and is dot-prefixed so it cannot show up as a doc if the
@@ -301,7 +301,7 @@ def _install(doc_path: Path, content: bytes) -> None:
             fh.flush()
             # fsync before the rename. Without it a crash can land the rename
             # while the bytes are still only in the page cache, and the doc comes
-            # back present but empty — which reads as "we decided nothing here"
+            # back present but empty, which reads as "we decided nothing here"
             # rather than as the loss it is.
             os.fsync(fh.fileno())
         os.chmod(tmp, mode)
@@ -437,7 +437,7 @@ def _edit(root: Path, slug: str, flags: dict) -> int:
 
     try:
         _stamp(sidecar, actor)
-        # The per-repo comms lock is deliberately NOT held here — see the module
+        # The per-repo comms lock is deliberately NOT held here: see the module
         # docstring. It is taken for the few milliseconds of _record() instead.
         code = _run_editor(command, doc_path, slug)
     finally:
@@ -458,7 +458,7 @@ def _edit(root: Path, slug: str, flags: dict) -> int:
 def main(argv: list[str]) -> int:
     """``argv`` is everything after ``comms-graph doc``."""
     if any(arg in ("-h", "--help", "-?") for arg in argv):
-        # Asking how a verb works must never have a side effect — and for a tool
+        # Asking how a verb works must never have a side effect, and for a tool
         # whose users are agents, this is the whole discovery path.
         print(USAGE)
         return EXIT_OK

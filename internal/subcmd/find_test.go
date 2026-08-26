@@ -4,7 +4,7 @@ import "testing"
 
 // TestFindRefFlagDoesNotSplitOnComma guards bug #R2-13: --ref must be taken
 // verbatim (StringArrayVar), NOT CSV-split (StringSliceVar). A value whose
-// kind:value contains a comma — e.g. a URL with query params — must remain a
+// kind:value contains a comma: e.g. a URL with query params: must remain a
 // single ref.
 func TestFindRefFlagDoesNotSplitOnComma(t *testing.T) {
 	cmd := NewFindCmd()

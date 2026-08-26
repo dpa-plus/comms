@@ -12,7 +12,7 @@ import (
 // The pre-edit hook has to exit 2 to block. Claude Code treats 2 as "block this
 // tool call and show stderr to the model" and EVERY other non-zero code as "the
 // hook itself failed", which lets the edit through. comms exited 1 here from the
-// day it shipped, so this hook never once blocked an edit in any session — while
+// day it shipped, so this hook never once blocked an edit in any session: while
 // a comms system error exited 2 and DID block. The behaviour was inverted.
 func TestPreEditHookExitsTwoSoClaudeCodeActuallyBlocks(t *testing.T) {
 	bin := buildCommsBinary(t)
@@ -128,7 +128,7 @@ func readLogLines(t *testing.T, home string) []string {
 // A finding only ever resurfaces through its path refs: claiming a file prints
 // prior findings on that path, and that is the only automatic read path in the
 // tool. On the real store 415 findings were filed while their author held an
-// open claim and carried no path ref at all — comms knew the file and discarded
+// open claim and carried no path ref at all: comms knew the file and discarded
 // it, so those findings were written once and never seen again.
 func TestFindingIsAnchoredToTheClaimTheAuthorHolds(t *testing.T) {
 	bin := buildCommsBinary(t)
@@ -212,7 +212,7 @@ func TestExplicitPathRefIsNotOverriddenByTheHeldClaim(t *testing.T) {
 }
 
 // A hook does not run where the file lives. Claude Code's working directory is
-// wherever the session started — routinely a parent folder holding several
+// wherever the session started: routinely a parent folder holding several
 // checkouts, and very often not a repository at all. Resolving the repository
 // from the process meant the hook failed on every edit whenever that was true,
 // and because "no repository" exited 2, that failure BLOCKED the edit. Installing
@@ -256,7 +256,7 @@ func TestHookResolvesTheRepoFromTheFileNotTheProcess(t *testing.T) {
 	}
 }
 
-// "No repository" is not "I cannot tell whether this is clear" — it is "there is
+// "No repository" is not "I cannot tell whether this is clear": it is "there is
 // nothing here to coordinate", and the only safe answer is to allow. Exiting 2
 // made every edit outside a checkout impossible, including creating a new file in
 // a directory that does not exist yet, which is what the editing tool does

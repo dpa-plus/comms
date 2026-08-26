@@ -41,7 +41,7 @@ func TestRosterSessionsKeepsSilentClaimHolder(t *testing.T) {
 
 // An actor whose session was deleted (retired, or its named session ended) but
 // that kept claiming afterward holds claims with NO Session entry. It must still
-// appear on the roster — otherwise its locks show in the claims list with no row
+// appear on the roster: otherwise its locks show in the claims list with no row
 // and no Release/Remove button, looking like claims that "won't go away".
 func TestRosterSessionsSurfacesOrphanClaimHolder(t *testing.T) {
 	now := time.Now()

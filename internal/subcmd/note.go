@@ -10,7 +10,7 @@ import (
 )
 
 // maxNoteRunes caps the body length. 200 Unicode runes (scalar values), NOT
-// bytes — per the plan's LOW-severity clarification.
+// bytes: per the plan's LOW-severity clarification.
 const maxNoteRunes = 200
 
 // NewNoteCmd builds `comms note "<≤200-char FYI>"`. Short ephemeral messages

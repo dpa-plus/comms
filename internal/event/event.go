@@ -29,7 +29,7 @@ const (
 
 	// The task graph. A task is what should happen; an edge is the order it must
 	// happen in and what the later task consumes from the earlier one; a state
-	// event moves a task along its two steps — do it, then a DIFFERENT agent
+	// event moves a task along its two steps: do it, then a DIFFERENT agent
 	// verifies it.
 	TypeTask      Type = "task"
 	TypeTaskEdge  Type = "task_edge"
@@ -39,7 +39,7 @@ const (
 	// overlapping scope. It is the only moment that proves the tool did its job,
 	// and until now it was the one moment nothing wrote down: the conflict went to
 	// stderr and the process exited. That is why a store of 4,356 claims reported
-	// zero collisions ever prevented — not because none were, but because a
+	// zero collisions ever prevented: not because none were, but because a
 	// prevented one left no trace.
 	TypeBlocked Type = "blocked"
 )
@@ -76,7 +76,7 @@ func KnownTypes() string {
 // Readers skip such a line and keep going (see Read); WRITERS still refuse to
 // emit one (see Encode). That asymmetry is the whole point: a binary must never
 // author a type it cannot fold, but it must survive meeting one. Without it,
-// adding a sixth event type would brick every older binary on the machine — a
+// adding a sixth event type would brick every older binary on the machine: a
 // single unrecognised line made Read abort, so `status`, `log`, `claim`, `note`
 // and the `check` pre-edit hook all failed on that repository at once.
 //
@@ -157,7 +157,7 @@ func Decode(line []byte) (Event, error) {
 // reconstruct claims/sessions, and the documented invariant is that IDs are
 // time-ordered AND monotonic. crypto/rand.Reader alone is NOT monotonic: two
 // same-millisecond IDs share the 48-bit timestamp prefix but get independent
-// random suffixes, so they sort in random order — which previously let
+// random suffixes, so they sort in random order, which previously let
 // same-millisecond events (e.g. a claim and its steal/release) replay out of
 // causal order. LockedMonotonicReader is safe for concurrent use.
 var entropy = &ulid.LockedMonotonicReader{MonotonicReader: ulid.Monotonic(rand.Reader, 0)}
@@ -166,8 +166,8 @@ var entropy = &ulid.LockedMonotonicReader{MonotonicReader: ulid.Monotonic(rand.R
 //
 // IDs minted within the same process in the same millisecond are guaranteed
 // strictly increasing via the shared monotonic entropy source above. On the
-// (astronomically unlikely) monotonic-overflow error — generating ~2^80 IDs in
-// one millisecond — we fall back to a fresh non-monotonic suffix rather than
+// (astronomically unlikely) monotonic-overflow error: generating ~2^80 IDs in
+// one millisecond: we fall back to a fresh non-monotonic suffix rather than
 // panic. Correctness does not depend on the fallback being monotonic: the state
 // reducer orders events by timestamp (see internal/state.Fold), not by ULID.
 func NewID(now time.Time) string {

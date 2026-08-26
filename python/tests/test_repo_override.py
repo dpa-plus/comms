@@ -2,13 +2,13 @@
 
 WHY THIS EXISTS AT ALL. On macOS a checkout under Desktop, Documents or
 Downloads can lose privacy access to the running process, and when it does,
-everything that calls getcwd() starts failing at once — comms, git, node. The
+everything that calls getcwd() starts failing at once: comms, git, node. The
 documented way out is to stop relying on the working directory: either pass the
 repository explicitly, or export it once for the session.
 
 That recovery is worth a test precisely because it is used at the worst moment.
-It was missing from this build entirely — the briefing taught `--repo`, and this
-build answered "unknown comms command '--repo'" — which is the sort of gap that
+It was missing from this build entirely: the briefing taught `--repo`, and this
+build answered "unknown comms command '--repo'", which is the sort of gap that
 is invisible until the one day it is not.
 """
 
@@ -95,7 +95,7 @@ def test_an_at_prefixed_name_is_the_same_agent(repo, monkeypatch, capsys):
     """IF THIS FAILS: an agent is locked out of its own files and told nothing.
 
     Every surface PRINTS an actor as "@name", so an agent copying its own name
-    off the board and passing it back arrives as "@name" — and a stored "@name"
+    off the board and passing it back arrives as "@name", and a stored "@name"
     was a DIFFERENT agent from "name". Found on a real store: one agent held 24
     events under "@claude-karte-fachebenen" while everyone else was plain.
 
@@ -116,7 +116,7 @@ def test_an_at_prefixed_name_is_the_same_agent(repo, monkeypatch, capsys):
 def test_an_at_prefixed_name_already_on_disk_heals(repo, monkeypatch, capsys):
     """The log is append-only, so events written before the writer refused "@"
     are still there. Both spellings must fold to one agent or that agent stays
-    locked out forever — folding on READ is the only repair the format allows."""
+    locked out forever: folding on READ is the only repair the format allows."""
     from datetime import datetime, timezone
 
     from comms_graph import log as clog
@@ -142,7 +142,7 @@ def test_an_at_prefixed_actor_is_normalised_for_every_verb(repo, monkeypatch, ca
 
     Every surface PRINTS an actor as "@name", so "@name" is exactly what an agent
     copies out of `status` and passes back to `--as`. Stripping it in one helper
-    was not enough — `check --staged` read the flag directly and reported an
+    was not enough: `check --staged` read the flag directly and reported an
     agent's own eleven staged files as "claimed by somebody else", naming that
     somebody as itself in the same line.
 

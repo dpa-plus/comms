@@ -1,8 +1,8 @@
 """Joining a claim to the map, and turning that into advice.
 
 The rule both modules are built around: a miss must be LOUD. A name that
-resolves to nothing looks exactly like a piece of work with no neighbours —
-quiet, and apparently fine — and a quarter of names typed from memory name
+resolves to nothing looks exactly like a piece of work with no neighbours:
+quiet, and apparently fine, and a quarter of names typed from memory name
 something that does not exist. Every test here is ultimately about not printing
 an all-clear over a question that was never answered.
 
@@ -61,7 +61,7 @@ def test_a_symbol_that_exists_resolves_to_exactly_that_symbol(graph):
 
 def test_a_function_claimed_the_way_people_type_it_still_resolves(graph):
     """IF THIS FAILS: every ordinary function claim misses, because the map
-    labels functions `charge()` while a person writes `path#charge` — nobody
+    labels functions `charge()` while a person writes `path#charge`: nobody
     types the brackets. And a miss reads as "not in the map", which is the exact
     false all-clear this module exists to prevent."""
     assert [p.node_id for p in resolve(graph, parse_scope(f"{SERVER}#charge")).places] == [
@@ -71,7 +71,7 @@ def test_a_function_claimed_the_way_people_type_it_still_resolves(graph):
 
 def test_a_typo_comes_back_as_a_reason_and_a_suggestion(graph):
     """IF THIS FAILS: a mistyped symbol produces an empty result that the caller
-    cannot tell apart from "checked, nothing near it" — so the agent is told it
+    cannot tell apart from "checked, nothing near it", so the agent is told it
     is clear to work on a name that does not exist."""
     res = resolve(graph, parse_scope(f"{SERVER}#chrage"))
     assert not res.places
@@ -83,7 +83,7 @@ def test_a_case_only_miss_says_so_in_those_words(graph):
     """IF THIS FAILS: the user stares at a name that looks identical to the one
     they typed and concludes the tool is broken. Case matters here because the
     blocking layer treats `Charge` and `charge` as different symbols, so the two
-    layers must agree — but a human needs telling why."""
+    layers must agree, but a human needs telling why."""
     res = resolve(graph, parse_scope(f"{SERVER}#Charge"))
     assert not res.places
     assert "case" in res.miss_reason.lower()
@@ -92,7 +92,7 @@ def test_a_case_only_miss_says_so_in_those_words(graph):
 def test_a_path_the_map_never_saw_is_distinguished_from_a_typo(graph, tmp_path):
     """IF THIS FAILS: "you spelled the filename wrong" and "this file exists but
     was never indexed" produce the same message, and the two need opposite
-    actions — fix the name, versus rebuild the map. Conflating them is how a typo
+    actions: fix the name, versus rebuild the map. Conflating them is how a typo
     gets mistaken for an isolated file."""
     (tmp_path / "src" / "api").mkdir(parents=True)
     (tmp_path / "src" / "api" / "new.ts").write_text("export const x = 1\n")
@@ -106,7 +106,7 @@ def test_a_path_the_map_never_saw_is_distinguished_from_a_typo(graph, tmp_path):
 
 def test_no_map_at_all_is_a_reason_not_a_silence(graph):
     """IF THIS FAILS: a project that has never been extracted reports "nothing
-    near your work" for every claim — an all-clear derived from no data at all."""
+    near your work" for every claim: an all-clear derived from no data at all."""
     res = resolve(None, parse_scope(f"{SERVER}#charge"))
     assert not res.places
     assert "extract" in res.miss_reason
@@ -145,7 +145,7 @@ def test_a_node_with_no_line_does_not_answer_a_line_claim(graph):
 
 
 def test_a_whole_file_claim_covers_everything_recorded_in_that_file(graph):
-    """IF THIS FAILS: the commonest claim of all — a file — resolves to less than
+    """IF THIS FAILS: the commonest claim of all: a file: resolves to less than
     the file, so contact advice about it is incomplete without saying so."""
     res = resolve(graph, parse_scope(SERVER))
     assert {p.node_id for p in res.places} == {"f:server", "s:charge", "s:refund", "s:helper"}
@@ -154,7 +154,7 @@ def test_a_whole_file_claim_covers_everything_recorded_in_that_file(graph):
 
 def test_the_path_a_person_typed_matches_the_path_that_was_indexed(graph):
     """IF THIS FAILS: every claim misses on projects whose scan recorded a
-    leading `./`, and the miss reads as "your file is not in the map" — a whole
+    leading `./`, and the miss reads as "your file is not in the map": a whole
     project quietly told that none of its files exist."""
     g = nx.DiGraph()
     node(g, "s:charge", "charge()", f"./{SERVER}", 20)
@@ -171,16 +171,16 @@ def held(graph, actor, scope):
 
 
 def test_the_same_symbol_claimed_twice_is_reported_as_the_same_ground(graph):
-    """IF THIS FAILS: the strongest signal there is — two people naming the one
-    symbol — is buried among the weak "nearby" hints, or missed entirely."""
+    """IF THIS FAILS: the strongest signal there is: two people naming the one
+    symbol: is buried among the weak "nearby" hints, or missed entirely."""
     mine = resolve(graph, parse_scope(f"{SERVER}#charge"))
     report = contact(graph, mine, [held(graph, "bob", f"{SERVER}#charge")])
     assert [(t.other_actor, t.kind) for t in report.touches] == [("bob", "same")]
 
 
 def test_work_next_door_is_flagged_with_the_connection_that_links_it(graph):
-    """IF THIS FAILS: the one thing this feature actually pays back — "the code
-    you named leans on code somebody else named" — is either silent or unreadable
+    """IF THIS FAILS: the one thing this feature actually pays back: "the code
+    you named leans on code somebody else named": is either silent or unreadable
     because it cannot say WHY it fired. A `calls` edge read straight out of the
     source deserves more attention than a guessed one, so the relation and its
     confidence have to survive."""
@@ -192,8 +192,8 @@ def test_work_next_door_is_flagged_with_the_connection_that_links_it(graph):
 
 
 def test_whoever_holds_the_callee_is_warned_too(graph):
-    """IF THIS FAILS: which of two agents gets the warning depends on which of
-    them happened to run the check — and it is the person holding the CALLEE
+    """IF THIS FAILS, which of two agents gets the warning depends on which of
+    them happened to run the check, and it is the person holding the CALLEE
     (whose change breaks the caller) who is left uninformed. Direction was tested
     and failed to predict anything; nearness is symmetric or it is nothing."""
     from_callee = contact(
@@ -206,7 +206,7 @@ def test_whoever_holds_the_callee_is_warned_too(graph):
 
 def test_an_unrelated_claim_produces_no_touch(graph):
     """IF THIS FAILS: everything is "near" everything, the warning fires on every
-    claim, and people stop reading it — which costs the real warnings too."""
+    claim, and people stop reading it, which costs the real warnings too."""
     mine = resolve(graph, parse_scope(f"{SERVER}#refund"))
     report = contact(graph, mine, [held(graph, "bob", f"{BILLING}#invoice")])
     assert report.touches == []
@@ -216,7 +216,7 @@ def test_an_unrelated_claim_produces_no_touch(graph):
 def test_a_structural_edge_does_not_hide_a_real_one(graph):
     """IF THIS FAILS: on a multigraph, a parallel `contains` edge (structural,
     meaningless for contact) masks a `calls` edge between the same two nodes, and
-    the pair is reported as no contact at all — a false all-clear produced by the
+    the pair is reported as no contact at all: a false all-clear produced by the
     map having MORE information, not less."""
     g = nx.MultiDiGraph()
     node(g, "s:charge", "charge()", SERVER, 20)
@@ -235,7 +235,7 @@ def test_a_structural_edge_does_not_hide_a_real_one(graph):
 def test_containment_alone_does_not_make_two_symbols_neighbours(graph):
     """IF THIS FAILS: every symbol in a file is "near" every other symbol in that
     file, because the file contains them both. That is precisely the mush that
-    makes the advice worthless — and it would fire on the most ordinary pair of
+    makes the advice worthless, and it would fire on the most ordinary pair of
     claims there is, two functions in one file."""
     mine = resolve(graph, parse_scope(f"{SERVER}#charge"))
     report = contact(graph, mine, [held(graph, "bob", f"{SERVER}#helper")])
@@ -245,7 +245,7 @@ def test_containment_alone_does_not_make_two_symbols_neighbours(graph):
 def test_somebody_elses_unplaceable_claim_is_reported_not_dropped(graph):
     """IF THIS FAILS: the all-clear prints over live work. The commonest reason
     another agent's claim cannot be placed is that the file was created since the
-    last extract — which is exactly what a parallel agent has just done, and
+    last extract, which is exactly what a parallel agent has just done, and
     exactly when a collision is most likely."""
     others = [held(graph, "bob", "src/api/brand-new.ts")]
     report = contact(graph, resolve(graph, parse_scope(f"{SERVER}#charge")), others)
@@ -274,7 +274,7 @@ def test_an_ordinary_file_claim_is_not_treated_as_too_broad(graph):
     """IF THIS FAILS: the feature bails out on nearly every real invocation. A
     whole-file claim is the natural unit and resolves to one node per symbol, so
     counting resolved NODES against the cap made an ordinary file claim exceed it
-    — and the advice was "narrow it to a file, a symbol, or a line range" on a
+   , and the advice was "narrow it to a file, a symbol, or a line range" on a
     claim that already was a file."""
     mine = resolve(graph, parse_scope(SERVER))
     assert len(mine.places) > MAX_SCOPES
@@ -284,7 +284,7 @@ def test_an_ordinary_file_claim_is_not_treated_as_too_broad(graph):
 
 def test_a_job_that_names_too_many_places_says_so_instead_of_guessing(graph):
     """IF THIS FAILS: a job that claims half the repository produces a wall of
-    "nearby" lines that nobody can act on, which is the same as saying nothing —
+    "nearby" lines that nobody can act on, which is the same as saying nothing:
     but without admitting it."""
     mine = resolve(graph, parse_scope(SERVER))
     report = contact(graph, mine, [held(graph, "bob", f"{BILLING}#rate")],
@@ -296,7 +296,7 @@ def test_a_job_that_names_too_many_places_says_so_instead_of_guessing(graph):
 def test_nothing_found_is_never_rendered_as_a_guarantee(graph):
     """IF THIS FAILS: the output promises independence it cannot deliver. Between
     a third and a half of file pairs that really do change together are invisible
-    to the map, so "no warning" must never be printed as "safe" — people act on
+    to the map, so "no warning" must never be printed as "safe": people act on
     that wording, and once it is wrong twice they stop reading any of it."""
     mine = resolve(graph, parse_scope(f"{SERVER}#refund"))
     report = contact(graph, mine, [held(graph, "bob", f"{BILLING}#invoice")])
@@ -319,8 +319,8 @@ def test_a_nearby_hint_is_never_worded_as_a_conflict(graph):
 
 
 def test_the_strong_case_is_printed_before_the_weak_one(graph):
-    """IF THIS FAILS: the one line worth acting on — somebody else holds this
-    exact symbol — is buried under advisory neighbours and gets skimmed past."""
+    """IF THIS FAILS: the one line worth acting on: somebody else holds this
+    exact symbol: is buried under advisory neighbours and gets skimmed past."""
     mine = resolve(graph, parse_scope(f"{SERVER}#charge"))
     report = contact(
         graph, mine,

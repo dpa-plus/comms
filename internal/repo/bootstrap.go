@@ -14,7 +14,7 @@ import (
 // per-machine .lock file is created first (used by callers to serialize log
 // writes), and per-repo files use O_EXCL so racing creators don't clobber.
 //
-// Bootstrap is idempotent — calling it on an already-set-up repo is a no-op.
+// Bootstrap is idempotent: calling it on an already-set-up repo is a no-op.
 func Bootstrap(p paths.Paths) error {
 	// 1. Per-machine log dir + repo-path canary (outside iCloud).
 	if err := os.MkdirAll(p.LogDir, 0o700); err != nil {

@@ -5,7 +5,7 @@ import "strings"
 // PathsOverlap reports whether two POSIX-style glob patterns can match at
 // least one path in common.
 //
-// This is a segment-aware string algorithm — we never expand against the
+// This is a segment-aware string algorithm: we never expand against the
 // real filesystem. Splits on `/`, recurses over segment pairs:
 //
 //	literal ∩ literal       → equal? then continue, else no-overlap
@@ -18,7 +18,7 @@ import "strings"
 // Special handling:
 //   - `**` matches zero or more segments (so `src/**/foo` overlaps `src/foo`).
 //   - `*` matches exactly one segment.
-//   - All other glob characters (?, [, ]) are treated as literals — overkill
+//   - All other glob characters (?, [, ]) are treated as literals: overkill
 //     to support full glob syntax for MVP.
 //
 // The function is total: it never panics and returns a definite yes/no.
@@ -124,8 +124,8 @@ func segmentsOverlap(a, b []string) bool {
 // the same segment name. Both patterns must NOT contain `**` (caller's job).
 //
 // Within a segment, `*` matches any run of zero or more characters (it never
-// crosses `/`, but there are no `/` here anyway). All other characters —
-// including `?`, `[`, `]` — are treated as literals, matching only themselves.
+// crosses `/`, but there are no `/` here anyway). All other characters:
+// including `?`, `[`, `]`: are treated as literals, matching only themselves.
 func singleSegmentOverlap(a, b string) bool {
 	// Fast path: both literal.
 	if !containsStar(a) && !containsStar(b) {
@@ -142,7 +142,7 @@ func singleSegmentOverlap(a, b string) bool {
 // old code only compared the leading and trailing literal anchors and assumed
 // anything between two compatible anchors could be reconciled. That produced
 // false positives whenever interior literals imposed required characters or a
-// minimum length — e.g. "a*a" vs "a" (the second has no room for the trailing
+// minimum length: e.g. "a*a" vs "a" (the second has no room for the trailing
 // 'a'), or "a*b*c" vs "axc" (the 'b' is mandatory but absent from "axc").
 //
 // We instead run a dynamic program over byte positions (i, j) where i indexes
@@ -151,7 +151,7 @@ func singleSegmentOverlap(a, b string) bool {
 //
 //   - a[i] == '*': the star may consume one byte of the opposing pattern
 //     (advance j, star stays) or be skipped, consuming zero (advance i).
-//   - b[j] == '*': symmetric — advance i (star stays) or skip it (advance j).
+//   - b[j] == '*': symmetric: advance i (star stays) or skip it (advance j).
 //   - both literals: they must be the equal byte; advance both.
 //
 // The accept state is dp[len(a)][len(b)] == true (both fully consumed). We

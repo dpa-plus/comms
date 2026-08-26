@@ -102,7 +102,7 @@ class Attributed:
     change: Change
     #: "" when the log says nothing. Never a guess.
     actor: str = ""
-    #: held | released | "" — how we know, so a reader can weigh it.
+    #: held | released | "": how we know, so a reader can weigh it.
     basis: str = ""
     #: The claim's stated intent, when there is a live claim.
     intent: str = ""

@@ -21,7 +21,7 @@ is recognised as ``claude-dev`` and cannot sign off its own work.
 
 **A cycle must be survivable.** ``fold`` returns no error and runs on the
 pre-edit hot path, in front of every tool call an agent makes. So the reachability
-pass is Kahn's algorithm — iterative, no recursion, terminating on any input —
+pass is Kahn's algorithm: iterative, no recursion, terminating on any input:
 and a task inside or downstream of a cycle resolves deterministically to the
 ``cycle`` phase. It is never a hang, never a crash, and never a stack overflow on
 somebody's laptop because two tasks were declared to follow each other.
@@ -35,7 +35,7 @@ import unicodedata
 from typing import Any, Iterable, Mapping
 
 # --------------------------------------------------------------------------
-# Phases — derived, never written into an event
+# Phases: derived, never written into an event
 # --------------------------------------------------------------------------
 
 #: Nothing upstream is outstanding and nobody has picked it up.
@@ -54,7 +54,7 @@ PHASE_CYCLE = "cycle"
 #: B uses something A produces. Reworking A flags B for recheck, because what
 #: B was built against may have moved.
 #:
-#: There used to be two words for this — `interface` and `artifact` — and every
+#: There used to be two words for this: `interface` and `artifact`, and every
 #: place the kind was READ treated them identically. So writing an edge meant
 #: choosing between synonyms, every time, for no change in behaviour. Both are
 #: still accepted and fold to this, so existing logs are unaffected; `consumes`
@@ -89,7 +89,7 @@ class TaskEdge:
     from_: str
     to: str
     kind: str = EDGE_SEQUENCE
-    #: What ``to`` consumes from ``from_`` — an interface, a schema, a file's
+    #: What ``to`` consumes from ``from_``: an interface, a schema, a file's
     #: public surface. This is what reaches whoever picks up ``to``, and it is
     #: why a rejection can be precise about who else needs to look again.
     provides: str = ""
@@ -118,17 +118,17 @@ class Task:
     doers: list[str] = field(default_factory=list)
 
     #: The actor whose implementation is awaiting review, or whose work was
-    #: verified. Cleared by a rejection — that is the rework edge.
+    #: verified. Cleared by a rejection: that is the rework edge.
     did: str = ""
     #: EVERYONE who has submitted work on this task, not just the most recent.
     #: `did` is overwritten by each submission, so with only that field a task
-    #: worked by alice and then by bob remembered bob — and alice, who had also
+    #: worked by alice and then by bob remembered bob, and alice, who had also
     #: worked on it, was then a "different agent" and could sign it off.
     submitters: list[str] = field(default_factory=list)
     #: Everyone who has ever held a claim tagged to this task, whether or not
     #: they submitted. `submitters` only knows who pressed `done`; a second
     #: agent recruited onto a multi-slot task and still mid-work has written
-    #: half of it and is not a reviewer. Persistent on purpose — releasing the
+    #: half of it and is not a reviewer. Persistent on purpose: releasing the
     #: file ends your turn on the task, it does not unwrite what you wrote.
     workers: list[str] = field(default_factory=list)
     #: What the doer REPORTED for each declared check, name -> result. The fold
@@ -143,13 +143,13 @@ class Task:
     verified_by: str = ""
     #: True once a verification has ever been accepted, and never cleared by a
     #: later rejection. It is what separates "this was signed off and has since
-    #: been reworked" from "this was never signed off at all" — two situations
+    #: been reworked" from "this was never signed off at all": two situations
     #: with the same verified_by ("") and opposite consequences downstream.
     ever_verified: bool = False
     #: Whether finishing this task parks it for somebody else to check.
     #:
     #: OPT-IN, and that is a reversal. The original design made review
-    #: unconditional because self-review measurably fails — which is true, and
+    #: unconditional because self-review measurably fails, which is true, and
     #: still the reason `task review` refuses to let you sign off your own work.
     #: What it got wrong is that an unconditional gate is not free: run against
     #: real work, four of eight tasks sat in `review` with nobody reviewing,
@@ -168,7 +168,7 @@ class Task:
     #: this tool, and it now sits in the graph permanently as a three-file
     #: neighbour of that agent's real work, outranking a genuine one-file
     #: neighbour. The harder people test, the more of it accumulates. A probe is
-    #: still a task — it is claimed, it is auditable — it is just not evidence
+    #: still a task: it is claimed, it is auditable: it is just not evidence
     #: about where the real work meets.
     probe: bool = False
     #: "independent" when the verifier's vendor differs from the doer's,
@@ -226,7 +226,7 @@ def base_actor(actor: str) -> str:
 
 
 # Cyrillic and Greek letters drawn the same as Latin ones. Folded to the Latin
-# letter for COMPARISON only — nothing here is ever stored or shown, and the log
+# letter for COMPARISON only: nothing here is ever stored or shown, and the log
 # keeps exactly the bytes that were written. Uppercase forms included because
 # casefold runs after this, not before.
 _LATIN_LOOKALIKES = str.maketrans({
@@ -250,7 +250,7 @@ _LATIN_LOOKALIKES = str.maketrans({
 def normalise_actor(actor: str) -> str:
     """An actor name reduced to what it LOOKS like, for comparison only.
 
-    Never stored or displayed — the log keeps exactly what was written.
+    Never stored or displayed: the log keeps exactly what was written.
 
     Closes the cheap disguises: a different case, a zero-width space, a
     non-breaking space, a compatibility character, and the Cyrillic and Greek
@@ -258,13 +258,13 @@ def normalise_actor(actor: str) -> str:
 
     That last group is here because a real attempt found it: with no host
     session id there is no hello, so :func:`same_agent` has only the name to go
-    on, and ``nоra`` with a Cyrillic "о" signed off work ``nora`` had written —
+    on, and ``nоra`` with a Cyrillic "о" signed off work ``nora`` had written:
     the board, the brief and the successor's unblock all asserting an
     independent review, under a name nobody could tell apart on screen.
 
     This is a fixed table of the letters that actually collide in a Latin name,
     not a full confusables database. It closes the realistic disguise and does
-    not pretend to close every possible one — which is why this stays a filter
+    not pretend to close every possible one, which is why this stays a filter
     and the session comparison in :func:`same_agent` is the real gate.
     """
     text = unicodedata.normalize("NFKC", actor or "")
@@ -285,7 +285,7 @@ def same_agent(a: str, b: str, sessions: Mapping[str, Any] | None = None) -> boo
 
     Comparing the raw names was not enough, and the ways past it were not exotic:
     ``CLAUDE-DEV`` reviewing ``claude-dev`` worked. So did a zero-width space, a
-    U+2010 hyphen, and a Cyrillic "a" — each printing a line indistinguishable
+    U+2010 hyphen, and a Cyrillic "a": each printing a line indistinguishable
     from a real review, because the difference is invisible on screen.
 
     TWO LAYERS, because neither alone is enough:
@@ -293,8 +293,8 @@ def same_agent(a: str, b: str, sessions: Mapping[str, Any] | None = None) -> boo
     * Normalised names catch the cheap disguises. They cannot catch a homoglyph.
     * The AGENT SESSION catches everything, because it ignores names entirely.
       Every actor writes a hello carrying the host agent's session id, and two
-      names from one process share it. The log already recorded this — the
-      pre-edit hook has used it for identity since it was written — the review
+      names from one process share it. The log already recorded this: the
+      pre-edit hook has used it for identity since it was written: the review
       gate simply never looked. That is what makes a homoglyph pointless: you
       may call yourself anything, but you are still the same process.
 
@@ -316,7 +316,7 @@ def _failed_checks(required: Iterable[str], data: Mapping[str, Any]) -> list[str
     """Required checks whose reported result is not a pass.
 
     Anything that is not the string "pass" counts as a failure, including a
-    check that was simply not reported. Silence is not a pass — the commonest
+    check that was simply not reported. Silence is not a pass: the commonest
     way for a gate like this to rot is for the thing it gates on to quietly stop
     running, and a missing result should read exactly like a failing one.
     """
@@ -355,7 +355,7 @@ def apply_task(tasks: dict[str, Task], ev: Any, string_of, int_of, ref_list) -> 
         t.size = size.upper()
     checks = ref_list(ev.data, "checks")
     # Absent on every task written before this existed, which folds to
-    # False — those tasks stop demanding a review nobody was giving them.
+    # False: those tasks stop demanding a review nobody was giving them.
     needs_review = bool(ev.data.get("review"))
     probe = bool(ev.data.get("probe"))
     if checks:
@@ -365,7 +365,7 @@ def apply_task(tasks: dict[str, Task], ev: Any, string_of, int_of, ref_list) -> 
             # A NEW required check invalidates a submission made before it
             # existed. The gate's contract is "every declared check passed when
             # this was submitted", and a check added afterwards was never
-            # reported — so leaving the submission standing let a task close
+            # reported, so leaving the submission standing let a task close
             # with a required check that had never run. Declaring the checks
             # late would otherwise be a way around the gate.
             #
@@ -412,7 +412,7 @@ def apply_task_edge(edges: list[TaskEdge], ev: Any, string_of,
             # kind already recorded: since the kind became load-bearing, that
             # downgraded interface to sequence and flipped a task a rejection
             # had reopened straight back to closed, with nobody re-reviewing it.
-            # Same rule apply_task uses for checks — only non-empty fields win.
+            # Same rule apply_task uses for checks: only non-empty fields win.
             for existing in edges:
                 if existing.from_ == from_ and existing.to == to:
                     kind = existing.kind
@@ -442,7 +442,7 @@ def _authored_by(task: "Task", actor: str, sessions=None) -> str | None:
     """The name this actor previously submitted work under, if any.
 
     Checks EVERY submitter rather than just the most recent. Two agents taking
-    turns on one task — alice submits, bob submits — left `did` holding only
+    turns on one task: alice submits, bob submits: left `did` holding only
     bob, so alice read as a different agent and could sign off work she had
     written half of. Review means somebody who did not build it looked at it;
     "did not build the last revision of it" is not the same claim.
@@ -466,8 +466,8 @@ def apply_task_state(
     """A lifecycle transition, with every rule that guards it.
 
     All three refusals live here rather than in the command layer, because a
-    rule enforced only at the CLI is a rule that a second writer — another
-    implementation, a repaired log, a script — does not have to obey. The fold
+    rule enforced only at the CLI is a rule that a second writer: another
+    implementation, a repaired log, a script: does not have to obey. The fold
     is the one place every reader agrees on.
     """
     task_id = string_of(ev.data, "task")
@@ -502,7 +502,7 @@ def apply_task_state(
         t.verified_by = ""
         # Clear the independence with the verification it describes. It used to
         # survive a resubmission, so after a rework `brief` on a successor said
-        # "signed off by @ themselves" — with a bare @ where the name had been —
+        # "signed off by @ themselves": with a bare @ where the name had been:
         # and the drawing painted the amber dashed self-signed node for a task
         # sitting in review with no verifier at all. A label outliving the thing
         # it labels is worse than no label.
@@ -539,7 +539,7 @@ def apply_task_state(
         t.ever_verified = True
         if author is not None:
             # An ESCAPE, not a loophole. Once two agents have both submitted a
-            # task, neither may verify it and only a third party can move it —
+            # task, neither may verify it and only a third party can move it:
             # which on a two-agent run is nobody, so the task and everything
             # after it stopped forever. Refusing to record anything is not
             # safety, it is a stall.
@@ -554,7 +554,7 @@ def apply_task_state(
             t.independence = independence_of(ev.actor, t.did)
         # The CLI has always written this; nothing read it. Only the `done`
         # branch extended notes, so a verifier's "how I checked it" was
-        # appended to the log and then dropped by the fold — present in the
+        # appended to the log and then dropped by the fold: present in the
         # bytes, absent from every surface. For a tool whose whole output is
         # independent verification, that was the one fact worth keeping.
         checked = ref_list(ev.data, "notes")
@@ -571,12 +571,12 @@ def apply_task_state(
         # is not ready, which is the outcome we want to be easy.
         #
         # Barring it created a deadlock: once alice and bob had both submitted,
-        # neither could verify (correct — they wrote it) and neither could
+        # neither could verify (correct: they wrote it) and neither could
         # reject either, so the task and everything downstream of it was stuck
         # until a third party appeared. On a two-agent run there is no third
         # party. A rejection returns the task to being worked on and costs
         # nobody anything; refusing one buys no safety at all.
-        # The rework edge. The graph is NOT redrawn — the task simply goes back
+        # The rework edge. The graph is NOT redrawn: the task simply goes back
         # to being worked on, and the findings travel with it so whoever picks
         # it up reads why it came back.
         t.did = ""
@@ -584,8 +584,8 @@ def apply_task_state(
         t.verification = ""
         # And the label describing that sign-off. Clearing this on resubmission
         # but not on rejection left the identical bug reachable by the other
-        # route: `brief` on a SUCCESSOR read "signed off by @ themselves" —
-        # a bare @ where the name had been — about a predecessor the same
+        # route: `brief` on a SUCCESSOR read "signed off by @ themselves":
+        # a bare @ where the name had been: about a predecessor the same
         # command had just called `ready`, and the drawing painted it amber
         # and dashed. Two surfaces read `independence` alone; both believed it.
         t.independence = ""
@@ -630,7 +630,7 @@ def _ever_finished(t: Any) -> bool:
     """The same question about the PAST, not the present.
 
     `ever_verified` exists to tell "reworked after a real sign-off" apart from
-    "never legitimately started" — both leave `verified_by` empty. A task that
+    "never legitimately started": both leave `verified_by` empty. A task that
     never required review has no sign-off to have had, so being done once is the
     equivalent evidence.
     """
@@ -646,7 +646,7 @@ def derive_phases(
     """Compute every task's phase from the graph and the live claims.
 
     Runs after the main fold, on every fold, so nothing here may raise and
-    nothing may fail to terminate — this is on the path of every pre-edit check.
+    nothing may fail to terminate: this is on the path of every pre-edit check.
 
     ``sessions`` matters: the review gate answers "is this the same agent?" with
     them, and this used to answer it without. One process under two names was
@@ -711,13 +711,13 @@ def derive_phases(
         # Compute this FIRST and for every task, not only for ones nobody has
         # touched. Testing verified_by ahead of it let a task that was never
         # startable be marked done, verified, and reported CLOSED while its own
-        # predecessor sat at ready — and `next` then offered its successors as
+        # predecessor sat at ready, and `next` then offered its successors as
         # startable, so unbuilt work unblocked more unbuilt work.
         #
         # DONE is not enough for a predecessor: a successor waits for VERIFIED.
         # That is the whole point of putting review on the critical path.
         # Which unverified predecessors actually hold this task back depends on
-        # whether it is finished yet — and that is what the edge KIND is for.
+        # whether it is finished yet, and that is what the edge KIND is for.
         #
         # Not started or in flight: EVERY predecessor blocks. Ordering is
         # ordering, and "b comes after a" means what it says.
@@ -725,7 +725,7 @@ def derive_phases(
         # Already verified: only the ones it CONSUMES from can reopen it. If a
         # was reworked and b was built against a's interface, what b was built
         # against has moved and b has to be looked at again. If the edge was
-        # only ordering, a's rework says nothing about b — reopening it would
+        # only ordering, a's rework says nothing about b: reopening it would
         # invalidate finished, reviewed work on no evidence, and after a couple
         # of those nobody believes the board.
         #
@@ -741,7 +741,7 @@ def derive_phases(
                 # Finished, and it consumes from this predecessor: what it was
                 # built against has moved, so look again.
                 or kind == EDGE_CONSUMES
-                # Finished, ordering-only edge — but this predecessor has NEVER
+                # Finished, ordering-only edge, but this predecessor has NEVER
                 # been verified, so the successor was never legitimately
                 # startable and its sign-off jumped the queue. That is a
                 # different situation from a rework, and only ever_verified
@@ -778,7 +778,7 @@ def ready_tasks(tasks: dict[str, Task]) -> list[Task]:
     """Tasks nobody has picked up, most recently touched first.
 
     READY only. A task with a doer belongs to that doer until they submit or
-    let go of it — one task, one agent, which is the rule that removed a whole
+    let go of it: one task, one agent, which is the rule that removed a whole
     family of bugs. Every severity-1 the task graph ever had came from two
     agents sharing one: a review that covered half the work, a gate you could
     opt out of by never submitting, and a file release that silently closed the
@@ -791,7 +791,7 @@ def ready_tasks(tasks: dict[str, Task]) -> list[Task]:
 
 def awaiting_review(tasks: dict[str, Task], actor: str,
                     sessions: Mapping[str, Any] | None = None) -> list[Task]:
-    """Tasks this actor may verify — that is, anything they did not do."""
+    """Tasks this actor may verify: that is, anything they did not do."""
     # _authored_by, not same_agent(actor, t.did): the GATE bars everyone who
     # submitted, so checking only the most recent submitter made the board
     # recommend a review the CLI was guaranteed to refuse. The reader half and
@@ -804,7 +804,7 @@ def awaiting_review(tasks: dict[str, Task], actor: str,
 
 
 def incoming(edges: list[TaskEdge], task_id: str) -> list[TaskEdge]:
-    """Edges into a task — what it depends on, and what it consumes from each."""
+    """Edges into a task: what it depends on, and what it consumes from each."""
     return sorted((e for e in edges if e.to == task_id), key=lambda e: e.from_)
 
 

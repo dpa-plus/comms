@@ -1,7 +1,7 @@
 """The live board: the surface a person leaves open while agents work.
 
 Two things matter here and nothing else does. It must never go blank because one
-piece of data could not be read — a board that disappears when something is wrong
+piece of data could not be read: a board that disappears when something is wrong
 is worse than one that says what is wrong. And it must be read-only: the log is
 written under a lock, through a fold that enforces the rules, and a dashboard
 that could mutate it would be a second writer with none of those guarantees.
@@ -70,7 +70,7 @@ def test_the_page_ships_usable_css_and_script(board):
 
     This happened: the template was written with doubled braces for a .format()
     call that never happened, so `{{` and `}}` shipped literally and every CSS
-    rule and script block was invalid. Nothing errored — it just looked wrong.
+    rule and script block was invalid. Nothing errored: it just looked wrong.
     """
     repo, log_file, base = board
     _, body = _get(base + "/")
@@ -92,7 +92,7 @@ def test_an_unreadable_log_is_reported_rather_than_blanking_the_board(board):
 
 
 def test_a_missing_code_map_says_how_to_build_one(board):
-    """The map is optional — claims record and block without it — so its absence
+    """The map is optional: claims record and block without it, so its absence
     is a normal state that must read as a next step, not as a failure."""
     repo, log_file, base = board
     status, body = _get(base + "/map.html")
@@ -141,7 +141,7 @@ def test_the_stamp_changes_only_when_the_log_does(board):
 def test_concurrent_requests_never_serve_an_empty_page(board):
     """IF THIS FAILS: a frame goes blank with HTTP 200 and nothing in any log.
 
-    Building a page is not side-effect free — it renders to a file and reads it
+    Building a page is not side-effect free: it renders to a file and reads it
     back. Two requests missing the cache together (a browser fetching both
     frames, or a reload landing on top of a push) had both builders writing the
     same path at once, and one read it half-written.
@@ -221,7 +221,7 @@ def test_a_claim_is_quiet_because_its_HOLDER_went_silent(board, tmp_path):
 
 def test_the_board_names_a_dependency_loop(board):
     """A cycle is the one state a plan cannot recover from on its own, and it
-    was computed inside the task-graph page's side panel — which the board
+    was computed inside the task-graph page's side panel, which the board
     hides to give the drawing room. So it was invisible where people watch."""
     from comms_graph import server as cserver
 
@@ -248,7 +248,7 @@ def test_the_board_names_a_dependency_loop(board):
 
 
 def test_a_quiet_board_says_so_rather_than_showing_nothing(board):
-    """No alerts must be a statement, not an absence — the reader has to be able
+    """No alerts must be a statement, not an absence: the reader has to be able
     to tell "nothing is wrong" from "the board did not load"."""
     from comms_graph import server as cserver
 
@@ -274,7 +274,7 @@ def test_who_is_here_lists_everyone_who_acted_not_only_who_said_hello(board):
     events = [
         _at(0, "hello", "claude-dev", 10, {"agent_session": "sA", "vendor": "anthropic"}),
         _at(0, "claim", "claude-dev", 9, {"intent": "a"}, scope=["src/a.py"]),
-        # no hello at all — a harness that reports no session id
+        # no hello at all: a harness that reports no session id
         _at(0, "claim", "codex-dev", 8, {"intent": "b"}, scope=["src/b.py"]),
     ]
     events.sort(key=lambda e: e.ts)
@@ -298,7 +298,7 @@ def test_the_page_script_actually_parses(board):
 
     This has now happened twice, both times silently. First a template written
     with doubled braces for a .format() that never ran, so every CSS rule was
-    invalid. Then an escaped quote inside a triple-quoted Python string —
+    invalid. Then an escaped quote inside a triple-quoted Python string:
     `\\"..\\"` became `".."`, which closed the JS string early and killed the
     whole <script>. Nothing errors: the iframes still load, the header still
     draws, and the rail is simply never filled in.
@@ -328,7 +328,7 @@ def test_the_page_script_actually_parses(board):
 def test_the_page_draws_every_array_the_snapshot_carries(board):
     """IF THIS FAILS: data is collected on every push and rendered nowhere.
 
-    Every one of these was in the payload and undrawn at some point — findings
+    Every one of these was in the payload and undrawn at some point: findings
     for the whole life of the board, and the feed, the claim id and the
     verification evidence until the page was rebuilt around them.
     """
@@ -345,7 +345,7 @@ def test_the_graphs_cost_nothing_until_somebody_asks_for_them(board):
     """IF THIS FAILS: every page load pays for two vis-network layouts.
 
     The board used to mount both graphs permanently, side by side, so each got
-    half a window and the activity — the one thing with content all day — got
+    half a window and the activity: the one thing with content all day: got
     whatever was left. Now the stream is the page and both graphs live behind
     one overlay, loaded on first open.
     """
@@ -366,7 +366,7 @@ def test_an_agent_with_no_hello_is_not_declared_abandoned_while_it_works(board):
     A hello only exists when the host reports a session id, which in practice
     means Claude Code. `quiet` was computed from hellos, so an agent on any
     other harness went quiet an hour after taking ground no matter how hard it
-    was working — and the board contradicted itself on one screen: "last seen
+    was working, and the board contradicted itself on one screen: "last seen
     10 seconds ago" in the roster beside "idle 3 hours" on the claim, with an
     alert recommending the reader free it.
     """
@@ -406,7 +406,7 @@ def test_the_working_now_band_is_actually_visible(board):
 
     The card is a flex column whose body takes the remaining height, so a
     sibling between the header and the body collapses unless it opts out. The
-    band had five rows of content in the DOM and no height on screen — the one
+    band had five rows of content in the DOM and no height on screen: the one
     failure mode a markup assertion cannot catch, so this pins the CSS rule.
     """
     repo, log_file, base = board
@@ -416,7 +416,7 @@ def test_the_working_now_band_is_actually_visible(board):
         "nowBand has no flex-basis rule; it will collapse inside the card"
     )
     # and it must not reuse a class the inherited sheet already owns. `.held`
-    # there is a fade-in badge — absolute, opacity 0 — so the band rendered
+    # there is a fade-in badge: absolute, opacity 0, so the band rendered
     # with height and no visible content until it was given its own name.
     assert 'class="nowband"' in body, "the band lost its own class"
     assert 'class="held"' not in body, (
@@ -427,7 +427,7 @@ def test_the_working_now_band_is_actually_visible(board):
 def test_a_findings_text_reaches_the_feed(board):
     """IF THIS FAILS: every finding on the board renders as an empty quote line.
 
-    `find` writes a finding's text as data["summary"] — that is what the CLI
+    `find` writes a finding's text as data["summary"]: that is what the CLI
     writes, what the Go build wrote before it, and what the findings panel
     already reads. The feed builder read data["body"] alone, which only notes
     carry. So the board showed 1532 findings in the real store with the category
@@ -473,7 +473,7 @@ def _claim_as(repo, log_file, actor, scope, intent="held"):
 def test_the_board_can_free_a_claim_and_records_who_did_it(board, monkeypatch):
     """The one write this server does.
 
-    The board is otherwise read-only ON PURPOSE — the log is written under a lock
+    The board is otherwise read-only ON PURPOSE: the log is written under a lock
     through a fold that enforces the rules, and a dashboard writing around either
     would be a second writer with none of those guarantees. So this does not
     write around them: same lock, re-read and re-fold inside it, same release

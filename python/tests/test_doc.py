@@ -107,7 +107,7 @@ def _findings(repo):
 
 
 # ---------------------------------------------------------------------------
-# Reading — the path that matters most
+# Reading: the path that matters most
 # ---------------------------------------------------------------------------
 
 
@@ -229,7 +229,7 @@ def test_a_doc_with_broken_bytes_still_prints_and_says_so(tmp_path, monkeypatch)
 
 
 # ---------------------------------------------------------------------------
-# Names — the path-safety story
+# Names: the path-safety story
 # ---------------------------------------------------------------------------
 
 
@@ -240,7 +240,7 @@ def test_a_doc_with_broken_bytes_still_prints_and_says_so(tmp_path, monkeypatch)
 def test_a_name_that_could_leave_the_docs_directory_is_refused(bad, tmp_path, monkeypatch):
     """IF THIS FAILS: `doc ../../.ssh/id_rsa` prints a private key, and `--edit`
     with the same argument writes wherever the name points. The grammar is the
-    whole containment story — there is no second check behind it."""
+    whole containment story: there is no second check behind it."""
     repo = _repo(tmp_path, monkeypatch)
 
     code, out = _cli(repo, bad)
@@ -282,7 +282,7 @@ def test_an_edit_saves_what_the_editor_wrote(tmp_path, monkeypatch):
 
 def test_editing_an_unknown_name_creates_the_doc(tmp_path, monkeypatch):
     """IF THIS FAILS: writing the first doc in a repo needs a mkdir and a touch
-    first, which nothing tells an agent to do — so the first doc never gets
+    first, which nothing tells an agent to do, so the first doc never gets
     written."""
     repo = _repo(tmp_path, monkeypatch)
     _editor(tmp_path, 'printf "%s\\n" "we chose ALKIS" >> "$1"', monkeypatch)
@@ -366,7 +366,7 @@ def test_an_editor_setting_with_a_quoted_path_and_a_flag_is_honoured(tmp_path, m
 
 def test_two_agents_cannot_edit_one_doc_and_the_loser_is_told_who_has_it(tmp_path, monkeypatch):
     """IF THIS FAILS: two agents open the same doc and the second save silently
-    discards the first one's work. 'Busy' alone is not enough either — the agent
+    discards the first one's work. 'Busy' alone is not enough either: the agent
     that is refused needs a name to go and talk to."""
     repo = _repo(tmp_path, monkeypatch)
     _write_doc(repo, "merge-develop", "# M\n\nreason\n")
@@ -426,7 +426,7 @@ def test_the_repo_lock_is_free_while_the_editor_is_open(tmp_path, monkeypatch):
 def test_a_saved_edit_is_recorded_the_way_the_go_build_records_it(tmp_path, monkeypatch):
     """IF THIS FAILS: doc edits are invisible to the other build. Both builds read
     one log, so a different category, summary or ref spelling for the same fact is
-    dropped silently by the reader that did not write it — no error, just a wiki
+    dropped silently by the reader that did not write it: no error, just a wiki
     that appears never to change."""
     repo = _repo(tmp_path, monkeypatch)
     _editor(tmp_path, 'printf "%s\\n" "ALKIS via WFS" >> "$1"', monkeypatch)

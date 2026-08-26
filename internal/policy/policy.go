@@ -1,4 +1,4 @@
-// Package policy loads `.comms/policy.txt` — the list of risky files where a
+// Package policy loads `.comms/policy.txt`: the list of risky files where a
 // whole-file claim is too coarse.
 //
 // Format:
@@ -30,7 +30,7 @@ type Policy struct {
 	Paths []string
 }
 
-// Load reads policy.txt from the given path. A missing file is fine — it
+// Load reads policy.txt from the given path. A missing file is fine: it
 // returns an empty Policy. Malformed entries return a wrapping error so the
 // CLI can map to exit 2.
 func Load(path string) (*Policy, error) {

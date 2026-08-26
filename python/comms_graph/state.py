@@ -1,7 +1,7 @@
 """Fold the comms event log into the current state of the world.
 
-Port of comms' internal/state/state.go (the coordination half — the task graph
-lands separately). Given the events, it answers: which claims are live, who is
+Port of comms' internal/state/state.go (the coordination half: the task graph
+lands separately). Given the events, it answers, which claims are live, who is
 still around, what was found, and which claims were refused.
 
 Two properties are load-bearing and everything below is arranged around them:
@@ -50,12 +50,12 @@ __all__ = [
 
 
 # The types this build understands. An event of any other type is dropped, the
-# way Go's Decode rejects it — but the task types stay in the set even though
+# way Go's Decode rejects it, but the task types stay in the set even though
 # the task graph is not folded yet, because a dropped event is also a lost
 # heartbeat and a lost entry in the session window counts.
 # Imported, never re-listed. log.py keeps the single ordered tuple precisely
 # because the Go port had two hand-maintained whitelists in two packages and
-# adding a type meant remembering both — and this module had quietly become the
+# adding a type meant remembering both, and this module had quietly become the
 # second one. When the two drift, the reader accepts events the reducer silently
 # drops, and a dropped event is a lost heartbeat that can suppress a legitimate
 # steal.
@@ -183,7 +183,7 @@ class Release:
 
 @dataclass
 class Blocked:
-    """One refused claim — who wanted what, and who already held it.
+    """One refused claim: who wanted what, and who already held it.
 
     This is the only event that is evidence the tool did its job. Without it a
     prevented collision leaves no trace at all, which is how a log of thousands
@@ -203,8 +203,8 @@ class Blocked:
     #: was stopped but not what they were stopped from doing.
     attempted: str = ""
     holders: list[str] = field(default_factory=list)
-    #: A refusal against a TASK rather than a scope — a self-review, a failing
-    #: check — has no scope at all. Without these two the board could only say
+    #: A refusal against a TASK rather than a scope: a self-review, a failing
+    #: check: has no scope at all. Without these two the board could only say
     #: "@alice was refused", dropping the only facts worth having.
     task: str = ""
     reason: str = ""
@@ -362,7 +362,7 @@ def fold(events: Iterable[Any]) -> State:
     Ordering policy: timestamp order, with a STABLE sort so events sharing a
     timestamp keep their append order. The log is append-only under a per-repo
     lock, so append order already IS causal order; sorting only re-seats a line
-    written out of wall-clock order. We deliberately do NOT sort by event ID —
+    written out of wall-clock order. We deliberately do NOT sort by event ID:
     same-millisecond ULIDs are not guaranteed to sort causally, which would
     silently reorder a claim against its own steal or release.
     """
@@ -372,7 +372,7 @@ def fold(events: Iterable[Any]) -> State:
     # A release closes its claim WHICHEVER ORDER the two fold in.
     #
     # The sort is by timestamp so that concatenated logs merge sensibly, but a
-    # clock step backwards between two commands — an NTP correction is enough —
+    # clock step backwards between two commands: an NTP correction is enough:
     # can seat a release before the claim it closes. The release then popped
     # nothing, the claim folded afterwards, and it stayed active FOREVER while the
     # exact-conflict layer blocked every other agent on a scope the log plainly
@@ -393,13 +393,13 @@ def fold(events: Iterable[Any]) -> State:
     # session_id -> claim ids opened under it. Ending a NAMED session has to
     # drop that session's claims, and doing it by scanning every open claim made
     # the fold quadratic: 8,000 session ends over 8,000 claims took 8s, on the
-    # path in front of every agent tool call. The index is treated as a HINT —
-    # every id is re-checked against the real claim before anything is deleted —
+    # path in front of every agent tool call. The index is treated as a HINT:
+    # every id is re-checked against the real claim before anything is deleted:
     # so a drifted entry can only cost a wasted lookup, never a wrong deletion.
     claims_by_session: dict[str, set[str]] = {}
     # Same shape, same reason, for the roster: ending a named session also drops
     # the actors registered under it, and that scan is the larger half of the
-    # cost — one pass over every actor, per end.
+    # cost: one pass over every actor, per end.
     actors_by_session: dict[str, set[str]] = {}
 
     state = State()
@@ -412,7 +412,7 @@ def fold(events: Iterable[Any]) -> State:
 
     # last_seen[actor] = that actor's most recent event of ANY type. Because
     # `ordered` ascends, the final write per actor is the maximum, so no
-    # comparison is needed here — that is the passive heartbeat.
+    # comparison is needed here: that is the passive heartbeat.
     last_seen: dict[str, datetime] = {}
 
     for ev in ordered:
@@ -478,7 +478,7 @@ def fold(events: Iterable[Any]) -> State:
                 # claim it displaces, so the steal folds first, pops nothing
                 # (the claim is not there yet), and clears the very record that
                 # would have suppressed it. The displaced claim then folds
-                # normally and both agents hold the same file — with the board
+                # normally and both agents hold the same file: with the board
                 # showing two holders and the pre-edit hook letting both edit.
                 stolen_ids.add(claim.stolen_from_id)
             if claim.id in released_ids or claim.id in stolen_ids:
@@ -490,7 +490,7 @@ def fold(events: Iterable[Any]) -> State:
             state.claims[claim.id] = claim
             # Taking ground for a task makes you one of its authors, and that
             # is permanent. Recorded HERE, in log order, so the review gate
-            # sees it on the very next event — `doers` is derived after the
+            # sees it on the very next event: `doers` is derived after the
             # fold has finished, far too late for a rule the fold enforces.
             if claim.task:
                 _t = state.tasks.get(claim.task)
@@ -502,7 +502,7 @@ def fold(events: Iterable[Any]) -> State:
                     # a claim from a machine whose clock runs two seconds behind
                     # arrives before the `task` event that declares what it is
                     # tagged to. Dropping it here lost the author record
-                    # PERMANENTLY — unlike a claim, nothing later repairs it —
+                    # PERMANENTLY: unlike a claim, nothing later repairs it:
                     # and the co-worker's sign-off then recorded as a genuine
                     # independent review. The steal and release paths in this
                     # same loop already carry sets forward for exactly this
@@ -522,8 +522,8 @@ def fold(events: Iterable[Any]) -> State:
                 if held is not None:
                     released_scopes.append(str(held.scope))
 
-            # Session lifecycle releases — retire, leader transfer, session end
-            # — carry refs too, because they sweep up the claims they close. But
+            # Session lifecycle releases: retire, leader transfer, session end
+            # carry refs too, because they sweep up the claims they close. But
             # they are coordination admin, not finished work, so they stay out
             # of the "recently completed" feed.
             housekeeping = (
@@ -560,7 +560,7 @@ def fold(events: Iterable[Any]) -> State:
                 reason = _string_of(ev.data, "reason") or _string_of(ev.data, "result")
                 # Sort ONLY the set actually used. This used to sort the global
                 # window's actors first and then throw that away for a named
-                # end — one sort of every actor ever seen, per end, which made
+                # end: one sort of every actor ever seen, per end, which made
                 # the fold quadratic: 8,000 named ends took 8 seconds on the
                 # path in front of every agent tool call. The profile put 3.2s
                 # of 4.7s in this one call.
@@ -734,7 +734,7 @@ def _sorted_actors(actors: set[str]) -> list[str]:
 # The trust boundary
 #
 # Everything below turns whatever the caller handed us into something the
-# reducer can rely on. Nothing here raises and nothing here recurses — no
+# reducer can rely on. Nothing here raises and nothing here recurses: no
 # helper walks a nested value, so a self-referential JSON object (data["d"] is
 # data) is read one level deep and cannot loop.
 # ---------------------------------------------------------------------------
@@ -770,15 +770,15 @@ def _validate(raw: Any) -> _Event | None:
         # with some elements missing, it is a line that does not conform to the
         # event shape at all.
         #
-        # WHAT WENT WRONG ONCE: this used to FILTER — `tuple(s for s in
-        # raw_scope if isinstance(s, str))` — which is strictly more permissive
+        # WHAT WENT WRONG ONCE: this used to FILTER: `tuple(s for s in
+        # raw_scope if isinstance(s, str))`, which is strictly more permissive
         # than either sibling and let corruption materialise as state:
         #   * {"scope":[123,"src/api/server.ts"]} dropped the 123 and folded an
         #     ACTIVE claim on src/api/server.ts, blocking every other agent on a
         #     scope no writer ever wrote.
         #   * {"scope":"src/api/server.ts"} (a bare string, not an array) is not
         #     a list at all, so it fell through to the empty tuple and the event
-        #     still folded far enough to bump the actor's last_seen — handing a
+        #     still folded far enough to bump the actor's last_seen: handing a
         #     dead agent a fresh heartbeat and suppressing a legitimate steal.
         # Neither line is salvageable, so neither line is salvaged.
         if not isinstance(raw_scope, (list, tuple)):
@@ -794,7 +794,7 @@ def _validate(raw: Any) -> _Event | None:
         data = {}
     elif not isinstance(data, Mapping):
         # A `data` that is a list or a scalar is not an event with an empty bag,
-        # it is a line that does not conform to the event shape at all — Go's
+        # it is a line that does not conform to the event shape at all. Go's
         # unmarshal into map[string]interface{} rejects the whole line. Folding
         # it as if its fields were merely missing would invent an empty note or
         # a scopeless release out of corruption.
@@ -819,8 +819,8 @@ def _timestamp(value: Any) -> datetime | None:
     """Normalize an event timestamp to an aware UTC datetime, or None.
 
     Every timestamp in the log is RFC3339 with a trailing Z. Accepting that Z is
-    exactly why the floor is Python 3.11 — `fromisoformat` refuses it before
-    that — so there is no fallback parser here on purpose.
+    exactly why the floor is Python 3.11: `fromisoformat` refuses it before
+    that, so there is no fallback parser here on purpose.
 
     A naive value is read as UTC rather than rejected, because the sort in
     `fold` uses a single key: mixing aware and naive datetimes in one comparison
@@ -846,7 +846,7 @@ def _timestamp(value: Any) -> datetime | None:
             # shift to UTC is a SECOND, independent failure point. A timestamp
             # sitting within its own UTC offset of datetime.min/datetime.max
             # moves out of Python's representable range when the offset is
-            # applied, and datetime signals that with OverflowError — which is
+            # applied, and datetime signals that with OverflowError, which is
             # not a ValueError, so it escaped the guard and took `fold` down.
             # On the pre-edit hot path that is one corrupt log line disabling
             # every agent write, exactly the failure the TOTAL property exists
@@ -859,7 +859,7 @@ def _timestamp(value: Any) -> datetime | None:
             # There is no Go behaviour to copy here: Go's time.Time spans a far
             # wider range and accepts both instants happily, so this is a limit
             # of the port, not of the format. Dropping is the right direction
-            # to fail in — the alternative, clamping to datetime.min/max, would
+            # to fail in: the alternative, clamping to datetime.min/max, would
             # let a corrupt line masquerade as a real instant, and a claim
             # pinned at datetime.max sorts last forever, wins every
             # latest_claim_by_actor and never ages out.
@@ -888,7 +888,7 @@ def _int_of(data: Mapping[str, Any], key: str) -> int:
 
     Go unmarshals every JSON number as float64 and truncates toward zero, while
     Python's json gives int for integers and float for the rest. Normalizing
-    here — the one place numbers enter — is what keeps the two agreeing. A bool
+    here: the one place numbers enter: is what keeps the two agreeing. A bool
     is an int subclass in Python but is not a number to Go's type switch, so it
     is excluded; NaN and the infinities are excluded because int() raises on
     them and this function may not.
@@ -912,7 +912,7 @@ def _ref_list(data: Mapping[str, Any], key: str) -> list[str]:
 
 
 def _parse_refs(data: Mapping[str, Any]) -> list[Ref]:
-    """Read a finding's `refs` — a list of `{kind, value}` objects."""
+    """Read a finding's `refs`: a list of `{kind, value}` objects."""
     value = data.get("refs")
     if not isinstance(value, (list, tuple)):
         return []

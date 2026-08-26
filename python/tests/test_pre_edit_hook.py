@@ -1,13 +1,13 @@
 """The pre-edit hook: the only thing that actually ENFORCES a claim.
 
 Everything else in comms is advice an agent may ignore. This is the one place an
-edit is stopped, and it runs in front of every tool call — so the cost of getting
+edit is stopped, and it runs in front of every tool call, so the cost of getting
 it wrong is paid on every keystroke, in both directions: block too eagerly and no
 work happens, block too little and the tool does nothing at all.
 
 THE EXIT CODE IS THE ENTIRE INTERFACE. Claude Code reads exit 2 from a PreToolUse
 hook as "block this call and show stderr to the model", and EVERY other non-zero
-code as "the hook itself errored" — in which case the edit proceeds. So 2 is the
+code as "the hook itself errored": in which case the edit proceeds. So 2 is the
 only code that stops anything, and there is no code meaning "something went
 wrong, be careful". That is why everything unanswerable here is also 2.
 """
@@ -74,7 +74,7 @@ def _payload(repo, name, session="sess-B", tool="Edit"):
 
 
 def test_an_agent_may_edit_the_file_it_just_claimed(tmp_path, monkeypatch):
-    """IF THIS FAILS: the tool is worse than useless — it blocks the one agent
+    """IF THIS FAILS: the tool is worse than useless: it blocks the one agent
     entitled to edit, with a message naming that same agent as the holder.
 
     The hook has no COMMS_ACTOR of its own; it inherits the session environment,
@@ -94,7 +94,7 @@ def test_an_agent_may_edit_the_file_it_just_claimed(tmp_path, monkeypatch):
 
 def test_a_different_session_is_blocked_with_exit_two(tmp_path, monkeypatch):
     """IF THIS FAILS with any other non-zero code, Claude Code reads it as a
-    broken hook and lets the edit through — so the tool silently stops enforcing
+    broken hook and lets the edit through, so the tool silently stops enforcing
     anything while still printing a refusal nobody acts on."""
     repo = _repo(tmp_path, monkeypatch)
     _run(repo, ["claim", "src/a.py", "--as", "claude-dev", "--intent", "mine"],
@@ -120,7 +120,7 @@ def test_an_unidentifiable_caller_is_blocked_rather_than_waved_through(tmp_path,
 
 
 def test_a_tool_call_with_no_file_is_allowed(tmp_path, monkeypatch):
-    """Bash, a web fetch, a plain read — most tool calls carry no file at all,
+    """Bash, a web fetch, a plain read: most tool calls carry no file at all,
     and a hook that blocked them would stop the session dead."""
     repo = _repo(tmp_path, monkeypatch)
     payload = json.dumps({"session_id": "sess-B", "tool_name": "Bash",
@@ -151,7 +151,7 @@ def test_a_new_file_in_directories_that_do_not_exist_yet_is_allowed(tmp_path, mo
 
 def test_an_unreadable_payload_fails_closed(tmp_path, monkeypatch):
     """There is no exit code meaning "be careful", so anything unanswerable has
-    to be 2 — the alternative is reporting "clear" without having established
+    to be 2: the alternative is reporting "clear" without having established
     it."""
     repo = _repo(tmp_path, monkeypatch)
     for bad in ("not json", ""):
@@ -161,7 +161,7 @@ def test_an_unreadable_payload_fails_closed(tmp_path, monkeypatch):
 
 def test_the_repo_is_resolved_from_the_file_not_from_the_process(tmp_path, monkeypatch):
     """IF THIS FAILS: the hook fails on every edit whenever the session was
-    started outside a checkout — the normal case for anyone keeping several
+    started outside a checkout: the normal case for anyone keeping several
     projects in one folder."""
     repo = _repo(tmp_path, monkeypatch)
     _run(repo, ["claim", "src/a.py", "--as", "claude-dev", "--intent", "mine"],
@@ -203,7 +203,7 @@ def test_a_different_case_is_the_same_file_and_must_be_blocked(tmp_path, monkeyp
     Overlap between claims is a string comparison, which is right on a
     case-sensitive filesystem and wrong on the one most of this runs on. On
     macOS src/a.py and src/A.py are ONE file, so an agent could hold one
-    spelling while another edited the other — the hook compared the strings,
+    spelling while another edited the other: the hook compared the strings,
     found them different, and exited 0.
     """
     repo = _claimed_repo(tmp_path, monkeypatch)
@@ -227,7 +227,7 @@ def test_either_unicode_spelling_of_one_filename_is_blocked(tmp_path, monkeypatc
     inode and both must be blocked. ext4 does not: there the two spellings are
     two different files, and blocking the second would refuse an edit to a file
     nobody has claimed. So this asks the filesystem rather than assuming, the
-    same way the case-folding test above does — that check existed and this one
+    same way the case-folding test above does: that check existed and this one
     did not, which is why this passed on macOS and failed on Linux from the
     first run CI ever gave it.
     """
@@ -261,7 +261,7 @@ def test_an_unexpected_failure_blocks_rather_than_letting_the_edit_through(
 
     Exit 2 is the only code that stops an edit; every other non-zero code tells
     Claude Code the hook itself errored and the edit proceeds. So an unhandled
-    exception does not merely look untidy — it waves an edit through on ground
+    exception does not merely look untidy: it waves an edit through on ground
     somebody holds. Measured before the wrapper: a tab in a filename, a
     300-byte component, and the repository root each raised and exited 1.
     """
@@ -292,7 +292,7 @@ def test_an_exact_spelling_on_disk_is_never_rewritten(tmp_path, monkeypatch):
 
 
 def test_canonicalising_does_not_hang_on_a_fifo(tmp_path, monkeypatch):
-    """IF THIS FAILS the hook hangs, which is worse than answering wrongly —
+    """IF THIS FAILS the hook hangs, which is worse than answering wrongly:
     nothing times it out, so the agent simply stops.
 
     Asking the filesystem for a path's real spelling means opening it, and a
@@ -350,7 +350,7 @@ def test_a_file_being_created_still_canonicalises_the_directories_above_it(
     """IF THIS FAILS: a claim on a directory does not cover a new file inside it.
 
     An earlier version bailed out entirely when the leaf did not exist, which
-    also stopped correcting the DIRECTORIES above it — so a claim on `src` did
+    also stopped correcting the DIRECTORIES above it, so a claim on `src` did
     not block an edit to `SRC/newfile.py`, and two agents could claim one
     not-yet-created file under two spellings. The previous test only covered a
     missing leaf under a correctly-spelled directory, which is why it passed.

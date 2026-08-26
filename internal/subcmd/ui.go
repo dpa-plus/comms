@@ -198,7 +198,7 @@ type uiServer struct {
 //
 // Protections:
 //   - POST only (CSRF can't be a top-level navigation/GET).
-//   - Same-origin — if the browser sends an Origin, it must match the Host AND
+//   - Same-origin: if the browser sends an Origin, it must match the Host AND
 //     that host must be loopback. This blocks both classic cross-origin CSRF
 //     (Origin != Host) and DNS-rebinding (Origin == Host but resolves to a
 //     non-loopback attacker domain). Non-browser clients (no Origin header,
@@ -238,7 +238,7 @@ func sameOriginRequest(r *http.Request) bool {
 		return false
 	}
 	// Origin must match the Host we were reached on, and that host must be
-	// loopback — otherwise a DNS-rebinding page (Origin == Host == attacker
+	// loopback: otherwise a DNS-rebinding page (Origin == Host == attacker
 	// domain pointed at 127.0.0.1) would slip through.
 	return strings.EqualFold(u.Host, r.Host) && hostIsLoopback(u.Host)
 }
@@ -279,7 +279,7 @@ const uiBuildToken = "__COMMS_BUILD_ID__"
 
 // uiBuildID fingerprints the served front-end. It is a hash of uiHTML (the entire
 // HTML/CSS/JS shell), so it changes exactly when the front-end changes and stays
-// identical across restarts of the same binary — no needless reloads on a crash
+// identical across restarts of the same binary: no needless reloads on a crash
 // bounce, a guaranteed reload on a real UI deploy. Computed once at init; uiHTML
 // is a const, so the template (with the placeholder) is what gets hashed, which is
 // also what the client's injected token resolves to, keeping the two in lockstep.
@@ -735,7 +735,7 @@ func endCommsSessionOnRuntime(rt *Runtime, reqName, reqSessionID, reqReason stri
 	sessionName := strings.TrimSpace(reqName)
 	// "current" is the sentinel for the legacy/global window (claims and
 	// sessions with no comms_session_id). Blanking it must drive the no-session
-	// sweep below, NOT the operator fallback — otherwise ending the legacy
+	// sweep below, NOT the operator fallback: otherwise ending the legacy
 	// current window would wrongly end this operator's own NAMED session and
 	// release that session's claims.
 	explicitCurrent := sessionID == "current"
@@ -836,7 +836,7 @@ type uiSnapshot struct {
 	Releases      []uiRelease      `json:"releases"`
 	Docs          []string         `json:"docs"`
 	// TaskBoard is the work graph, already laid out. Empty in the all-projects
-	// view — dependencies live inside one repository, so the board follows the
+	// view: dependencies live inside one repository, so the board follows the
 	// project you select rather than being merged across them.
 	TaskBoard *uiTaskBoard `json:"task_board,omitempty"`
 	Lessons   []string     `json:"lessons"`
@@ -860,7 +860,7 @@ type uiSnapshot struct {
 	// Build fingerprints the front-end (uiHTML) this server serves. Every snapshot
 	// carries it; the page records the build it booted with and reloads itself when
 	// a later snapshot reports a different one. That is what makes an open dashboard
-	// pick up a redeployed binary instead of running stale HTML/JS forever — the SSE
+	// pick up a redeployed binary instead of running stale HTML/JS forever: the SSE
 	// stream pushes data, not the page shell, so without this a restart leaves every
 	// tab on the old version until a manual hard-refresh.
 	Build string `json:"build,omitempty"`
@@ -900,7 +900,7 @@ type uiProject struct {
 	StaleAfter       string `json:"stale_after"`
 	// UnlistedStores counts logs the all-projects view found but could not show:
 	// stores with no recorded repo path, which cannot be named or acted on.
-	// Reported so that setting them aside is visible rather than silent — an
+	// Reported so that setting them aside is visible rather than silent: an
 	// unlisted store is still a store, and a user who has one deserves to know.
 	UnlistedStores int `json:"unlisted_stores,omitempty"`
 }
@@ -923,7 +923,7 @@ type uiSession struct {
 	// Liveness (derived): LastSeen is the actor's passive heartbeat (most-recent
 	// event of any type); SilentFor is the human age since then; LikelyDead is
 	// true when the actor holds >=1 claim AND has been silent past the stale
-	// window — the crash signal that's worth an operator's attention.
+	// window: the crash signal that's worth an operator's attention.
 	LastSeen   time.Time `json:"last_seen"`
 	SilentFor  string    `json:"silent_for"`
 	ClaimCount int       `json:"claim_count"`
@@ -1309,7 +1309,7 @@ func buildGlobalUISnapshot(staleAfter time.Duration) (uiSnapshot, error) {
 			// or acted on: repoRootForGlobalHash fails for it, so every mutation
 			// the board offers is dead for this row. It listed as a bare 12-char
 			// hash, and on a real machine those outnumbered the genuine projects
-			// nine to one — 47 hashes against 5 named repos, every one of them a
+			// nine to one: 47 hashes against 5 named repos, every one of them a
 			// throwaway store left behind by a test run. That is not a project
 			// list any more, it is a haystack.
 			//
@@ -1455,7 +1455,7 @@ func buildGlobalUISnapshot(staleAfter time.Duration) (uiSnapshot, error) {
 	sort.Slice(out.Active, func(i, j int) bool { return out.Active[i].StartedAt.After(out.Active[j].StartedAt) })
 	sort.Slice(out.CommsSessions, func(i, j int) bool { return out.CommsSessions[i].EndedAt.After(out.CommsSessions[j].EndedAt) })
 	sort.Slice(out.Claims, func(i, j int) bool { return out.Claims[i].TS.Before(out.Claims[j].TS) })
-	// Priority-first, then newest — matches recentFindings/recentNotes so the
+	// Priority-first, then newest: matches recentFindings/recentNotes so the
 	// merged all-projects view orders the same way the per-repo view does.
 	sort.SliceStable(out.Findings, func(i, j int) bool {
 		if out.Findings[i].Priority != out.Findings[j].Priority {
@@ -1578,8 +1578,8 @@ func isScratchRepoRoot(repoRoot string) bool {
 // Deliberately separate from isScratchRepoRoot, which additionally requires the
 // directory to be NAMED comms-* or test-comms-*. That name rule was written for
 // this tool's own fixtures and rightly excludes them; it does not catch the
-// other throwaways a test run leaves behind — testrepo, hooktest, idtest,
-// demo-repo — which are real stores and stay listed, just marked.
+// other throwaways a test run leaves behind: testrepo, hooktest, idtest,
+// demo-repo, which are real stores and stay listed, just marked.
 func isEphemeralRepoRoot(repoRoot string) bool {
 	repoRoot = strings.TrimSpace(repoRoot)
 	if repoRoot == "" {
@@ -1786,7 +1786,7 @@ func buildUIActions(snap uiSnapshot) []uiAction {
 			retire.Reason = msg
 		} else {
 			// End and retire are routed to the owning repo (serveGlobal*), the
-			// same way release is — enable them; the frontend scopes each to the
+			// same way release is: enable them; the frontend scopes each to the
 			// selected project.
 			end.Enabled = true
 			retire.Enabled = true
@@ -3028,7 +3028,7 @@ let historyRenderLimit = HISTORY_PAGE_SIZE;
 // v0.2.1 replaced the per-session log selector with one continuous History. Drop
 // the key it stored so it does not linger forever in every existing browser.
 try { localStorage.removeItem('selectedSessionID'); } catch (e) {}
-// History arrives incrementally: /api/status: and the frame that primes a newly
+// History arrives incrementally: /api/status, and the frame that primes a newly
 // connected EventSource: carry every row, and each later push carries only what
 // was appended since. We keep the merged log here so the filter still runs over
 // EVERY row, and reconcile against events_total: if a push was coalesced away and

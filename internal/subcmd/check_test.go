@@ -32,7 +32,7 @@ func TestMakeRepoRelative_RejectsParentEscape(t *testing.T) {
 
 // A PreToolUse hook inherits the environment, and COMMS_ACTOR is set per command
 // by agents rather than exported, so the hook usually has no actor. Without one,
-// every claim looks like a stranger's — including the caller's own — so an agent
+// every claim looks like a stranger's: including the caller's own, so an agent
 // that claimed a file was then blocked from editing it. The hook payload carries
 // the same session id the agent's environment had at `comms hello`, so the log
 // can answer what the environment cannot.

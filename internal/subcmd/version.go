@@ -11,8 +11,8 @@ import (
 // BuildInfo carries the version metadata that identifies a comms binary. The
 // fields are injected at build time via -ldflags (see the Makefile and
 // .goreleaser.yaml). Resolve fills any that the build did not set from the
-// embedded module build info, so `go install`-built binaries — which ignore
-// -ldflags — still report a real version and commit instead of "dev".
+// embedded module build info, so `go install`-built binaries, which ignore
+// -ldflags: still report a real version and commit instead of "dev".
 type BuildInfo struct {
 	Version string
 	Commit  string

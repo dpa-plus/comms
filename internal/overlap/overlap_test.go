@@ -187,7 +187,7 @@ func TestParse_RejectsControlCharacters(t *testing.T) {
 		{"newline-in-symbol", "src/foo.ts#ba\nr"},
 		// C1 CSI (U+009B) is valid UTF-8 (bytes 0xC2 0x9B) yet many terminals
 		// interpret it like ESC[, so it must be rejected in BOTH a path and a
-		// symbol anchor. Built as a real code point — not a raw byte — so it
+		// symbol anchor. Built as a real code point: not a raw byte, so it
 		// survives the symbol branch's utf8.ValidString check and would slip
 		// past a C0/DEL-only predicate.
 		{"c1-csi-in-path", "src/foo" + string(rune(0x9b)) + "2K.ts"},

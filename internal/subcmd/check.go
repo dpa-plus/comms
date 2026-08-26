@@ -31,14 +31,14 @@ import (
 //
 // So:
 //
-//	0 — path clear (or held by same actor)
-//	2 — blocked by another actor's active claim (PreToolUse path — must be 2)
-//	1 — blocked, --staged path (feeds git, where any non-zero aborts)
-//	2 — system error (broken log, unreadable dir)
+//	0: path clear (or held by same actor)
+//	2: blocked by another actor's active claim (PreToolUse path: must be 2)
+//	1: blocked, --staged path (feeds git, where any non-zero aborts)
+//	2: system error (broken log, unreadable dir)
 //
 // Blocked and system-error share code 2 on the hook path, and that is the safe
 // direction: if comms cannot read the log it cannot prove the path is clear, so
-// it should stop rather than wave the edit through. Note what this used to do —
+// it should stop rather than wave the edit through. Note what this used to do:
 // a real conflict exited 1 and Claude Code let the edit through, while a comms
 // bug exited 2 and blocked it. The behaviour was exactly inverted.
 //
@@ -99,7 +99,7 @@ func runCheck(args []string, stdinJSON, staged bool) error {
 		p, sid, err := extractPathFromStdinJSON(os.Stdin)
 		hookSession = sid
 		if err != nil {
-			// In --stdin-json mode, malformed input is exit 2 — the hook will
+			// In --stdin-json mode, malformed input is exit 2: the hook will
 			// then "warn, don't block" per the plan's failure-mode policy.
 			Fatalf(2, "check: %v", err)
 		}
@@ -119,13 +119,13 @@ func runCheck(args []string, stdinJSON, staged bool) error {
 	//
 	// A hook does not run where the file lives. Claude Code's working directory is
 	// wherever the session was started, which is routinely a parent folder holding
-	// several checkouts — and is very often not a repository at all. Resolving from
+	// several checkouts, and is very often not a repository at all. Resolving from
 	// the process meant the hook failed on every edit whenever that was true,
 	// including for files that were plainly inside a repository.
 	repoHint := ""
 	if stdinJSON && filepath.IsAbs(path) {
 		// Walk up to the nearest directory that exists. Creating a new file in a
-		// new directory is ordinary — the editing tool makes the parents — but the
+		// new directory is ordinary: the editing tool makes the parents, but the
 		// hook runs BEFORE that happens, so the file's own directory frequently
 		// does not exist yet. Handing a non-existent path to repo discovery makes
 		// it fail on a stat, which used to block the write.
@@ -147,7 +147,7 @@ func runCheck(args []string, stdinJSON, staged bool) error {
 	rt, err := Open(OpenOpts{Mutating: false, SkipLock: true, RepoRootOverride: repoHint})
 	if err != nil {
 		// NOT exit 2. Failing to find a repository is not "I cannot tell whether
-		// this path is clear" — it is "there is nothing here to coordinate", and the
+		// this path is clear": it is "there is nothing here to coordinate", and the
 		// safe answer to that is to let the edit through. Exiting 2 blocks it, which
 		// made every edit outside a repository impossible the moment the hook was
 		// installed. Only a repository we CAN identify but CANNOT read is worth
@@ -207,7 +207,7 @@ func runCheck(args []string, stdinJSON, staged bool) error {
 	}
 	// EXIT 2, NOT 1. Claude Code's PreToolUse contract treats 2 as "block this
 	// tool call and show stderr to the model", and every other non-zero code as
-	// "the hook itself failed" — which is reported to the user and lets the edit
+	// "the hook itself failed", which is reported to the user and lets the edit
 	// through. This exited 1 from the day it shipped, so the pre-edit hook has
 	// never once blocked an edit in any session. The conflict report was written
 	// to stderr and thrown away.
@@ -449,7 +449,7 @@ func extractPathFromStdinJSON(r io.Reader) (string, string, error) {
 //
 // A hook process inherits the environment, and COMMS_ACTOR is set per command by
 // agents rather than exported into the session, so the hook almost never has one.
-// Without an actor every claim looks like somebody else's — including your own —
+// Without an actor every claim looks like somebody else's: including your own:
 // so an agent that claimed a file was then blocked from editing it, which is the
 // fastest possible way to get the hook switched off.
 //

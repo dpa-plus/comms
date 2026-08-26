@@ -1,17 +1,17 @@
-"""``comms-graph session`` — named coordination windows.
+"""``comms-graph session``: named coordination windows.
 
 Port of comms' ``internal/subcmd/session.go``. A session is a NAME two or more
 agents agree to work under: "auth-refactor", "ad-dashboard-fixes". Everything
 they do while it is open is tagged with it, so a reader can later ask what that
-piece of work cost, who was on it, and what it left behind — and so ending it
+piece of work cost, who was on it, and what it left behind, and so ending it
 can sweep up exactly the ground it took and nothing else.
 
 THE MECHANIC, WHICH IS NOT AN EVENT TYPE. There is no ``session`` event. A
 session exists because the actor's most recent ``hello`` carries
 ``comms_session_id`` / ``comms_session_name``, and because every event that
 actor writes afterwards repeats those two keys in its ``data``. The fold in
-``state.py`` already reads them everywhere — Claim, Note, Finding, Blocked,
-Release and the ended-session archive all have the pair — so this module only
+``state.py`` already reads them everywhere. Claim, Note, Finding, Blocked,
+Release and the ended-session archive all have the pair, so this module only
 has to WRITE them: the hello here, and :func:`stamp` for every other verb.
 
 Not its own event type on purpose: a session that were one would need the fold
@@ -27,8 +27,8 @@ fact is a session the other build cannot see.
 
 EXIT CODES. 0 recorded, 2 bad usage. 1 is used where the Go build returns a
 plain error and exits 2: "that name is already active", "no session called
-that", "@x is not active". Those are refusals — the command worked, read the
-log and the answer is no, nothing was written — and this build reserves 1 for
+that", "@x is not active". Those are refusals: the command worked, read the
+log and the answer is no, nothing was written, and this build reserves 1 for
 exactly that, the same way ``claim`` reports a conflict. A wrapper that only
 tests for zero sees no difference.
 """
@@ -78,8 +78,8 @@ USAGE = """Usage: comms-graph session <command>
   Exit status: 0 recorded, 1 the answer is no, 2 bad usage."""
 
 #: The one coordination-recency window, matching the Go build's `activeWindow`.
-#: An actor — and therefore a named session, which is only alive while somebody
-#: in it is — counts as active if it has been SEEN inside this span. Seen means
+#: An actor, and therefore a named session, which is only alive while somebody
+#: in it is: counts as active if it has been SEEN inside this span. Seen means
 #: any event at all, not the hello: an agent that greeted six hours ago and has
 #: been claiming ever since is working, and judging it on the one-shot greeting
 #: would drop a live session off the board mid-flight.
@@ -124,7 +124,7 @@ def _active_leader(st, cutoff: datetime) -> str:
     """Who leads right now, or "" when nobody is active.
 
     An explicit leader flag wins; otherwise it is the actor who has been here
-    longest (earliest hello), which is the rule that makes leadership stable —
+    longest (earliest hello), which is the rule that makes leadership stable:
     electing the most recent arrival would move it on every new agent.
 
     Reads without marking. The Go original writes the answer back onto the
@@ -148,7 +148,7 @@ def _session_by_name(st, name: str, cutoff: datetime) -> tuple[str, str]:
     """Find an active named session by name, case-blind. ("", "") when there is none.
 
     Falls back to the CLAIMS when no live actor carries the name. An agent can
-    hold ground under a session and then go quiet past the window — its claims
+    hold ground under a session and then go quiet past the window: its claims
     are still tagged, and `end` still has to be able to find and free them.
     Without the second pass the ground taken by a crashed session would be
     unreachable by name and could only be released one claim id at a time.
@@ -184,13 +184,13 @@ def stamp(st, actor: str, data: dict) -> None:
 
     This is the whole writing side of the mechanic, and it belongs on EVERY
     verb that appends: claim, release, find, note, task. An event that skips it
-    is invisible to the session — `end` will not release its claim, the archive
+    is invisible to the session: `end` will not release its claim, the archive
     will not count it, and a reader asking what that piece of work produced
     gets an answer that is quietly short.
 
     A caller that has already set ``comms_session_id`` is left alone: the
     session-lifecycle events below name the session they are ACTING ON, which
-    is not always the one the writer is in — retiring somebody out of another
+    is not always the one the writer is in: retiring somebody out of another
     window is the case that gets this wrong if the stamp overwrites.
     """
     if st is None or data is None:
@@ -261,7 +261,7 @@ def _tty() -> str:
     """The controlling terminal, best effort.
 
     The Go build shells out to `tty(1)`; asking the descriptor directly is the
-    same answer without a process, and returns "" in exactly the same case —
+    same answer without a process, and returns "" in exactly the same case:
     stdin is not a terminal, which is true for every agent that is not a person.
     """
     try:
@@ -298,7 +298,7 @@ def _release_before_switch(st, actor: str, target_id: str, target_name: str,
 
     * It frees the claims the actor holds under the OLD session. Ground taken
       for one piece of work must not silently follow the agent into the next
-      one — `end` on the old session would no longer find it (its holder has
+      one: `end` on the old session would no longer find it (its holder has
       moved), so it would sit there held by somebody who has stopped thinking
       about it until it went stale.
     * It carries ``session_retire``, which the fold reads as "drop this actor
@@ -324,7 +324,7 @@ def _release_before_switch(st, actor: str, target_id: str, target_name: str,
     }
     if stale_session:
         # The session being LEFT, not the one being joined. This event belongs
-        # to the old window's story — it is where that ground went.
+        # to the old window's story: it is where that ground went.
         data["comms_session_id"] = current.session_id
         data["comms_session_name"] = current.session_name
     return _ev(actor, _log.TYPE_RELEASE, data, release_at)
@@ -359,7 +359,7 @@ def _session_hello(st, actor: str, session_id: str, session_name: str,
     # The pre-edit hook has no COMMS_ACTOR of its own; it identifies the caller
     # by matching the host's session id against `agent_session` on the hello
     # (see _hook_actor in cli.py). This hello REPLACES the actor's previous one
-    # in the fold — only the most recent survives — so leaving the pairing out
+    # in the fold: only the most recent survives, so leaving the pairing out
     # would erase it, and every claim in the repo, the caller's own included,
     # would come back as somebody else's.
     #
@@ -373,7 +373,7 @@ def _session_hello(st, actor: str, session_id: str, session_name: str,
     # Model identity, on the same terms as `_hello_if_unknown`: absent when
     # unset rather than guessed. Carried here because this hello supersedes the
     # one that had it, and dropping it downgrades every later verification from
-    # "independent" to "unknown" — a weaker claim than the truth.
+    # "independent" to "unknown": a weaker claim than the truth.
     vendor = os.environ.get("COMMS_VENDOR", "").strip()
     if vendor:
         data["vendor"] = vendor
@@ -384,7 +384,7 @@ def _session_hello(st, actor: str, session_id: str, session_name: str,
 
 
 def _enter(argv: list[str], start: bool) -> int:
-    """`session start` and `session join` — the same write with a different gate."""
+    """`session start` and `session join`: the same write with a different gate."""
     verb = "start" if start else "join"
     positional, flags = _parse_flags(argv)
     unknown = _unknown_flags(flags, {"as", "root", "label"})
@@ -431,7 +431,7 @@ def _enter(argv: list[str], start: bool) -> int:
 
         # A millisecond apart, and that is the whole point. The fold sorts by
         # TIMESTAMP, so the release that ends the old session has to be earlier
-        # IN TIME than the hello that begins the new one — appending it first is
+        # IN TIME than the hello that begins the new one: appending it first is
         # not enough. Sharing an instant would let the two fold in either order,
         # and in the wrong one the retire pops the session the hello just made,
         # leaving an actor that has joined nothing.
@@ -469,7 +469,7 @@ def _enter(argv: list[str], start: bool) -> int:
 
 
 def _end(argv: list[str]) -> int:
-    """`session end "<name>"` — close a window and free everything taken in it."""
+    """`session end "<name>"`: close a window and free everything taken in it."""
     positional, flags = _parse_flags(argv)
     unknown = _unknown_flags(flags, {"as", "root", "reason"})
     if unknown:
@@ -536,7 +536,7 @@ def _session_metadata_for_retire(st, target: str, claims: list) -> tuple[str, st
 
 
 def _retire(argv: list[str]) -> int:
-    """`session retire <actor>` — take somebody off the roster and free their ground.
+    """`session retire <actor>`: take somebody off the roster and free their ground.
 
     The verb for an agent that is not coming back. It appends; it does not edit
     the log, and it does not pretend the actor was never here. `release --force`
@@ -589,11 +589,11 @@ def _retire(argv: list[str]) -> int:
 
 
 def _lead(argv: list[str]) -> int:
-    """`session lead [<actor>]` — move leadership to one active actor.
+    """`session lead [<actor>]`: move leadership to one active actor.
 
     The leader's only extra privilege is posting priority notes and findings, so
     this is a small decision; it is a command rather than an election because
-    the alternative — inferring it from who greeted first — cannot be corrected
+    the alternative: inferring it from who greeted first: cannot be corrected
     when the first one to greet is the one who has gone quiet.
     """
     positional, flags = _parse_flags(argv)
@@ -654,7 +654,7 @@ def main(argv: list[str]) -> int:
         print(USAGE)
         return EXIT_USAGE
     if any(a in ("-h", "--help", "-?", "help") for a in argv):
-        # Asking how a verb works must never write anything — and for a tool
+        # Asking how a verb works must never write anything, and for a tool
         # whose users are agents, it is the whole discovery path.
         print(USAGE)
         return EXIT_OK

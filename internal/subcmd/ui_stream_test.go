@@ -78,8 +78,8 @@ func TestHubPrimesWithFullFrameWhileBroadcastingDelta(t *testing.T) {
 // backwards on every push would defeat the trimming entirely.
 //
 // It also pins the reason ordering is by ticket and not by timestamp: a snapshot
-// whose newest event vanished — a repository removed, or a log that stopped being
-// readable — still has to be delivered, or the dashboard would stop updating until
+// whose newest event vanished: a repository removed, or a log that stopped being
+// readable: still has to be delivered, or the dashboard would stop updating until
 // the wall clock passed the old watermark.
 func TestHubWatermarkNeverGoesBackwards(t *testing.T) {
 	h := newHub()
@@ -293,7 +293,7 @@ func TestHubPublishStillDeliversRebuildWithNoNewEvents(t *testing.T) {
 
 // TestHubSubscribeNeverBlocksDuringConcurrentPublish verifies subscribing while
 // the hub is publishing cannot wedge the caller. Priming after registering the
-// channel looks safe — the buffer is fresh — but a publish landing in between
+// channel looks safe: the buffer is fresh, but a publish landing in between
 // fills it, and the prime send then blocks forever on a channel whose only reader
 // is the SSE handler still stuck inside subscribe().
 func TestHubSubscribeNeverBlocksDuringConcurrentPublish(t *testing.T) {

@@ -44,8 +44,8 @@ def phases(st):
 def _chain(ev):
     """api -> ui, where ui consumes an interface from api.
 
-    `api` asks for review explicitly. Review is opt-in — a task that never asked
-    for one is finished when it is done — and everything below this point is
+    `api` asks for review explicitly. Review is opt-in: a task that never asked
+    for one is finished when it is done, and everything below this point is
     testing the GATE, so the precondition has to be stated rather than assumed.
     It used to be assumed because review was unconditional.
     """
@@ -59,14 +59,14 @@ def _chain(ev):
 
 
 # ---------------------------------------------------------------------------
-# The review gate — the reason the graph exists at all
+# The review gate: the reason the graph exists at all
 # ---------------------------------------------------------------------------
 
 
 def test_a_successor_waits_for_verified_not_merely_done():
     """IF THIS FAILS: the review gate is decorative. An agent marks its own work
     done and everything downstream immediately unblocks, so unchecked work
-    propagates through the whole plan — which is the exact failure the
+    propagates through the whole plan, which is the exact failure the
     verify-before-unblock design exists to prevent."""
     ev = _Seq()
     evs = _chain(ev)
@@ -83,7 +83,7 @@ def test_a_successor_waits_for_verified_not_merely_done():
 def test_an_agent_cannot_verify_its_own_work_under_a_role_suffix():
     """IF THIS FAILS: self-review is one rename away. An agent that reviews as
     `claude-dev/review` is the same agent with the same blind spots, and
-    self-review measurably fails — which is the whole reason a DIFFERENT agent
+    self-review measurably fails, which is the whole reason a DIFFERENT agent
     is on the critical path."""
     ev = _Seq()
     evs = _chain(ev)
@@ -118,7 +118,7 @@ def test_a_refused_transition_is_recorded_not_silently_dropped():
 def test_done_is_refused_when_a_declared_check_did_not_run():
     """IF THIS FAILS: a gate silently stops gating. The commonest way a required
     check rots is that it quietly stops running, so a MISSING result must read
-    exactly like a failing one — silence is not a pass."""
+    exactly like a failing one: silence is not a pass."""
     ev = _Seq()
     evs = _chain(ev)
     evs.append(ev("task_state", "claude-dev", {"task": "api", "state": "done"}))
@@ -207,13 +207,13 @@ def test_a_claim_tagged_to_no_task_does_not_invent_one():
 
 
 # ---------------------------------------------------------------------------
-# Cycles — this runs in front of every agent tool call
+# Cycles: this runs in front of every agent tool call
 # ---------------------------------------------------------------------------
 
 
 def test_a_cycle_resolves_to_a_phase_instead_of_hanging():
     """IF THIS FAILS: a malformed graph wedges the pre-edit hook, which runs
-    before every Edit an agent makes — so one bad pair of edges stops all work
+    before every Edit an agent makes, so one bad pair of edges stops all work
     in the repository rather than reporting itself."""
     ev = _Seq()
     evs = [
@@ -230,7 +230,7 @@ def test_a_cycle_resolves_to_a_phase_instead_of_hanging():
 
 
 def test_a_task_downstream_of_a_cycle_is_reported_as_cycle_too():
-    """A task that can never be reached is not 'blocked' — blocked implies
+    """A task that can never be reached is not 'blocked': blocked implies
     somebody finishing something unblocks you, and here nobody can."""
     ev = _Seq()
     evs = [
@@ -350,7 +350,7 @@ def test_independence_is_reported_honestly_when_it_cannot_be_told():
 
 
 # ---------------------------------------------------------------------------
-# Through the real CLI — the surface agents actually touch
+# Through the real CLI: the surface agents actually touch
 # ---------------------------------------------------------------------------
 
 
@@ -360,7 +360,7 @@ def _cli(repo, *args, session=None):
     `session` is the host agent's session id. Real agents each have their own;
     a test that leaves it unset inherits the session of whatever process is
     running pytest, which makes every actor in the test look like ONE agent to
-    the review gate — correctly, since it would be.
+    the review gate: correctly, since it would be.
     """
     import io
     import os
@@ -500,7 +500,7 @@ def test_an_id_that_is_not_speakable_is_refused(tmp_path, monkeypatch):
 
 
 def test_a_task_id_is_matched_the_way_a_person_would_say_it(tmp_path, monkeypatch):
-    """Case is folded, deliberately — and this is the OPPOSITE of the rule for
+    """Case is folded, deliberately, and this is the OPPOSITE of the rule for
     scope anchors, so the difference is worth stating.
 
     A symbol anchor is case-SENSITIVE because in several languages case is what
@@ -528,7 +528,7 @@ def test_the_drawing_uses_definite_heights_not_a_percentage_chain(tmp_path):
 
     vis sizes its canvas to fill its container. If that container's height is a
     percentage resolving against an ancestor with no definite height, the canvas
-    ends up driving the box that was supposed to be driving it — observed
+    ends up driving the box that was supposed to be driving it: observed
     growing 2036 -> 2072 -> 2120 px across redraws while painting nothing at
     all. Every diagnostic looked healthy: the canvas existed, reported sensible
     dimensions, and the network reported nine positioned nodes.
@@ -545,7 +545,7 @@ def test_the_drawing_uses_definite_heights_not_a_percentage_chain(tmp_path):
 
 def test_the_drawing_disables_the_layout_pre_pass_that_gives_up(tmp_path):
     """IF THIS FAILS: vis's improvedLayout pre-pass can bail on a graph and
-    leave every node without coordinates — it logs an info message, not an
+    leave every node without coordinates: it logs an info message, not an
     error, and the page renders empty. Hierarchical layout assigns every
     position itself, so the pre-pass has nothing to contribute here anyway."""
     from comms_graph import taskview
@@ -664,7 +664,7 @@ def test_a_leading_slash_does_not_empty_the_base_name():
     """IF THIS FAILS: the gate breaks in BOTH directions at once.
 
     Splitting on "/" made '/alice' and '/bob' both reduce to '', so two
-    genuinely different agents were refused as self-review — while
+    genuinely different agents were refused as self-review: while
     '/claude-dev' reviewing 'claude-dev' sailed through, because '' never
     equals 'claude-dev'. A leading slash is not a role suffix.
     """
@@ -681,7 +681,7 @@ def test_a_leading_slash_does_not_empty_the_base_name():
 ])
 def test_a_cheap_disguise_cannot_sign_off_its_own_work(disguise, label):
     """IF THIS FAILS: the one guarantee this tool makes is defeated by typing
-    your own name differently — and the printed line reads identically to a real
+    your own name differently, and the printed line reads identically to a real
     review, so nobody looking at the board can tell."""
     ev = _Seq()
     evs = _chain(ev)
@@ -702,7 +702,7 @@ def test_a_homoglyph_is_caught_by_the_session_not_the_name(homoglyph, label):
     """IF THIS FAILS: an agent renames itself with a lookalike character and
     signs off its own work.
 
-    No amount of normalising closes this — a Cyrillic 'a' genuinely IS a
+    No amount of normalising closes this: a Cyrillic 'a' genuinely IS a
     different letter. What closes it is that both names come from ONE process,
     and every actor's hello records the host agent's session id. The log already
     held that fact; the gate simply never read it.
@@ -795,7 +795,7 @@ def test_every_agent_who_submitted_is_barred_from_reviewing_not_just_the_last():
     other's combined work.
 
     `did` holds only the most recent submission, so alice-then-bob left bob
-    recorded — and alice, who had written half of it, read as a different agent.
+    recorded, and alice, who had written half of it, read as a different agent.
     Review means somebody who did not build it looked at it; "did not build the
     most recent revision" is a different and much weaker claim.
     """
@@ -819,7 +819,7 @@ def test_a_task_whose_predecessor_is_unfinished_cannot_report_itself_closed():
 
     Testing verified_by before blocked let a task that was never startable be
     marked done, verified, and reported CLOSED while its own predecessor sat at
-    ready — and `next` then offered ITS successors as startable.
+    ready, and `next` then offered ITS successors as startable.
     """
     ev = _Seq()
     evs = [ev("task", "p", {"task": "a"}), ev("task", "p", {"task": "b"}),
@@ -842,7 +842,7 @@ def test_the_greeting_lands_before_the_event_it_explains(tmp_path, monkeypatch):
     hello on record yet.
 
     fold() sorts by TIMESTAMP, so putting the greeting first in the batch list
-    is not enough — it has to be first in TIME. It was minted second, so it
+    is not enough: it has to be first in TIME. It was minted second, so it
     sorted second, and independence came back "unknown" while the session half
     of the self-review gate had nothing to compare.
     """
@@ -885,7 +885,7 @@ def test_a_refused_transition_leaves_a_trace_in_the_log(tmp_path, monkeypatch):
     """IF THIS FAILS: the gate fires in silence.
 
     The CLI declines before the fold ever sees the transition, so without a
-    written record refused_task_states stays empty in every CLI-written log —
+    written record refused_task_states stays empty in every CLI-written log:
     and a rule that leaves no trace when it works looks exactly like a rule
     nobody wrote. claim already records a blocked event for the same reason.
     """
@@ -975,8 +975,8 @@ def test_a_sequence_predecessor_that_was_never_verified_still_blocks_a_finished_
 def test_a_task_two_agents_both_submitted_can_still_be_rejected():
     """IF THIS FAILS: the task deadlocks and everything downstream with it.
 
-    Once alice and bob have both submitted, neither may VERIFY — correct, they
-    wrote it — and barring them from rejecting too left the task unmovable until
+    Once alice and bob have both submitted, neither may VERIFY: correct, they
+    wrote it, and barring them from rejecting too left the task unmovable until
     a third party appeared. On a two-agent run there is no third party.
     Self-APPROVAL is the failure this gate exists for; self-rejection is
     somebody saying their own work is not ready, which should be easy.
@@ -1015,7 +1015,7 @@ def test_next_never_offers_a_review_the_gate_will_refuse():
 def test_an_edge_event_naming_no_kind_keeps_the_recorded_one():
     """IF THIS FAILS: adding a note to an edge erases the rework dependency on
     it, and a task a rejection had reopened flips back to closed with nobody
-    re-reviewing it. Same rule apply_task uses for checks — only non-empty
+    re-reviewing it. Same rule apply_task uses for checks: only non-empty
     fields overwrite."""
     ev = _Seq()
     evs = [ev("task", "p", {"task": "a"}), ev("task", "p", {"task": "b"}),
@@ -1032,7 +1032,7 @@ def test_a_check_declared_after_submission_invalidates_it():
     """IF THIS FAILS: declaring the checks late is a way around the gate.
 
     A task with no checks is submitted, a required check is added afterwards,
-    and the submission still stands — so the task closes with a required check
+    and the submission still stands, so the task closes with a required check
     that never ran. The gate's contract is "every declared check passed when
     this was submitted", and a check added later was never reported.
     """
@@ -1067,7 +1067,7 @@ def test_a_two_agent_run_has_a_way_out_and_it_is_recorded_honestly():
     """IF THIS FAILS either the task deadlocks or the gate has a silent loophole.
 
     Once two agents have both submitted, neither may verify and only a third
-    party can move it — which on a two-agent run is nobody, so the task and
+    party can move it, which on a two-agent run is nobody, so the task and
     everything after it stops forever. Refusing to record anything is not
     safety, it is a stall.
 
@@ -1099,7 +1099,7 @@ def test_two_agents_cannot_both_claim_one_not_yet_created_file(tmp_path, monkeyp
     the window they are both writing it.
 
     Everything below the deepest existing directory is kept as typed, because a
-    file with no spelling on disk has nothing to defer to — so on a case-blind
+    file with no spelling on disk has nothing to defer to, so on a case-blind
     filesystem `src/NewFeature.py` and `src/newfeature.py` were two scopes for
     one file. Claiming the file you are about to create is the primary use of
     this tool, so this was the primary case going wrong.
@@ -1174,7 +1174,7 @@ def test_a_self_signed_signoff_is_disclosed_on_every_surface(tmp_path, monkeypat
 
     The whole justification for letting somebody sign off their own work is
     that nobody can mistake it for a review. It was marked on the task's own
-    brief, the board and /api/status — and NOT on `next`, not on a successor's
+    brief, the board and /api/status, and NOT on `next`, not on a successor's
     predecessor line, and not in the drawing. The agent picking up the next task
     is building against that interface and is exactly who needs telling.
     """
@@ -1235,7 +1235,7 @@ def test_a_directory_with_no_cased_letters_does_not_disable_the_twin_check(
     the first version gave up when that name had no cased letters. Date folders,
     ticket numbers and version directories all hit it, and every one turned the
     whole thing off on a filesystem that IS case-blind. It walks up to an
-    ancestor it can ask about now — case-sensitivity is a property of the
+    ancestor it can ask about now: case-sensitivity is a property of the
     volume, so any ancestor on it answers the same question.
     """
     from comms_graph.cli import _case_blind_here
@@ -1277,8 +1277,8 @@ def test_a_resubmission_clears_the_independence_it_described(tmp_path, monkeypat
     """IF THIS FAILS: a label outlives the thing it labels.
 
     A resubmission clears verified_by but left independence set, so `brief` on a
-    successor said "signed off by @ themselves" — a bare @ where the name had
-    been — and the drawing painted the self-signed node for a task sitting in
+    successor said "signed off by @ themselves": a bare @ where the name had
+    been, and the drawing painted the self-signed node for a task sitting in
     review with no verifier at all.
     """
     ev = _Seq()
@@ -1297,8 +1297,8 @@ def test_a_resubmission_clears_the_independence_it_described(tmp_path, monkeypat
 def test_an_unusable_store_is_an_error_not_a_traceback(tmp_path, monkeypatch):
     """IF THIS FAILS: a wrapper reads an unreachable store as a live conflict.
 
-    Every writing command crashed with a raw FileExistsError and exited 1 — the
-    code the usage text reserves for "somebody else holds this" — so a script
+    Every writing command crashed with a raw FileExistsError and exited 1: the
+    code the usage text reserves for "somebody else holds this", so a script
     that retries on conflict would loop forever against a broken store.
     """
     import shutil
@@ -1357,7 +1357,7 @@ def test_a_full_task_is_not_offered(tmp_path, monkeypatch):
 
 
 def test_a_task_level_refusal_records_what_and_why(tmp_path, monkeypatch):
-    """IF THIS FAILS the board can only say "@alice was refused" — dropping the
+    """IF THIS FAILS the board can only say "@alice was refused": dropping the
     two facts worth having. A refusal against a TASK has no scope at all."""
     repo = _repo(tmp_path, monkeypatch)
     _cli(repo, "task", "add", "t1", "--check", "test", "--as", "p", session="agent-P")
@@ -1418,7 +1418,7 @@ def test_the_verifier_s_evidence_reaches_whoever_builds_on_it(tmp_path, monkeypa
     """IF THIS FAILS: the one thing the review gate produces is thrown away.
 
     `task review --pass --evidence` was written into the log by the CLI and
-    then dropped by the fold — only the `done` branch read notes. The bytes
+    then dropped by the fold: only the `done` branch read notes. The bytes
     were on disk and no surface ever showed them, so an agent picking up a
     successor saw "closed" with no way to know whether that meant a real check
     or a rubber stamp.
@@ -1488,7 +1488,7 @@ def test_the_board_tooltip_says_how_a_task_was_checked(tmp_path, monkeypatch):
 def test_an_agent_that_touched_a_task_cannot_verify_it_without_ever_submitting(
     tmp_path, monkeypatch
 ):
-    """IF THIS FAILS: the review gate is opt-out — just never press `done`.
+    """IF THIS FAILS: the review gate is opt-out: just never press `done`.
 
     The gate reads `did` and `submitters`, both written by `task done`. An
     agent that took ground on the task, wrote part of it, and let go without
@@ -1533,7 +1533,7 @@ def test_a_task_everyone_has_touched_is_not_a_dead_end(tmp_path, monkeypatch):
     """IF THIS FAILS: a two-agent project can stop forever.
 
     Touching a task bars you from verifying it, permanently. On a project with
-    only two agents that can leave nobody able to sign it off — so the refusal
+    only two agents that can leave nobody able to sign it off, so the refusal
     has to name the escape, and the escape has to record what it is.
     """
     repo = _repo(tmp_path, monkeypatch)
@@ -1575,8 +1575,8 @@ def test_reclaiming_ground_you_hold_replaces_it_rather_than_stacking(tmp_path, m
 
     Conflict detection only fires for a DIFFERENT actor, so re-claiming your own
     ground appended a second claim. The board showed two rows for one file, it
-    was ambiguous which intent was current, and — because a claim carries a task
-    tag — one agent on one file registered as a doer on two tasks, which the
+    was ambiguous which intent was current, and, because a claim carries a task
+    tag: one agent on one file registered as a doer on two tasks, which the
     phase derivation reads as two people still working.
     """
     repo = _repo(tmp_path, monkeypatch)
@@ -1617,7 +1617,7 @@ def test_reclaiming_moves_you_between_tasks_instead_of_onto_both(tmp_path, monke
 
 def test_a_claim_taken_after_a_sign_off_does_not_unsign_it(tmp_path, monkeypatch):
     """IF THIS FAILS: a bare claim reopens reviewed work and the board
-    contradicts itself — "BLOCKED until these are VERIFIED: ta" printed above
+    contradicts itself: "BLOCKED until these are VERIFIED: ta" printed above
     "verified by @carol: checked ta".
 
     A verification is evidence about the thing as it stood. Ground taken BEFORE
@@ -1655,7 +1655,7 @@ def test_a_claim_that_folds_before_its_task_still_records_the_worker(tmp_path, m
 
     fold() sorts by TIMESTAMP. A claim from a machine running slightly behind
     arrives before the `task` event it is tagged to, and the worker record was
-    dropped on the floor — permanently, since unlike a claim nothing later
+    dropped on the floor: permanently, since unlike a claim nothing later
     repairs it. The co-worker then passed the review gate and their sign-off
     recorded as a genuine independent review.
     """
@@ -1694,11 +1694,11 @@ def test_an_abandoned_claim_can_be_taken_over(tmp_path, monkeypatch):
 
     `release` only ever touched claims held by `--as`, so freeing somebody
     else's ground meant stealing it and handing it back, or passing their name
-    — which the CLI accepts and which writes a lie into an append-only log.
+   , which the CLI accepts and which writes a lie into an append-only log.
 
     Note what is NOT here any more: this used to have to check that the
     takeover did not close the task on a stale sign-off. With one agent per
-    task that cannot happen — the task simply has no submission, so it cannot
+    task that cannot happen: the task simply has no submission, so it cannot
     be verified, and it waits.
     """
     from comms_graph import state as cstate
@@ -1749,7 +1749,7 @@ def test_a_homoglyph_name_does_not_launder_a_sign_off(tmp_path, monkeypatch):
     """IF THIS FAILS: a Cyrillic letter buys an independent review.
 
     With no host session id no hello is written, so same_agent has only the
-    name to compare — and `nоra` with a Cyrillic "о" signed off work `nora` had
+    name to compare, and `nоra` with a Cyrillic "о" signed off work `nora` had
     written, under a name nobody can tell apart on screen. The board, the brief
     and the successor's unblock all asserted a real review.
     """
@@ -1780,7 +1780,7 @@ def test_a_finding_can_be_written_and_reaches_the_board(tmp_path, monkeypatch):
     """IF THIS FAILS: the one place agents record what they learned is unwritable.
 
     The fold has always folded `finding` and `note` events into state.findings
-    and state.notes, and this build had no verb to write either — so both lists
+    and state.notes, and this build had no verb to write either, so both lists
     were permanently empty and the board's panels over them permanently blank.
     The board also read the finding's text as `body`, a field Finding does not
     have, so even a hand-written one would have rendered as a blank line.
@@ -1852,8 +1852,8 @@ def test_a_person_can_free_ground_an_agent_abandoned(tmp_path, monkeypatch):
     """IF THIS FAILS: clearing up after a crashed agent means impersonating it.
 
     `release` only ever touched claims held by `--as`, so the two ways to free
-    somebody else's ground were to steal it and hand it back — two writes, and
-    you briefly own work you did not do — or to pass their name, which the CLI
+    somebody else's ground were to steal it and hand it back: two writes, and
+    you briefly own work you did not do, or to pass their name, which the CLI
     accepts and which writes a lie into an append-only log. A person tidying up
     after a crash should not have to pretend to be the crash.
     """
@@ -1907,7 +1907,7 @@ def test_releasing_your_own_claim_does_not_need_force(tmp_path, monkeypatch):
 def test_a_task_belongs_to_one_agent_at_a_time(tmp_path, monkeypatch):
     """IF THIS FAILS: every severity-1 this task graph ever had comes back.
 
-    Two agents sharing one task produced all of them — a review covering half
+    Two agents sharing one task produced all of them: a review covering half
     the work, a gate you could opt out of by never submitting, a rejection that
     un-did the bookkeeping, and a plain file release that silently closed a
     task somebody else was still writing. They were not separately fixable;
@@ -1932,7 +1932,7 @@ def test_a_task_belongs_to_one_agent_at_a_time(tmp_path, monkeypatch):
     # and it says what to do instead
     assert "split this one" in out or "different task" in out, out
 
-    # the same agent may hold several files for one task — that is normal
+    # the same agent may hold several files for one task: that is normal
     code, out = _cli(repo, "claim", "b.py", "--as", "alice", "--task", "big",
                      "--intent", "also A", session="sA")
     assert code == 0, out
@@ -1940,7 +1940,7 @@ def test_a_task_belongs_to_one_agent_at_a_time(tmp_path, monkeypatch):
 
 def test_a_task_is_handed_over_sequentially_not_shared(tmp_path, monkeypatch):
     """One agent at a time is not one agent ever. When the holder lets go, the
-    task is free — that is a handoff, and it must keep working."""
+    task is free: that is a handoff, and it must keep working."""
     repo = _repo(tmp_path, monkeypatch)
     for f in ("a.py", "b.py"):
         (repo / f).write_text("x = 1\n")
@@ -1954,7 +1954,7 @@ def test_a_task_is_handed_over_sequentially_not_shared(tmp_path, monkeypatch):
                      "--intent", "B", session="sB")
     assert code == 0, ("the handoff was refused after alice let go:\n" + out)
 
-    # bob finishes it and somebody else checks it — the ordinary path
+    # bob finishes it and somebody else checks it: the ordinary path
     _cli(repo, "task", "done", "big", "--as", "bob", "--note", "did it", session="sB")
     code, out = _cli(repo, "task", "review", "big", "--as", "carol", "--pass",
                      "--evidence", "ran the suite", session="sC")
@@ -1971,7 +1971,7 @@ def test_a_task_is_handed_over_sequentially_not_shared(tmp_path, monkeypatch):
 def test_the_old_edge_kinds_still_fold(tmp_path, monkeypatch):
     """IF THIS FAILS: every log written before the merge changes meaning.
 
-    `interface` and `artifact` were two words for one behaviour — every place
+    `interface` and `artifact` were two words for one behaviour: every place
     the kind was READ treated them identically, so writing an edge meant
     picking between synonyms for no effect. They are one kind now, `consumes`,
     which is what they always meant and which pairs with `--provides`.
@@ -2026,7 +2026,7 @@ def test_the_cli_accepts_the_old_kind_names(tmp_path, monkeypatch):
 def test_a_task_that_never_asked_for_review_closes_when_it_is_done():
     """IF THIS FAILS: every task parks in a queue nobody is serving.
 
-    Review was unconditional, and the reasoning was sound — self-review
+    Review was unconditional, and the reasoning was sound: self-review
     measurably fails. What that missed is that an always-on gate is not free.
     Measured on real work: four of eight tasks sat in `review` with no reviewer
     coming, which is not a quality bar, it is a backlog. A gate that is always on
@@ -2057,7 +2057,7 @@ def test_a_finished_no_review_task_unblocks_what_comes_after_it():
 
     The successor waits on a verification the predecessor was never going to
     receive, so the chain stops forever. Reading only `verified_by` here is
-    exactly that bug — the outer guard, not the branch below it, is what decides.
+    exactly that bug: the outer guard, not the branch below it, is what decides.
     """
     ev = _Seq()
     evs = [ev("task", "p", {"task": "first", "title": "First"}),
@@ -2069,7 +2069,7 @@ def test_a_finished_no_review_task_unblocks_what_comes_after_it():
 
 def test_restating_a_task_without_review_turns_the_requirement_off():
     """`task` is a whole-record upsert, like `hello`. Every other field follows
-    that rule and this one is not a special case — worth pinning so it is a
+    that rule and this one is not a special case: worth pinning so it is a
     decision rather than an accident."""
     ev = _Seq()
     evs = [ev("task", "p", {"task": "t", "review": True}),

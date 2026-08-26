@@ -1,11 +1,11 @@
-"""hello / version / help — the identity record, and the two verbs that answer.
+"""hello / version / help: the identity record, and the two verbs that answer.
 
 What is actually at stake here is `hello`. It is the record that ties an actor
 name to a host agent session, and three separate mechanisms read it: the
 pre-edit hook resolves "who is asking" through it, the review gate decides
 self-review through it, and the independence label is read off its vendor. If
 the record is missing, spelled differently from the one the rest of the CLI
-writes, or silently skipped on a re-run, all three fail QUIETLY — an agent gets
+writes, or silently skipped on a re-run, all three fail QUIETLY: an agent gets
 blocked by its own claim, or a self-review passes as independent.
 
 Each test says what breaks in the real world if it fails.
@@ -88,7 +88,7 @@ def _events_of(repo):
 
 
 # ---------------------------------------------------------------------------
-# hello — the identity record the hook reads
+# hello: the identity record the hook reads
 # ---------------------------------------------------------------------------
 
 
@@ -108,8 +108,8 @@ def test_hello_lets_the_pre_edit_hook_recognise_the_actor(tmp_path, monkeypatch)
 def test_an_explicit_hello_is_written_exactly_like_the_automatic_one(tmp_path, monkeypatch):
     """IF THIS FAILS: there are two spellings of one identity record. The
     automatic hello (cli._hello_if_unknown) and this verb both feed the same
-    readers, so a key that drifts here — session id under a different name, a
-    vendor that stops being recorded — makes half the agents on a machine
+    readers, so a key that drifts here: session id under a different name, a
+    vendor that stops being recorded: makes half the agents on a machine
     invisible to the hook and to the independence label, with no error anywhere."""
     repo = _repo(tmp_path, monkeypatch)
     code, _out, err = _run(repo, "hello", "--as", "claude-dev", session="sess-1",
@@ -170,7 +170,7 @@ def test_hello_records_the_vendor_so_independence_is_not_guessed(tmp_path, monke
 def test_a_label_that_could_forge_an_output_line_is_refused(tmp_path, monkeypatch):
     """IF THIS FAILS: an actor can write its own lines into the board. The label
     is printed raw next to the actor name, so a newline or an ESC in it lets one
-    agent render text that looks like the tool speaking — including a claim that
+    agent render text that looks like the tool speaking: including a claim that
     somebody holds nothing. Nothing may be recorded when the value is refused."""
     repo = _repo(tmp_path, monkeypatch)
     for bad in ("Real\n@someone else holds nothing", "esc\x1b[2Jgone", "bell\x07",
@@ -183,7 +183,7 @@ def test_a_label_that_could_forge_an_output_line_is_refused(tmp_path, monkeypatc
 
 def test_a_label_long_enough_to_flood_the_board_is_refused(tmp_path, monkeypatch):
     """IF THIS FAILS: one actor's display name can push every other agent's row
-    off the screen — the board is the one place a human checks who holds what."""
+    off the screen: the board is the one place a human checks who holds what."""
     repo = _repo(tmp_path, monkeypatch)
     code, out, err = _run(repo, "hello", "--as", "claude-dev", "--label", "x" * 200, session="s1")
     assert code == 2 and "200 characters" in err
@@ -193,7 +193,7 @@ def test_a_label_long_enough_to_flood_the_board_is_refused(tmp_path, monkeypatch
 def test_hello_without_a_host_session_still_records_and_says_what_is_missing(
         tmp_path, monkeypatch):
     """IF THIS FAILS: a human at a terminal either gets no identity record at all,
-    or gets one silently. Both are bad in different ways — the second is worse,
+    or gets one silently. Both are bad in different ways: the second is worse,
     because the hook's inability to recognise this actor then shows up much later
     as an unexplained block on a file the agent had claimed."""
     repo = _repo(tmp_path, monkeypatch)
@@ -218,7 +218,7 @@ def test_a_positional_name_overrides_the_environment(tmp_path, monkeypatch):
 
 def test_hello_with_no_actor_anywhere_refuses_rather_than_guessing(tmp_path, monkeypatch):
     """IF THIS FAILS: an unnamed agent gets a default identity, and two agents
-    sharing one name cannot detect a conflict between them — the exact failure
+    sharing one name cannot detect a conflict between them: the exact failure
     the actor requirement exists to prevent."""
     repo = _repo(tmp_path, monkeypatch)
     code, out, err = _run(repo, "hello", session="s1")
@@ -227,8 +227,8 @@ def test_hello_with_no_actor_anywhere_refuses_rather_than_guessing(tmp_path, mon
 
 
 def test_hello_names_the_actor_on_the_first_line(tmp_path, monkeypatch):
-    """IF THIS FAILS: the one fact hello exists to surface — which actor you are
-    about to work as — scrolls away behind the rest of the output, and a
+    """IF THIS FAILS: the one fact hello exists to surface, which actor you are
+    about to work as: scrolls away behind the rest of the output, and a
     misconfigured name is found after the claims are already recorded under it."""
     repo = _repo(tmp_path, monkeypatch)
     _, out, _err = _run(repo, "hello", "--as", "claude-dev", "--label", "Claude Dev", session="s1")
@@ -239,8 +239,8 @@ def test_hello_names_the_actor_on_the_first_line(tmp_path, monkeypatch):
 
 def test_hello_counts_the_sessions_that_share_a_family_name(tmp_path, monkeypatch):
     """IF THIS FAILS: the "you are the 2nd claude here" signal is wrong, and the
-    misconfiguration it catches — two agents accidentally running as one family
-    with one name — stays invisible until they collide."""
+    misconfiguration it catches: two agents accidentally running as one family
+    with one name: stays invisible until they collide."""
     repo = _repo(tmp_path, monkeypatch)
     _, out, _err = _run(repo, "hello", "--as", "claude-a", session="s1")
     assert "(1 claude session active right now.)" in out
@@ -267,8 +267,8 @@ def test_hello_asked_for_help_records_nothing(tmp_path, monkeypatch):
 
 
 def test_version_prints_the_version_as_the_second_field(tmp_path, monkeypatch):
-    """IF THIS FAILS: every script that cuts the version out of `comms version` —
-    the conventional way to check what is installed before filing a bug — reads
+    """IF THIS FAILS: every script that cuts the version out of `comms version`:
+    the conventional way to check what is installed before filing a bug: reads
     the wrong field or nothing at all."""
     repo = _repo(tmp_path, monkeypatch)
     code, out, err = _run(repo, "version")
@@ -280,8 +280,8 @@ def test_version_prints_the_version_as_the_second_field(tmp_path, monkeypatch):
 
 
 def test_version_from_a_source_checkout_says_dev_rather_than_failing(monkeypatch):
-    """IF THIS FAILS: running from a checkout — how everyone working ON comms runs
-    it — raises out of a command whose entire job is to answer a question."""
+    """IF THIS FAILS: running from a checkout: how everyone working ON comms runs
+    it: raises out of a command whose entire job is to answer a question."""
     from importlib.metadata import PackageNotFoundError
 
     def _missing(_name):
