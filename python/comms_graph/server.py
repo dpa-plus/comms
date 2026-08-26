@@ -37,6 +37,7 @@ from . import lock as _lock
 from . import log as _log
 from . import state as _state
 from . import task as _task
+from . import tree as _tree
 from . import taskcode as _taskcode
 
 #: How often the watcher stats the log. The log is appended under a lock and a
@@ -391,11 +392,34 @@ def _snapshot(root: Path, log_file: Path, graph_path: Path | None = None) -> dic
                      else "low"),
         })
 
+    # What is ACTUALLY changed on disk, which no agent has to remember to
+    # report. Every other number on this board comes from somebody choosing to
+    # declare something; this one comes from git. It is the answer to "is the
+    # tree quiet", a question the claim count was being read as answering and
+    # cannot.
+    survey = _tree.survey(root, st)
+    dirty = {
+        "readable": survey.readable,
+        "unavailable": survey.unavailable,
+        "headline": _tree.headline(survey),
+        "total": len(survey.changes),
+        "unclaimed": len(survey.unattributed),
+        "files": [
+            {"path": a.change.path, "how": a.change.how(), "actor": a.actor,
+             "basis": a.basis, "intent": a.intent,
+             "staged": a.change.staged, "deleted": a.change.deleted}
+            # Capped, and the cap is spent on the unattributed ones first,
+            # because those are the reason the panel exists.
+            for a in sorted(survey.changes, key=lambda a: (a.known, a.change.path))[:200]
+        ],
+    }
+
     return {
         "root": str(root),
         "generated": _now_text(),
         "alerts": alerts,
         "projects": projects,
+        "dirty": dirty,
         # Never silently. A rail that quietly drops 213 entries is indistinguishable
         # from one that lost them, and the next person to wonder where a project
         # went has nothing to read.
@@ -1216,6 +1240,15 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
   font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-4); }
 .nowband-hd .count { color: var(--ink-3); text-transform: none; letter-spacing: 0; font-size: 11.5px; }
 .nowband-empty { padding: var(--sp-h) var(--sp-2) var(--sp-2); color: var(--ink-4); font-size: 12.5px; }
+/* The one empty state that is not a shrug: no claims WITH a dirty tree is a
+   thing to look at, not an absence to move past. */
+.nowband-empty.amber { color: var(--amber); }
+.loosehd { border-top: 1px solid var(--line); }
+.afiles.loose { padding-bottom: var(--sp-h); }
+.afiles.loose .afrow { justify-content: flex-start; gap: var(--sp-2); }
+.afiles.loose .how { color: var(--ink-4); font-size: 11.5px; }
+.afiles.loose .how.amber { color: var(--amber); }
+.afiles.loose .who { color: var(--ink-4); font-size: 11px; }
 .hrow { display: flex; align-items: baseline; gap: var(--sp-1);
   padding: 3px var(--sp-2); font-size: 12.5px; }
 .hrow:last-child { padding-bottom: var(--sp-1); }
@@ -1500,8 +1533,24 @@ function renderNow() {
   var h = '<div class="nowband">';
   h += '<div class="nowband-hd"><span>Working now</span><span class="count">' +
        (cs.length ? cs.length + (cs.length === 1 ? " file claimed" : " files claimed") : "") + "</span></div>";
+  var dirt = D.dirty || {};
   if (!cs.length) {
-    h += '<div class="nowband-empty">Nobody is holding any ground right now.</div>';
+    // "Nobody is holding any ground" is only reassuring if the tree agrees, and
+    // it was measured NOT agreeing: no claims on the board while fifteen files
+    // were changed on disk. Say which of the two situations this is.
+    if (dirt.readable === false) {
+      h += '<div class="nowband-empty">Nobody is holding any ground right now, and ' +
+           'the working tree could not be read (' + esc(dirt.unavailable || "no reason given") +
+           '), so this is not the same as quiet.</div>';
+    } else if (dirt.total) {
+      h += '<div class="nowband-empty amber">Nobody is holding any ground, but ' +
+           dirt.total + (dirt.total === 1 ? " file has" : " files have") +
+           ' uncommitted changes. Nothing here is claimed, which is not the same as ' +
+           'nothing happening.</div>';
+    } else {
+      h += '<div class="nowband-empty">Nobody is holding any ground, and there are ' +
+           'no uncommitted changes.</div>';
+    }
   } else {
     // BY AGENT, not by file. One agent holding eight files produced eight
     // near-identical rows — same name, same truncated intent, same task, eight
@@ -1547,6 +1596,33 @@ function renderNow() {
       });
       h += "</div>";
     });
+  }
+  // Changed on disk with nothing in the log about it. This is the half of the
+  // picture no agent has to remember to emit, so it is the half that survives a
+  // context compaction, a run of shell heredoc edits, or an agent that simply
+  // never claimed anything.
+  // Everything dirty that NO LIVE CLAIM covers. Filtering to the wholly
+  // unattributed would have hidden the other half of the problem: a file
+  // somebody released and left uncommitted appears under neither "working now"
+  // nor "claimed by nobody", so it fell out of the board entirely.
+  var loose = (dirt.files || []).filter(function (f) { return f.basis !== "held"; });
+  if (loose.length) {
+    h += '<div class="nowband-hd loosehd"><span>Changed on disk, nobody holding it</span>' +
+         '<span class="count">' + loose.length + " of " + dirt.total + "</span></div>";
+    h += '<div class="afiles loose">';
+    loose.slice(0, 25).forEach(function (f) {
+      h += '<div class="afrow">' +
+           '<span class="mono afpath">' + esc(shortPath(f.path)) + "</span>" +
+           '<span class="how' + (f.deleted ? " amber" : "") + '">' + esc(f.how) + "</span>" +
+           '<span class="grow"></span>' +
+           '<span class="who mono">' +
+           (f.actor ? "@" + esc(f.actor) + " let go of it" : "claimed by nobody") +
+           "</span></div>";
+    });
+    if (loose.length > 25) {
+      h += '<div class="pmore">and ' + (loose.length - 25) + " more</div>";
+    }
+    h += "</div>";
   }
   h += "</div>";
   el("nowBand").innerHTML = h;

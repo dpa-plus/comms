@@ -28,6 +28,7 @@ doing and which files it took, comms can answer questions a lock cannot:
 | Which files did that task actually touch? | claims tagged `--task` |
 | Whose work sits next to mine in the code? | the task graph joined to the code map |
 | Would this commit take somebody else's work? | `check --staged` |
+| What is changed on disk that nobody declared? | `git status`, read by comms itself |
 
 <p align="center">
   <img src="assets/dashboard.png" alt="The comms board: the activity stream, who is holding which files, the task list with the files each task touches, and every project on the machine down the left." width="900">
@@ -63,6 +64,27 @@ These are the classic problems of people working in parallel, and the classic an
 | **Session** | A named work window that groups claims/events and can be archived. | `comms-graph session start "dashboard fixes"` |
 | **Doc** | A small per-repo wiki under `.comms/docs`. | `comms-graph doc tracker-architecture` |
 | **Lesson** | Cross-project knowledge that outlives any one repo. | `comms-graph lesson verify-data-before-ui` |
+
+### One signal nobody has to remember to send
+
+Everything above depends on an agent choosing to declare something, and the
+measured behaviour is that they often do not: after a context compaction the
+discipline lapses, and edits made through a shell heredoc or a codegen script
+are invisible to the pre-edit hook by construction.
+
+So comms reads `git status` itself. The board shows what is genuinely changed on
+disk next to what was declared, attributed where the log can attribute it and
+marked **claimed by nobody** where it cannot. It never guesses an author from
+timing or activity, because "we do not know who did this" is the finding.
+
+This closes two measured failures, both of which read as an all-clear:
+
+* The board printed *"no active claims in this repo"* while `git status` showed
+  fifteen changed files, four of which appear nowhere in the log.
+* `check --staged` passed a commit carrying a staged deletion left behind by a
+  departed agent. The check was true on its own terms, the file was unclaimed,
+  and the deletion shipped. A staged deletion of another actor's ground is now
+  refused.
 
 **Task is the one that changed the shape of the thing.** A claim says who is on a
 file; a task says what the work is, and tagging your claims to it (`--task
