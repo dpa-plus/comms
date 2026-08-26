@@ -27,6 +27,15 @@ not run that hook yourself; it runs whether or not you remember it.
 the same file on this disk, and the guard treats them as one, so you cannot get
 round a claim by changing the case of a letter.
 
+**Claim before the first WRITE, not before the first edit you notice.** A
+generator counts. `npm run i18n -- set` counts. A codegen step, a formatter you
+point at one file, a script that rewrites a JSON file — all writes. An agent
+here wrote three keys into a shared `messages/de.json` through an i18n command,
+claimed the file forty minutes later when it got to the tests, and in between a
+peer committed the whole file inside an unrelated change. Nothing was violated:
+at that moment nobody held it. Nothing broke either, which was luck. That agent
+would have said it was following the rule right up until it read the log.
+
 **The hook only sees Edit and Write.** If you change a file with `sed -i`, a
 heredoc, `tee`, or a Python one-liner inside Bash, nothing checks it — and in
 auto mode Bash is the documented default, so this is the normal case, not a
@@ -345,6 +354,87 @@ owns that reference is the one that knows how, and comms taking a dependency on
 it would mean auth, a CLI that may be absent, and a public tool hard-wired to
 one team's internals.
 
+## How the Task Graph and the Code Map Meet
+
+This is the reason comms sits on graphify at all, so it is worth one paragraph
+of how rather than a list of verbs.
+
+**Two graphs, and only one of them is declared.**
+
+- The **task graph** is what people wrote down. An edge exists because somebody
+  ran `task edge`, and it means *sequence*: the target comes after the source.
+- The **code map** is what the code actually does. `graphify extract` reads the
+  repository into files, symbols and the edges between them. Nobody declares any
+  of it and it is true whether or not anyone noticed.
+
+**They are joined by your claims.** A claim tagged `--task <slug>` puts a file on
+a task. The map already knows how that file reaches other files. So comms can
+say which *tasks* meet in the code — derived, not typed — and the board shows it
+on a task as **MEETS IN THE CODE**, with the count of places the two share.
+
+That is worth stating plainly because it is the difference between the two
+things being connected and merely being installed side by side. Measured on this
+machine: eight tasks and **zero** declared edges in a log with thousands of
+events. Left to declarations alone the task graph is a list. Left to the code
+map alone, nobody knows which work the connections belong to.
+
+**Read them as different kinds of claim.** A declared edge is a judgement about
+order and it blocks: the successor waits. A code connection is a fact with no
+direction — these two pieces of work touch the same neighbourhood — and it blocks
+nothing. It is a reason to go and look, or to talk to whoever holds the other
+task, before you find out by collision.
+
+The map runs at roughly a third to a half recall on this kind of codebase, so
+**silence from it is weak evidence**. "Meets nothing" means "nothing found", not
+"nothing there".
+
+**And some files are not on the map at all**, which is a different thing from low
+recall and reads the same. The map is built from code: a JSON catalogue, a
+config file, a SQL migration has no symbols and no imports, so it is simply
+absent. In this repo the single highest-traffic shared file is
+`frontend/messages/de.json` — the one most likely to be edited by two agents at
+once — and it can never appear as a shared file. An agent lost work to exactly
+that file while its task showed no relevant neighbours. Treat catalogue, config
+and migration files as invisible here and coordinate them by claiming, not by
+looking for a connection that cannot exist.
+
+**The map is only as fresh as the last extract.** It does not update itself. A
+map several commits old reports line numbers that have moved and misses
+connections added since, and it does so confidently — which is worse than having
+none, because a wrong answer and a right one look identical. The board shows the
+map's age and warns past a day. If what you are reading matters, re-run
+`graphify extract . --code-only` first.
+
+**Where this is worth reading, and where it is not.** Measured by the agents
+using it: for the author of both sides of a connection it is confirmation, not
+information — you already know. It earns its place when you are about to touch a
+file you did NOT write and cannot know who is downstream of it right now. The
+code map gives you the fan-out; the claims give you which of those are in
+somebody's open task. Neither half is the feature; the join is.
+
+That is also why `claim` runs the same check at the moment you take ground: that
+is when the information is new.
+
+**A task you made to find something out is not work.** Declare it with
+`comms-graph task add <slug> --probe` and it stays out of the derived
+neighbours. Diagnostics, spikes and reproductions get tasks under the rule
+above, and without the flag they sit in the graph afterwards as permanent
+neighbours of real work.
+
+**In practice, before you start a task:**
+
+```bash
+comms-graph brief <slug>          # what it is, what it consumes, decisions upstream
+comms-graph board                 # who holds what, and under which task
+graphify explain "<symbol>"       # what your ground connects to in the code
+```
+
+If the board says your task meets another one, read that task before you edit —
+whoever holds it is working in the same neighbourhood, and that is exactly the
+collision claims cannot prevent on files neither of you has claimed yet.
+
+---
+
 ## Navigating the Code
 
 If the repo has a graphify map (`graphify-out/graph.json`), it can answer some
@@ -356,8 +446,18 @@ The split is not a matter of taste; it was measured on this codebase.
 `rg` locates a symbol. Once you have its name, graphify tells you what connects
 to it — which is the part grep cannot do without a manual fan-out.
 
+**The two forms answer different questions and only one of them gives you
+callers.** `explain <symbol>` returns what that symbol calls and what contains
+it; it does NOT reliably return its callers, including plain same-file calls.
+`explain <file>` returns the files that import it, and is complete. So if the
+question is "who depends on this", ask for the FILE. Measured against `rg` on a
+real change: the file form matched grep exactly, and its per-symbol precision is
+what makes it worth running before a signature change — nine files imported the
+module, only three imported the symbol being changed.
+
 ```bash
-graphify explain "matchTransactionToTenancy"   # callers, callees, relation kinds
+graphify explain "<symbol>"                    # its CALLEES and what contains it
+graphify explain "path/to/file.ts"             # its IMPORTERS — who depends on it
 graphify affected "<node-id>"                  # transitive blast radius
 graphify god-nodes                             # the hubs, when you are new here
 ```

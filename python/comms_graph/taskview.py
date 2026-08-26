@@ -58,11 +58,37 @@ class TaskViewResult:
 
 
 def _node_label(t: Any) -> str:
-    """Slug on top, title under it. The slug is what an agent has to type next."""
-    title = (t.title or "").strip()
-    if len(title) > 34:
-        title = title[:33] + "…"
-    return t.id + ("\n" + title if title else "")
+    """What the box says, and it is read at a glance or not at all.
+
+    It used to be the slug with a truncated title under it, which answered
+    neither question somebody actually has in front of a task graph: what is
+    this, and is anyone on it. Two boxes reading "jagd-runde-zwei / Elf Befunde
+    der zweiten Browserja…" are indistinguishable at a glance.
+
+    So: the TITLE first, because that is what the task is. Then the state in
+    words. Then who is holding it, since "someone is on this" and "this is
+    sitting there" are the two states worth telling apart from across a room.
+    """
+    title = (t.title or "").strip() or t.id
+    if len(title) > 38:
+        title = title[:37] + "…"
+
+    if t.phase == "doing" and t.doers:
+        state = "@" + ", @".join(t.doers)
+    elif t.phase == "review":
+        state = "waiting to be checked"
+    elif t.phase == "closed":
+        state = ("checked by @" + t.verified_by) if t.verified_by else "done"
+    elif t.phase == "blocked":
+        state = "waiting on " + ", ".join(t.blocked_by[:2]) if t.blocked_by else "blocked"
+    elif t.phase == "cycle":
+        state = "in a dependency loop"
+    else:
+        state = "nobody on it"
+    if len(state) > 38:
+        state = state[:37] + "…"
+
+    return f"{title}\n{state}\n{t.id}"
 
 
 def _tooltip(t: Any, edges: list) -> str:
@@ -72,7 +98,9 @@ def _tooltip(t: Any, edges: list) -> str:
     if t.doers:
         lines.append("doing: " + ", ".join("@" + d for d in t.doers))
     if t.did:
-        lines.append(f"awaiting review of @{t.did}'s work")
+        lines.append(f"awaiting review of @{t.did}'s work"
+                     if getattr(t, "needs_review", False)
+                     else f"finished by @{t.did}")
     if t.verified_by:
         lines.append(f"verified by @{t.verified_by} ({t.independence or 'unknown'})")
         # What they say they ran. A person scanning the board for a task to
@@ -223,17 +251,29 @@ _PAGE = """<!doctype html>
   .note {{ color: #8890b0; font-size: 11.5px; margin-top: 4px; }}
   .blocked-on {{ color: #f0c274; font-family: ui-monospace, Menlo, monospace; }}
   .empty {{ color: #8890b0; padding: 24px 0; }}
+  /* Over the canvas, not inside the panel beside it. The board hides that panel
+     to give the picture the whole pane, which is right — but it was taking the
+     one line that explains what you are looking at with it, so a column of
+     unconnected boxes arrived with no way to know why. */
   .warn {{ background: #3a1d1b; border: 1px solid #f28b82; color: #f6b0aa;
     padding: 8px 10px; border-radius: 5px; margin: 10px 0; }}
+  /* A SIBLING of #graph, not a child. vis-network replaces the contents of its
+     container on construction, so anything inside #graph is destroyed the
+     moment the picture is drawn — the notice was in the HTML, absent from the
+     DOM, and invisible for exactly that reason. */
+  #wrap > .warn {{ position: absolute; z-index: 5; left: 16px; top: 12px;
+    margin: 0; max-width: 720px; font-size: 12.5px; line-height: 1.45;
+    box-shadow: 0 6px 24px rgba(0,0,0,.45); }}
+  #wrap {{ position: relative; }}
   code {{ background: #24243f; padding: 1px 5px; border-radius: 3px;
     font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; }}
 </style>
 <div id="wrap">
   <div id="graph"></div>
+  {warning}
   <div id="side">
     <h1>Task graph</h1>
     <div class="headline">{headline}</div>
-    {warning}
     {blocked_block}
     {review_block}
     <div class="sec">Phases</div>
@@ -358,7 +398,21 @@ def render(state: Any, output_path: str | Path, generated: str = "") -> TaskView
         review_block = (f'<div class="sec">Waiting on review</div>{rows}'
                         '<div class="note">Each of these blocks everything after it.</div>')
 
-    warning = ""
+    # A picture of nodes with no edges is not a graph, it is a list drawn
+    # badly — and it invites the reader to look for connections that are not
+    # there. Measured on the real store: 8 tasks, 0 task_edge events, ever. Say
+    # so, and say what would change it, rather than presenting a column of boxes
+    # as though the layout meant something.
+    if not edges and nodes:
+        warning = ('<div class="warn">No dependencies have been declared, so these '
+                   f'{len(nodes)} task(s) are independent — nothing here waits on '
+                   'anything else. The column is not an ordering.<br>'
+                   'An agent connects two with '
+                   '<code>comms-graph task edge &lt;first&gt; &lt;second&gt; '
+                   '--kind consumes --provides "what the second one uses"</code>, '
+                   'and then this becomes a graph worth looking at.</div>')
+    else:
+        warning = ""
     if summary["cycles"]:
         warning = (f'<div class="warn">{summary["cycles"]} task(s) are in a dependency loop '
                    "and can never start. Nothing downstream of them can either.</div>")
