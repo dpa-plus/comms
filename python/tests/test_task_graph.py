@@ -42,9 +42,16 @@ def phases(st):
 
 
 def _chain(ev):
-    """api -> ui, where ui consumes an interface from api."""
+    """api -> ui, where ui consumes an interface from api.
+
+    `api` asks for review explicitly. Review is opt-in — a task that never asked
+    for one is finished when it is done — and everything below this point is
+    testing the GATE, so the precondition has to be stated rather than assumed.
+    It used to be assumed because review was unconditional.
+    """
     return [
-        ev("task", "planner", {"task": "api", "title": "Auth API", "checks": ["test"]}),
+        ev("task", "planner", {"task": "api", "title": "Auth API",
+                               "checks": ["test"], "review": True}),
         ev("task", "planner", {"task": "ui", "title": "Login screen"}),
         ev("task_edge", "planner", {"from": "api", "to": "ui", "kind": "interface",
                                     "provides": "POST /session returns a token"}),
@@ -449,7 +456,7 @@ def test_brief_carries_the_upstream_decision_to_whoever_picks_up_next(tmp_path, 
     repo = _repo(tmp_path, monkeypatch)
     plan = repo / "plan.json"
     plan.write_text(
-        '{"tasks":[{"id":"auth-api","checks":[]},{"id":"login-ui"}],'
+        '{"tasks":[{"id":"auth-api","checks":[],"review":true},{"id":"login-ui"}],'
         '"edges":[{"from":"auth-api","to":"login-ui","kind":"interface",'
         '"provides":"POST /session returns a JWT"}]}'
     )
@@ -793,7 +800,7 @@ def test_every_agent_who_submitted_is_barred_from_reviewing_not_just_the_last():
     most recent revision" is a different and much weaker claim.
     """
     ev = _Seq()
-    evs = [ev("task", "p", {"task": "api"}),
+    evs = [ev("task", "p", {"task": "api", "review": True}),
            ev("task_state", "alice", {"task": "api", "state": "done"}),
            ev("task_state", "bob", {"task": "api", "state": "done"}),
            ev("task_state", "alice", {"task": "api", "state": "verified"})]
@@ -975,7 +982,7 @@ def test_a_task_two_agents_both_submitted_can_still_be_rejected():
     somebody saying their own work is not ready, which should be easy.
     """
     ev = _Seq()
-    evs = [ev("task", "p", {"task": "t"}),
+    evs = [ev("task", "p", {"task": "t", "review": True}),
            ev("task_state", "alice", {"task": "t", "state": "done"}),
            ev("task_state", "bob", {"task": "t", "state": "done"})]
     assert cstate.fold(evs).tasks["t"].phase == "review"
@@ -996,7 +1003,7 @@ def test_next_never_offers_a_review_the_gate_will_refuse():
     """The reader half and the enforcing half must ask the same question, or the
     board recommends a command guaranteed to fail."""
     ev = _Seq()
-    evs = [ev("task", "p", {"task": "t"}),
+    evs = [ev("task", "p", {"task": "t", "review": True}),
            ev("task_state", "alice", {"task": "t", "state": "done"}),
            ev("task_state", "bob", {"task": "t", "state": "done"})]
     st = cstate.fold(evs)
@@ -1047,10 +1054,10 @@ def test_restating_a_task_with_the_same_checks_does_not_bounce_the_work():
     """The rule must be about NEW requirements, not about touching the task.
     Renaming a title would otherwise throw away a submission."""
     ev = _Seq()
-    evs = [ev("task", "p", {"task": "b", "checks": ["test"]}),
+    evs = [ev("task", "p", {"task": "b", "review": True, "checks": ["test"]}),
            ev("task_state", "alice", {"task": "b", "state": "done",
                                       "checks": {"test": "pass"}}),
-           ev("task", "p", {"task": "b", "title": "renamed", "checks": ["test"]})]
+           ev("task", "p", {"task": "b", "review": True, "title": "renamed", "checks": ["test"]})]
     st = cstate.fold(evs)
     assert st.tasks["b"].did == "alice"
     assert st.tasks["b"].phase == "review"
@@ -1069,7 +1076,7 @@ def test_a_two_agent_run_has_a_way_out_and_it_is_recorded_honestly():
     Somebody chose to sign off their own work and their name is on it.
     """
     ev = _Seq()
-    evs = [ev("task", "p", {"task": "t"}),
+    evs = [ev("task", "p", {"task": "t", "review": True}),
            ev("task_state", "alice", {"task": "t", "state": "done"}),
            ev("task_state", "bob", {"task": "t", "state": "done"})]
 
@@ -1314,7 +1321,7 @@ def test_brief_does_not_say_a_verified_task_is_awaiting_review(tmp_path, monkeyp
     """The line was emitted whenever a doer was recorded, so every closed task
     announced it was awaiting review in the same breath as naming its verifier."""
     repo = _repo(tmp_path, monkeypatch)
-    _cli(repo, "task", "add", "t1", "--as", "p", session="agent-P")
+    _cli(repo, "task", "add", "t1", "--as", "p", "--review", session="agent-P")
     _cli(repo, "task", "done", "t1", "--as", "alice", session="agent-A")
     code, out = _cli(repo, "brief", "t1", session="agent-C")
     assert "awaiting review of @alice's work" in out, "it really is awaiting one"
@@ -2009,3 +2016,65 @@ def test_the_cli_accepts_the_old_kind_names(tmp_path, monkeypatch):
     code, out = _cli(repo, "task", "edge", "a", "b", "--as", "p",
                      "--kind", "nonsense", session="sP")
     assert code != 0, out
+
+
+# ---------------------------------------------------------------------------
+# Review is opt-in
+# ---------------------------------------------------------------------------
+
+
+def test_a_task_that_never_asked_for_review_closes_when_it_is_done():
+    """IF THIS FAILS: every task parks in a queue nobody is serving.
+
+    Review was unconditional, and the reasoning was sound — self-review
+    measurably fails. What that missed is that an always-on gate is not free.
+    Measured on real work: four of eight tasks sat in `review` with no reviewer
+    coming, which is not a quality bar, it is a backlog. A gate that is always on
+    and rarely satisfied teaches people to stop declaring tasks at all, and then
+    there is no graph to gate.
+
+    So `--review` asks for it and everything else closes on `done`. Signing off
+    somebody else's work is still possible on any task; only REQUIRING it moved.
+    """
+    ev = _Seq()
+    evs = [ev("task", "planner", {"task": "plain", "title": "No review"}),
+           ev("task_state", "alice", {"task": "plain", "state": "done"})]
+    assert phases(cstate.fold(evs)) == {"plain": "closed"}
+
+
+def test_a_task_that_asked_for_review_still_waits_for_one():
+    ev = _Seq()
+    evs = [ev("task", "planner", {"task": "gated", "title": "Gated", "review": True}),
+           ev("task_state", "alice", {"task": "gated", "state": "done"})]
+    assert phases(cstate.fold(evs)) == {"gated": "review"}
+
+    evs.append(ev("task_state", "bob", {"task": "gated", "state": "verified"}))
+    assert phases(cstate.fold(evs)) == {"gated": "closed"}
+
+
+def test_a_finished_no_review_task_unblocks_what_comes_after_it():
+    """IF THIS FAILS: opt-in review deadlocks every plan that uses it.
+
+    The successor waits on a verification the predecessor was never going to
+    receive, so the chain stops forever. Reading only `verified_by` here is
+    exactly that bug — the outer guard, not the branch below it, is what decides.
+    """
+    ev = _Seq()
+    evs = [ev("task", "p", {"task": "first", "title": "First"}),
+           ev("task", "p", {"task": "second", "title": "Second"}),
+           ev("task_edge", "p", {"from": "first", "to": "second", "kind": "consumes"}),
+           ev("task_state", "alice", {"task": "first", "state": "done"})]
+    assert phases(cstate.fold(evs)) == {"first": "closed", "second": "ready"}
+
+
+def test_restating_a_task_without_review_turns_the_requirement_off():
+    """`task` is a whole-record upsert, like `hello`. Every other field follows
+    that rule and this one is not a special case — worth pinning so it is a
+    decision rather than an accident."""
+    ev = _Seq()
+    evs = [ev("task", "p", {"task": "t", "review": True}),
+           ev("task_state", "alice", {"task": "t", "state": "done"})]
+    assert phases(cstate.fold(evs)) == {"t": "review"}
+
+    evs.append(ev("task", "p", {"task": "t"}))
+    assert phases(cstate.fold(evs)) == {"t": "closed"}

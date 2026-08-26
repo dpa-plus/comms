@@ -146,6 +146,31 @@ class Task:
     #: been reworked" from "this was never signed off at all" — two situations
     #: with the same verified_by ("") and opposite consequences downstream.
     ever_verified: bool = False
+    #: Whether finishing this task parks it for somebody else to check.
+    #:
+    #: OPT-IN, and that is a reversal. The original design made review
+    #: unconditional because self-review measurably fails — which is true, and
+    #: still the reason `task review` refuses to let you sign off your own work.
+    #: What it got wrong is that an unconditional gate is not free: run against
+    #: real work, four of eight tasks sat in `review` with nobody reviewing,
+    #: which is not a quality bar, it is a queue nobody is serving. A gate that
+    #: is always on and rarely satisfied teaches people to stop declaring tasks.
+    #:
+    #: So: ask for it when the work warrants it (`task add --review`), and
+    #: `task done` closes everything else. Reviewing is still possible on any
+    #: task; it is being REQUIRED that is now a choice.
+    needs_review: bool = False
+    #: Declared as a probe: a diagnostic, a spike, a throwaway that produced
+    #: nothing. Excluded from derived neighbours.
+    #:
+    #: This is a cost of the "every request that will change files gets a task"
+    #: rule, and it compounds: an agent made a task purely to reproduce a bug in
+    #: this tool, and it now sits in the graph permanently as a three-file
+    #: neighbour of that agent's real work, outranking a genuine one-file
+    #: neighbour. The harder people test, the more of it accumulates. A probe is
+    #: still a task — it is claimed, it is auditable — it is just not evidence
+    #: about where the real work meets.
+    probe: bool = False
     #: "independent" when the verifier's vendor differs from the doer's,
     #: "same-family" otherwise. Verified and verified-by-something-with-the-same-
     #: blind-spots are different claims and should not read alike.
@@ -329,6 +354,10 @@ def apply_task(tasks: dict[str, Task], ev: Any, string_of, int_of, ref_list) -> 
     if size:
         t.size = size.upper()
     checks = ref_list(ev.data, "checks")
+    # Absent on every task written before this existed, which folds to
+    # False — those tasks stop demanding a review nobody was giving them.
+    needs_review = bool(ev.data.get("review"))
+    probe = bool(ev.data.get("probe"))
     if checks:
         added = [c for c in checks if c not in t.checks]
         t.checks = checks
@@ -351,6 +380,11 @@ def apply_task(tasks: dict[str, Task], ev: Any, string_of, int_of, ref_list) -> 
     ref = string_of(ev.data, "ref")
     if ref:
         t.ref = ref
+    # `task` is a whole-record upsert, like `hello`, so re-stating a task
+    # without --review turns the requirement off. That is the same rule the
+    # other fields follow and not a special case.
+    t.needs_review = needs_review
+    t.probe = probe
     t.updated_at = ev.ts
     t.last_activity = ev.ts
 
@@ -580,6 +614,29 @@ def _findings_from(data: Mapping[str, Any]) -> list[TaskFinding]:
 # --------------------------------------------------------------------------
 
 
+
+def _finished(t: Any) -> bool:
+    """Is this predecessor done with, for the purpose of unblocking what follows?
+
+    Two ways, and the second is what opt-in review made necessary: a task that
+    was verified, or a task that was done and never asked to be verified.
+    Reading only `verified_by` here meant a closed no-review task still blocked
+    its successor forever, waiting for a sign-off nobody was ever going to give.
+    """
+    return bool(t.verified_by) or (not t.needs_review and bool(t.did))
+
+
+def _ever_finished(t: Any) -> bool:
+    """The same question about the PAST, not the present.
+
+    `ever_verified` exists to tell "reworked after a real sign-off" apart from
+    "never legitimately started" — both leave `verified_by` empty. A task that
+    never required review has no sign-off to have had, so being done once is the
+    equivalent evidence.
+    """
+    return bool(t.ever_verified) or (not t.needs_review and bool(t.did))
+
+
 def derive_phases(
     tasks: dict[str, Task],
     edges: list[TaskEdge],
@@ -676,7 +733,7 @@ def derive_phases(
         # edge behaved like an interface edge.
         blocked_by = sorted({
             dep for dep, kind in predecessors[t.id]
-            if not tasks[dep].verified_by
+            if not _finished(tasks[dep])
             and (
                 # Not finished yet: every predecessor blocks. Ordering is
                 # ordering, whatever the kind.
@@ -689,7 +746,7 @@ def derive_phases(
                 # startable and its sign-off jumped the queue. That is a
                 # different situation from a rework, and only ever_verified
                 # tells them apart: both leave verified_by empty.
-                or not tasks[dep].ever_verified
+                or not _ever_finished(tasks[dep])
             )
         })
         t.blocked_by = blocked_by
@@ -705,7 +762,7 @@ def derive_phases(
         elif t.verified_by:
             t.phase = PHASE_CLOSED
         elif t.did:
-            t.phase = PHASE_REVIEW
+            t.phase = PHASE_REVIEW if t.needs_review else PHASE_CLOSED
         elif t.doers:
             t.phase = PHASE_DOING
         else:

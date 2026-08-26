@@ -51,6 +51,7 @@ from . import contact as _contact
 from . import lock as _lock
 from . import log as _log
 from . import task as _task
+from . import taskcode as _taskcode
 from . import taskview as _taskview
 from . import resolve as _resolve
 from . import scope as _scope
@@ -1668,13 +1669,32 @@ def _cmd_check_inner(argv: list[str]) -> int:
 
     holder = conflicts[0]
     when = holder.ts.isoformat().replace("+00:00", "Z")
+    # WHO WE THINK YOU ARE changes what this message can honestly say. With no
+    # actor and no session that resolves, the answer is not "somebody else holds
+    # this" — we do not know that. It was saying exactly that, and naming the
+    # caller as the holder in the next line: "Holder: @you ... Do not edit ground
+    # you were refused." An agent read that about a file it had just claimed and
+    # believed it was locked out of its own work.
+    #
+    # It still blocks, because failing closed is right when identity cannot be
+    # established. But it says which problem it has.
+    unidentified = actor == "\x00not-a-real-actor"
     _err(f"BLOCKED: {rel_text} is claimed.")
     _err(f"  Holder:  @{holder.actor}")
     _err(f"  Claim:   {holder.id}")
     if holder.intent:
         _err(f'  Intent:  "{holder.intent}"')
     _err(f"  Since:   {when}")
-    _err("  Ask them, or claim something narrower. Do not edit ground you were refused.")
+    if unidentified:
+        _err("  comms could not work out who you are, so it cannot tell whether "
+             "this claim is yours.")
+        _err("  If it is: set COMMS_ACTOR, or pass --as <actor>. If the pre-edit "
+             "hook is doing the asking,")
+        _err("  run `comms-graph hello --as <actor>` in this session so the log "
+             "can recognise it.")
+    else:
+        _err("  Ask them, or claim something narrower. Do not edit ground you "
+             "were refused.")
     return EXIT_BLOCK
 
 
@@ -1732,6 +1752,17 @@ def _task_add(argv: list[str]) -> int:
     checks = [c.strip() for c in _repeated(argv, "check") if c.strip()]
     if checks:
         data["checks"] = checks
+    # --review asks for a second pair of eyes; without it `task done` closes the
+    # task. Opt-in because an always-on gate that nobody serves is a queue, not a
+    # quality bar: measured on real work, four of eight tasks sat in `review`
+    # waiting for a reviewer who was never coming.
+    if "review" in flags:
+        data["review"] = True
+    # A probe is a task you made to find something out, not to change something.
+    # It stays claimable and auditable; it simply stops being evidence about
+    # where the real work meets.
+    if "probe" in flags:
+        data["probe"] = True
 
     with _lock.file_lock(lock_file) as handle:
         broken = handle.compromised()
@@ -1747,6 +1778,12 @@ def _task_add(argv: list[str]) -> int:
     print(f"TASK {slug}" + (f"  {data.get('title')}" if data.get("title") else ""))
     if checks:
         print(f"  must pass before done: {', '.join(checks)}")
+    if data.get("probe"):
+        print("  a probe — it will not show up as a neighbour of real work")
+    if data.get("review"):
+        print("  needs somebody else to check it before it closes")
+    else:
+        print("  closes when you run `task done` — add --review if it needs checking")
     return EXIT_OK
 
 
@@ -1882,8 +1919,16 @@ def _task_done(argv: list[str]) -> int:
         if greeting is not None:
             events.insert(0, greeting)
         _log.append_batch(log_file, events)
-    print(f"DONE {slug} by @{actor} — awaiting review")
-    print("  Somebody else has to verify it before anything after it unblocks.")
+    # What actually happened depends on whether this task asked to be checked.
+    # Announcing "awaiting review" on a task that just closed is the kind of
+    # contradiction that makes people stop reading the output.
+    if getattr(st.tasks.get(slug), "needs_review", False):
+        print(f"DONE {slug} by @{actor} — awaiting review")
+        print("  Somebody else has to verify it before anything after it unblocks.")
+    else:
+        print(f"DONE {slug} by @{actor} — closed")
+        print("  It did not ask for a review, so this finishes it. Anything "
+              "waiting on it is now free.")
     return EXIT_OK
 
 
@@ -2092,10 +2137,8 @@ def _cmd_find(argv: list[str]) -> int:
     if not summary:
         _err("error: find needs something to say")
         return EXIT_USAGE
-    if len(summary) > 400:
-        _err(f"error: that summary is {len(summary)} characters; keep it under 400")
-        _err("  A finding is the one line somebody reads later, not the writeup.")
-        return EXIT_USAGE
+    if len(summary) > NOTE_MAX:
+        return _too_long("finding", summary, NOTE_MAX)
     actor = _actor(flags)
     root, log_file, lock_file = _task_runtime(flags)
 
@@ -2124,6 +2167,46 @@ def _cmd_find(argv: list[str]) -> int:
     return EXIT_OK
 
 
+
+#: Notes and findings are one line somebody reads later, not the writeup.
+#: Measured on 469 real notes: median 171 characters, p90 194, longest 352. So
+#: the cap is not tight — nothing written normally has ever come close to it,
+#: and everything that hit it was a handoff being posted to the wrong verb.
+NOTE_MAX = 400
+
+
+def _too_long(kind: str, text: str, cap: int) -> int:
+    """Refuse, but show WHERE it would cut and name the verb that fits.
+
+    The old message said only "that note is 586 characters; keep it under 400",
+    which is true and useless: it does not say what to drop, and it does not say
+    that the thing being written is not a note. Three agents reported it and one
+    did the predictable thing — split the handoff into two notes, which then read
+    OUT OF ORDER in the feed, because the feed is ordered by time and the second
+    half was written first in their head.
+
+    That is the damage worth preventing, so it is said explicitly. Splitting is
+    the one option that looks like it works and does not.
+    """
+    over = len(text) - cap
+    _err(f"error: that {kind} is {len(text)} characters, {over} over the {cap} cap.")
+    _err("  It would end here:")
+    _err(f"    …{text[max(0, cap - 60):cap]}")
+    _err(f"    ⟨{over} more character{'s' if over != 1 else ''} after that⟩")
+    _err(f"  A {kind} is the one line somebody reads later, not the writeup. If it "
+         "is longer than that, it is probably one of:")
+    # Every route here is checked to actually accept a long body. `doc --edit`
+    # is NOT one of them: it hands control to $EDITOR, which an agent cannot
+    # drive, so the file is named instead — docs are plain repo files and writing
+    # one directly is how an agent gets a long thing written down.
+    _err('    why a task ended the way it did   →  comms-graph task done <id> --note "…"')
+    _err("    something the repo should keep     →  write .comms/docs/<slug>.md")
+    _err('    a decision, in ONE line            →  comms-graph find decision "…"')
+    _err("  Do not split it into two notes. The feed is ordered by time, so they "
+         "will not read in the order you wrote them.")
+    return EXIT_USAGE
+
+
 def _cmd_note(argv: list[str]) -> int:
     """A short FYI. Deliberately separate from `find`: a note is something you
     would say out loud and forget, a finding is something the next agent needs
@@ -2134,9 +2217,8 @@ def _cmd_note(argv: list[str]) -> int:
         _err("error: note needs something to say")
         _err('  e.g. comms-graph note "schema migration lands next session" --as me')
         return EXIT_USAGE
-    if len(body) > 400:
-        _err(f"error: that note is {len(body)} characters; keep it under 400")
-        return EXIT_USAGE
+    if len(body) > NOTE_MAX:
+        return _too_long("note", body, NOTE_MAX)
     actor = _actor(flags)
     root, log_file, lock_file = _task_runtime(flags)
     with _lock.file_lock(lock_file):
@@ -2233,8 +2315,11 @@ def _cmd_brief(argv: list[str]) -> int:
     if t.did and not t.verified_by:
         # Only while it really is awaiting one. Emitting this whenever a doer is
         # recorded meant every CLOSED task announced it was awaiting review in
-        # the same breath as naming its verifier.
-        bits.append(f"awaiting review of @{t.did}'s work")
+        # the same breath as naming its verifier — and now that review is opt-in,
+        # a task that never asked for one is finished, not waiting.
+        bits.append(f"awaiting review of @{t.did}'s work"
+                    if getattr(t, "needs_review", False)
+                    else f"finished by @{t.did}")
     if t.verified_by:
         bits.append(f"verified by @{t.verified_by} ({t.independence})")
     if t.rejections:
@@ -2291,6 +2376,63 @@ def _cmd_brief(argv: list[str]) -> int:
         print("  decisions recorded here:")
         for note in t.notes[-5:]:
             print(f"    {note}")
+
+    # WHO ELSE IS IN THIS NEIGHBOURHOOD, from the code map rather than from
+    # anybody declaring it. This lived only on the board, and agents read CLI
+    # output, not browsers — so the one thing that could warn you about a peer
+    # before you collide with them was in a place nobody about to edit was
+    # looking. An agent found this out the useful way: the two tasks it meets
+    # here were exactly the two collisions that had already cost it an afternoon.
+    try:
+        root = _repo_root(flags.get("root"))
+        graph = _load_graph(root / "graphify-out" / "graph.json")
+        if graph is not None:
+            def _sof(d, k):
+                v = (d or {}).get(k)
+                return v if isinstance(v, str) else ""
+            files, actors = _taskcode.files_from_log(_log.read(log_file), _sof)
+            me = (flags.get("as") or os.environ.get("COMMS_ACTOR", "")).strip()
+            links = _taskcode.link(graph, st.tasks, files, root, actors, me)
+            rel = (links.get(slug) or {}).get("related") or []
+            if rel:
+                print("  meets in the code (nobody declared these):")
+                # Demote your own work, never DROP it. Sorting it last and
+                # then taking the top five deleted it — and the row deleted was
+                # the one that made the feature pay off: an agent found a peer's
+                # unclaimed task through a file shared with its OWN earlier task.
+                # It also made discovery depend on which end you opened, and the
+                # end you naturally open when investigating somebody else's work
+                # was the blind one.
+                strangers = [r for r in rel if not r.get("same_actor")]
+                own = [r for r in rel if r.get("same_actor")]
+                for r in strangers[:5] + own[:3]:
+                    mark = "  (your own earlier work)" if r.get("same_actor") else ""
+                    # NAME them. Three agents independently said the same thing:
+                    # "4 shared places" is a number without a noun, and you
+                    # cannot act on it — whether to go and knock on somebody's
+                    # door depends entirely on whether the four places are the
+                    # component you both edit or four barrels every file
+                    # imports. Naming them also lets the reader discount a god
+                    # file on sight, which is the other complaint.
+                    def _short(v):
+                        # The tail is what identifies a file to a reader; the
+                        # leading directories are the same for everything here.
+                        parts = str(v).split("/")
+                        return "/".join(parts[-2:]) if len(parts) > 2 else str(v)
+                    where = ", ".join(_short(v) for v in (r.get("via") or [])[:3])
+                    more = r["shared"] - len(r.get("via") or [])
+                    if more > 0:
+                        where += f", +{more} more"
+                    print(f"    {r['task']} — {r['shared']} shared "
+                          f"{'file' if r['shared'] == 1 else 'files'}{mark}")
+                    if where:
+                        print(f"        via {where}")
+                print("    These are not an ordering. They touch the same ground, so "
+                      "look or ask before you edit.")
+    except Exception:
+        # Advisory only. A missing, stale or unreadable map must never stop
+        # `brief` printing the part that comes from the log.
+        pass
     return EXIT_OK
 
 
@@ -2299,7 +2441,7 @@ def _cmd_plan(argv: list[str]) -> int:
     source = flags.get("from")
     if not source:
         _err("error: plan needs --from <file.json>")
-        _err('  {"tasks": [{"id": "api", "title": "...", "checks": ["test"]}],')
+        _err('  {"tasks": [{"id": "api", "title": "...", "checks": ["test"], "review": true}],')
         _err('   "edges": [{"from": "api", "to": "ui", "kind": "interface", "provides": "..."}]}')
         return EXIT_USAGE
     actor = _actor(flags)
@@ -2343,6 +2485,11 @@ def _cmd_plan(argv: list[str]) -> int:
         slug = _slug_or_exit(str(item.get("id") or ""))
         declared.add(slug)
         data: dict = {"task": slug}
+        # A plan can ask for review per task, the same way `task add --review`
+        # does. Without this a decomposition could not express "this one needs
+        # checking" at all, which is exactly where it matters most.
+        if item.get("review"):
+            data["review"] = True
         for key in ("title", "size", "ref"):
             if item.get(key):
                 data[key] = str(item[key])
@@ -2420,6 +2567,8 @@ def _cmd_plan(argv: list[str]) -> int:
 TASK_USAGE = """Usage: comms-graph task <command>
 
   add <id> --as <actor> [--title "..."] [--size S|M|L]   (a rough scale, not a gate)
+                        [--review]        somebody else must check it to close
+                        [--probe]         a diagnostic; kept out of derived neighbours
                         [--check <name>]... [--ref "tracker:PROJ-1234"]
   edge <from> <to> --as <actor> [--kind consumes|sequence]
                                 [--provides "..."]      <to> comes AFTER <from>
@@ -2485,7 +2634,13 @@ def _cmd_board(argv: list[str]) -> int:
         when = claim.ts.isoformat().replace("+00:00", "Z")
         mark = " <- you" if me and claim.actor == me else ""
         intent = f'  "{claim.intent}"' if claim.intent else ""
-        print(f"  {claim.scope}  @{claim.actor}  {when}  [{claim.id}]{intent}{mark}")
+        # The task tag, because an agent cannot otherwise check its own work.
+        # The whole case for `--task` is that the board can then show a task's
+        # files — and the CLI printed everything about a claim EXCEPT whether it
+        # was tagged, so the one thing you would want to verify was the one
+        # thing you had to take on faith.
+        tag = f"  ({getattr(claim, 'task', '') or 'no task'})"
+        print(f"  {claim.scope}  @{claim.actor}  {when}  [{claim.id}]{tag}{intent}{mark}")
     return EXIT_OK
 
 
