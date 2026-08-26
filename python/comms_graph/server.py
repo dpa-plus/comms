@@ -1875,7 +1875,12 @@ function openTask(id) {
     h += '<div class="tdet-note">Not declared by anyone — these tasks touch files that ' +
          "reach each other in the map.</div>";
     h += '<div class="tdet-files">';
-    rel.slice(0, 8).forEach(function (r) {
+    // Demote, never drop — same reason as the CLI. Sorting own work last and
+    // then slicing deleted it, and that row is the one an agent reported as the
+    // win.
+    var strangers = rel.filter(function (r) { return !r.same_actor; });
+    var ownRel = rel.filter(function (r) { return r.same_actor; });
+    strangers.slice(0, 8).concat(ownRel.slice(0, 4)).forEach(function (r) {
       // NAME the places. Three agents said the same thing independently: a
       // count is a number without a noun, and you cannot act on it — whether to
       // go and knock on somebody's door depends on whether the shared files are

@@ -388,6 +388,42 @@ The map runs at roughly a third to a half recall on this kind of codebase, so
 **silence from it is weak evidence**. "Meets nothing" means "nothing found", not
 "nothing there".
 
+**Know which kinds it sees, not just the number.** A flat recall figure hides the
+shape of what is missing, and the shape is what tells you when to stop trusting
+it. Counted on this repository's map: 2169 `contains`, 1323 `imports`, 792
+`calls`, 731 `imports_from` — and no edge kind for one component rendering
+another. The extractor sees `foo()` and does not see `<Foo />`.
+
+In a React codebase that is not a gap at the margin, it is the structure. A
+component whose body renders five children reports degree 3, and its two edges
+are `cn()` and a colour helper — the connections that join everything to
+everything and inform least. The children exist as nodes; the edge from their
+only caller does not. So the map is keeping the noise and dropping the signal
+exactly where the signal lives.
+
+Two consequences worth carrying:
+
+* Derived neighbours are one hop, so inside a React feature most one-hop paths
+  do not exist and what survives is hops through shared FILES. Every meet
+  measured so far went via a shared file, none via a shared component.
+* For a `.tsx` file, "meets nothing" means "nothing found, and component
+  structure was never looked for". That is actionable in a way the recall caveat
+  is not: go and read the file.
+
+**A second gap, on the backend, and it is not the same one.** Suspected rather
+than proven, from a controlled pair: a call made from inside a NAMED function was
+extracted, and a call to a sibling helper made from inside
+`auftraege.flatMap((auftrag) => …)` was not, leaving that helper with no inbound
+caller at all. If a call needs a named enclosing scope to hang off, then every
+call inside a callback loses its caller — and on server code `.map`, `.flatMap`,
+`prisma.$transaction(async (tx) => …)`, express handlers and every `onSuccess`
+are anonymous, so that is most of them.
+
+Treat it as two data points, not a finding. The practical consequence is the same
+either way and is the rule worth remembering: **`explain <symbol>` under-reports
+callers, on components and on server code, for two different reasons.
+`explain <file>` is the reliable form for "who depends on this".**
+
 **And some files are not on the map at all**, which is a different thing from low
 recall and reads the same. The map is built from code: a JSON catalogue, a
 config file, a SQL migration has no symbols and no imports, so it is simply

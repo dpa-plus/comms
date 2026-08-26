@@ -166,3 +166,26 @@ def test_a_probe_task_is_not_a_neighbour(monkeypatch):
     out = taskcode.link(_graph(), tasks, files, None)
     assert out["real"]["related"] == [], "a probe was counted as a neighbour"
     assert "spike" not in out, "a probe should not get a neighbourhood of its own"
+
+
+def test_your_own_work_is_demoted_but_never_dropped(monkeypatch):
+    """IF THIS FAILS: the row that makes this feature pay off disappears.
+
+    Demoting the caller's own tasks and then taking the top N deleted them. The
+    row deleted was precisely the one an agent reported as the win: it found a
+    peer's unclaimed task through a file shared with its OWN earlier task.
+
+    It also made discovery depend on which end you opened. `brief theirs` would
+    list yours, `brief yours` would not list theirs — and the end you naturally
+    open when investigating somebody else's work was the blind one.
+    """
+    monkeypatch.setattr(taskcode, "_nodes_for",
+                        lambda graph, scopes, root: {s for s in scopes if s in graph})
+    files = {"mine": ["a.py"], "theirs": ["b.py"]}
+    actors = {"mine": {"alice"}, "theirs": {"bob"}}
+    out = taskcode.link(_graph(), {t: _T(t) for t in files}, files, None,
+                        actors, caller="bob")
+
+    rel = out["mine"]["related"]
+    assert [r["task"] for r in rel] == ["theirs"], "bob's own task vanished"
+    assert rel[0]["same_actor"] is True, "it should be labelled, not removed"
