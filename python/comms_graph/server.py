@@ -239,6 +239,7 @@ def _snapshot(root: Path, log_file: Path, graph_path: Path | None = None) -> dic
             graph, {t["id"]: t for t in tasks},
             {t["id"]: [f["scope"] for f in t.get("files") or []] for t in tasks},
             root,
+            {t["id"]: {f["actor"] for f in t.get("files") or []} for t in tasks},
         ) if graph is not None else {}
     except Exception as exc:  # pragma: no cover - defensive by intent
         links = {}
@@ -251,6 +252,26 @@ def _snapshot(root: Path, log_file: Path, graph_path: Path | None = None) -> dic
         info = links.get(t["id"]) or {}
         t["touches"] = info.get("touches", 0)
         t["related"] = info.get("related", [])
+
+    # HOW OLD THE MAP IS. Raised by an agent that called `explain` on a symbol
+    # and got a line number ~100 lines stale and three of its connections: the
+    # map had been extracted once and the file had moved under it. Their point is
+    # the right one — a map that is confidently wrong is worse than no map,
+    # because "meets nothing" and "meets nothing I know about" read identically,
+    # and the recall caveat covers presence, not freshness.
+    map_age = None
+    try:
+        if graph_path and graph_path.is_file():
+            map_age = int(now.timestamp() - graph_path.stat().st_mtime)
+    except OSError:
+        map_age = None
+    if map_age is not None and map_age > 86400:
+        alerts.append({
+            "kind": "stale-map",
+            "text": f"the code map is {map_age // 86400} day(s) old, so what tasks "
+                    f"'meet in the code' may be out of date",
+            "hint": "Rebuild it with `graphify extract . --code-only`.",
+        })
 
     # The log itself, most recent first, as a readable feed. The board had no
     # answer at all to "what just happened" — the one question somebody who has
@@ -376,6 +397,7 @@ def _snapshot(root: Path, log_file: Path, graph_path: Path | None = None) -> dic
         # from one that lost them, and the next person to wonder where a project
         # went has nothing to read.
         "projects_hidden": hidden,
+        "map_age_seconds": map_age,
         "store_key": here,
         "claims": claims,
         "roster": roster,
@@ -1280,6 +1302,7 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 .tfdot.meet { background: var(--accent); }
 .tfrow.tmeet { cursor: pointer; }
 .tfrow.tmeet:hover .tfpath { color: var(--accent); }
+.tvia { color: var(--ink-4); font-size: 11px; padding: 0 0 4px 14px; }
 .tfpath { color: var(--ink); flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tfactor { color: var(--accent); flex: none; }
 .tfstate { color: var(--ink-4); font-size: 11px; flex: none; }
@@ -1850,11 +1873,26 @@ function openTask(id) {
          "reach each other in the map.</div>";
     h += '<div class="tdet-files">';
     rel.slice(0, 8).forEach(function (r) {
+      // NAME the places. Three agents said the same thing independently: a
+      // count is a number without a noun, and you cannot act on it — whether to
+      // go and knock on somebody's door depends on whether the shared files are
+      // the component you both edit or four barrels every file imports. Naming
+      // them also lets a reader discount a 3000-line god file on sight.
+      var via = (r.via || []).map(function (v) {
+        var parts = String(v).split("/");
+        return parts.length > 2 ? parts.slice(-2).join("/") : v;
+      });
+      var more = r.shared - (r.via || []).length;
       h += '<div class="tfrow tmeet" data-task="' + esc(r.task) + '">' +
            '<span class="tfdot meet"></span>' +
            '<span class="mono tfpath">' + esc(r.task) + "</span>" +
+           (r.same_actor ? '<span class="tag">your own</span>' : "") +
            '<span class="tfstate">' + r.shared +
-           (r.shared === 1 ? " shared place" : " shared places") + "</span></div>";
+           (r.shared === 1 ? " shared file" : " shared files") + "</span></div>";
+      if (via.length) {
+        h += '<div class="tvia mono">' + esc(via.join(", ")) +
+             (more > 0 ? ", +" + more + " more" : "") + "</div>";
+      }
     });
     h += "</div>";
   } else if (t.touches) {

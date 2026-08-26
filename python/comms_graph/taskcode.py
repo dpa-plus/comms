@@ -53,7 +53,25 @@ def _nodes_for(graph, scopes: list[str], root) -> set[str]:
     return found
 
 
-def link(graph, tasks: dict[str, Any], task_files: dict[str, list[str]], root) -> dict[str, dict]:
+def _files_of(graph, node_ids) -> set[str]:
+    """The distinct source files a set of graph nodes belongs to.
+
+    Counting NODES instead of files is what made the ranking useless. A hub
+    module contributes one node per exported symbol, so two tasks that both
+    touched `auftraege/schema.ts` scored 30 while a genuinely specific overlap of
+    two components scored 4 — and 30 sorted first. "You both touched the schema"
+    is true of nearly everything on that backend and carries no information; the
+    4 was the collision that actually cost somebody an afternoon.
+    """
+    out = set()
+    for nid in node_ids:
+        data = graph.nodes.get(nid) or {}
+        out.add(str(data.get("source_file") or data.get("path") or nid))
+    return out
+
+
+def link(graph, tasks: dict[str, Any], task_files: dict[str, list[str]], root,
+         task_actors: dict[str, set[str]] | None = None) -> dict[str, dict]:
     """For each task: what its files reach, and which tasks that puts it next to.
 
     Returns ``{task_id: {"touches": int, "related": [{"task", "via", "shared"}]}}``.
@@ -97,12 +115,51 @@ def link(graph, tasks: dict[str, Any], task_files: dict[str, list[str]], root) -
             # point, and would report a different number to each of the two
             # agents involved.
             shared = (near.get(tid, set()) & other_ids) | (near.get(other, set()) & ids)
-            if shared:
-                related.append({
-                    "task": other,
-                    "shared": len(shared),
-                    "via": sorted(shared)[:3],
-                })
-        related.sort(key=lambda r: (-r["shared"], r["task"]))
+            if not shared:
+                continue
+            places = _files_of(graph, shared)
+            mine = (task_actors or {}).get(tid) or set()
+            theirs = (task_actors or {}).get(other) or set()
+            related.append({
+                "task": other,
+                # Distinct FILES, which is what "places" means to a reader.
+                "shared": len(places),
+                "via": sorted(places)[:3],
+                # Meeting your own earlier work is a mirror, not a warning. The
+                # point of this is finding the person you have not talked to, and
+                # on a task whose whole list was its author's own prior tasks the
+                # useful rows were pushed off the bottom.
+                "same_actor": bool(mine and theirs and mine <= theirs or
+                                   theirs and mine and theirs <= mine),
+            })
+        # Somebody else's work first, then by how specific the overlap is.
+        related.sort(key=lambda r: (r["same_actor"], -r["shared"], r["task"]))
         out[tid] = {"touches": len(near.get(tid, set())), "related": related}
     return out
+
+
+def files_from_log(events, string_of) -> tuple[dict[str, list[str]], dict[str, set[str]]]:
+    """Which files each task touched, and who touched them, out of the log.
+
+    Read from claim EVENTS rather than from live claims, so a file stays on the
+    task after it is released — a task that forgets its files the moment the work
+    finishes answers "what did this touch" with "nothing".
+
+    One implementation, used by both the board and `brief`. Two would drift, and
+    the first version of `brief` referred to a helper that did not exist at all:
+    wrapped in a try/except it printed nothing and said nothing, which is the
+    worst of the three possible behaviours.
+    """
+    files: dict[str, list[str]] = {}
+    actors: dict[str, set[str]] = {}
+    for ev in events:
+        if getattr(ev, "type", "") != "claim" or not getattr(ev, "scope", None):
+            continue
+        tag = string_of(ev.data, "task")
+        if not tag:
+            continue
+        scope = ev.scope[0]
+        if scope not in files.setdefault(tag, []):
+            files[tag].append(scope)
+        actors.setdefault(tag, set()).add(ev.actor)
+    return files, actors

@@ -51,6 +51,7 @@ from . import contact as _contact
 from . import lock as _lock
 from . import log as _log
 from . import task as _task
+from . import taskcode as _taskcode
 from . import taskview as _taskview
 from . import resolve as _resolve
 from . import scope as _scope
@@ -2331,6 +2332,53 @@ def _cmd_brief(argv: list[str]) -> int:
         print("  decisions recorded here:")
         for note in t.notes[-5:]:
             print(f"    {note}")
+
+    # WHO ELSE IS IN THIS NEIGHBOURHOOD, from the code map rather than from
+    # anybody declaring it. This lived only on the board, and agents read CLI
+    # output, not browsers — so the one thing that could warn you about a peer
+    # before you collide with them was in a place nobody about to edit was
+    # looking. An agent found this out the useful way: the two tasks it meets
+    # here were exactly the two collisions that had already cost it an afternoon.
+    try:
+        root = _repo_root(flags.get("root"))
+        graph = _load_graph(root / "graphify-out" / "graph.json")
+        if graph is not None:
+            def _sof(d, k):
+                v = (d or {}).get(k)
+                return v if isinstance(v, str) else ""
+            files, actors = _taskcode.files_from_log(_log.read(log_file), _sof)
+            links = _taskcode.link(graph, st.tasks, files, root, actors)
+            rel = (links.get(slug) or {}).get("related") or []
+            if rel:
+                print("  meets in the code (nobody declared these):")
+                for r in rel[:5]:
+                    mark = "  (your own earlier work)" if r.get("same_actor") else ""
+                    # NAME them. Three agents independently said the same thing:
+                    # "4 shared places" is a number without a noun, and you
+                    # cannot act on it — whether to go and knock on somebody's
+                    # door depends entirely on whether the four places are the
+                    # component you both edit or four barrels every file
+                    # imports. Naming them also lets the reader discount a god
+                    # file on sight, which is the other complaint.
+                    def _short(v):
+                        # The tail is what identifies a file to a reader; the
+                        # leading directories are the same for everything here.
+                        parts = str(v).split("/")
+                        return "/".join(parts[-2:]) if len(parts) > 2 else str(v)
+                    where = ", ".join(_short(v) for v in (r.get("via") or [])[:3])
+                    more = r["shared"] - len(r.get("via") or [])
+                    if more > 0:
+                        where += f", +{more} more"
+                    print(f"    {r['task']} — {r['shared']} shared "
+                          f"{'file' if r['shared'] == 1 else 'files'}{mark}")
+                    if where:
+                        print(f"        via {where}")
+                print("    These are not an ordering. They touch the same ground, so "
+                      "look or ask before you edit.")
+    except Exception:
+        # Advisory only. A missing, stale or unreadable map must never stop
+        # `brief` printing the part that comes from the log.
+        pass
     return EXIT_OK
 
 
