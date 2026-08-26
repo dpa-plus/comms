@@ -18,9 +18,9 @@ import (
 //
 // Exit codes:
 //
-//	0 — claim granted
-//	1 — blocked by another active claim (stderr = render.WriteConflict)
-//	2 — system error
+//	0: claim granted
+//	1: blocked by another active claim (stderr = render.WriteConflict)
+//	2: system error
 func NewClaimCmd() *cobra.Command {
 	var (
 		intent      string
@@ -147,7 +147,7 @@ func runClaim(scopeRaw, intent, stealID, stealReason, task string) error {
 		data["steals"] = displaceID
 		data["steal_reason"] = stealReason
 		if autoStale {
-			// Fully automatic takeover of a stale claim — no human authorized it,
+			// Fully automatic takeover of a stale claim: no human authorized it,
 			// so record it as such instead of stamping a misleading arbitrator.
 			data["steal_kind"] = "auto-stale"
 		} else if a := os.Getenv("COMMS_ARBITRATOR"); a != "" {
@@ -257,7 +257,7 @@ func runClaimBatch(scopeRaws []string, intent, task string) error {
 		evs = append(evs, ev)
 		ids = append(ids, ev.ID)
 	}
-	// Append every claim and fold once, not once per scope — shorter lock hold.
+	// Append every claim and fold once, not once per scope: shorter lock hold.
 	if err := rt.AppendBatch(evs); err != nil {
 		return err
 	}
@@ -303,7 +303,7 @@ func filterOutClaim(in []*state.Claim, id string) []*state.Claim {
 }
 
 // printClaimContext surfaces up to 3 prior findings on the just-claimed path(s)
-// — the decisions/gotchas that explain WHY a file is the way it is — at the exact
+// (the decisions/gotchas that explain WHY a file is the way it is) at the exact
 // moment an agent is about to edit it. claim is the most-run command and was
 // context-free; this turns it into the natural read-trigger (most agents never
 // run a separate `comms log --scope` query). Durable findings (decision/gotcha)
@@ -315,8 +315,8 @@ func printClaimContext(rt *Runtime, scopes []overlap.Scope) {
 	}
 	fmt.Println("  prior context on this path:")
 	for _, f := range matches {
-		// Truncate by RUNES (not bytes) so a multibyte summary — these contain
-		// German/UTF-8 — is never cut mid-rune into mojibake.
+		// Truncate by RUNES (not bytes) so a multibyte summary: these contain
+		// German/UTF-8: is never cut mid-rune into mojibake.
 		summary := f.Summary
 		if r := []rune(summary); len(r) > 96 {
 			summary = string(r[:95]) + "…"
@@ -326,7 +326,7 @@ func printClaimContext(rt *Runtime, scopes []overlap.Scope) {
 		if age == "now" {
 			when = "just now"
 		}
-		// Sanitize log-sourced fields before they hit the terminal — the same
+		// Sanitize log-sourced fields before they hit the terminal: the same
 		// defense the conflict renderer uses against ESC/C0/C1/DEL injection.
 		fmt.Printf("    • [%s] %s  (@%s, %s)\n", render.EscapeScope(f.Category), render.EscapeScope(summary), render.EscapeActor(f.Actor), when)
 	}

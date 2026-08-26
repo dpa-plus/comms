@@ -1,4 +1,4 @@
-"""``comms-graph`` — the surface an agent actually types.
+"""``comms-graph``: the surface an agent actually types.
 
 This module is the discoverability half of comms. The always-on instruction
 block (``graphify/always_on/*.md``) tells an agent to claim before editing; this
@@ -22,7 +22,7 @@ switched off, and a hard conflict buried in advice gets skimmed past.
 
 A THIRD REPLY THAT IS NOT SILENCE. A claim whose name resolves to nothing on the
 map is reported loudly, with the reason. It must never render as "no
-connections" — a mistyped symbol and an genuinely isolated one look identical
+connections": a mistyped symbol and an genuinely isolated one look identical
 otherwise, and in testing a quarter of names typed from memory named something
 that does not exist. The claim is still recorded: the log is about paths, and a
 path is true whether or not the map has indexed it.
@@ -113,7 +113,7 @@ USAGE = """Usage: comms-graph <command>
 EXIT_OK = 0
 EXIT_CONFLICT = 1
 EXIT_USAGE = 2
-# Same code as a usage error — 2 is "this did not work", as distinct from 1's
+# Same code as a usage error: 2 is "this did not work", as distinct from 1's
 # "it worked and the answer is no". Named separately because a compromised lock
 # is not the user mistyping something, and a reader of the call site should not
 # have to think it was.
@@ -139,7 +139,7 @@ def _repo_root(explicit: str | None) -> Path:
 
     The git root, not the cwd: two agents run from different subdirectories of
     the same repository all the time, and keying on the cwd would silently give
-    them two separate logs that cannot see each other's claims — coordination
+    them two separate logs that cannot see each other's claims: coordination
     that reports success while coordinating nothing.
     """
     if explicit:
@@ -154,14 +154,14 @@ def _repo_root(explicit: str | None) -> Path:
         return chosen
     # Then a global --repo/--root given before the verb, then COMMS_REPO. Both
     # exist for the same reason: when the process cannot read its own working
-    # directory — routine for a checkout under Desktop or Documents on macOS,
-    # where privacy access can be withdrawn from a running process — naming the
+    # directory: routine for a checkout under Desktop or Documents on macOS,
+    # where privacy access can be withdrawn from a running process: naming the
     # repository is the only way to keep working. The flag wins over the
     # variable, so what you typed on this line beats what you exported earlier.
     #
     # Both are validated exactly like --root: a path that is not a directory is
     # refused rather than used. A typo that is silently accepted opens a private
-    # ledger — the command succeeds, the claim records, and the agent is told it
+    # ledger: the command succeeds, the claim records, and the agent is told it
     # holds ground on a log no peer will ever read.
     for value, label in ((_GLOBAL_ROOT, "--repo"),
                          (os.environ.get("COMMS_REPO", "").strip(), "COMMS_REPO")):
@@ -181,8 +181,8 @@ def _repo_root(explicit: str | None) -> Path:
     # from the top of such a directory and from a subdirectory of it and you get
     # two different store keys, two separate logs, and both agents told the
     # ground is free. Nothing in the instructions says a git repo is required,
-    # and the commonest places to hit this — a scratch directory, an unpacked
-    # tarball, a freshly scaffolded project — are exactly where somebody is
+    # and the commonest places to hit this: a scratch directory, an unpacked
+    # tarball, a freshly scaffolded project: are exactly where somebody is
     # likeliest to be running two agents at once.
     print(
         f"comms: warning: no git repository above {here}, so this directory is being "
@@ -215,8 +215,8 @@ def _load_graph(path: Path):
     silently drop every inbound edge and under-report contact.
 
     A missing or unreadable map is not an error here. It costs the advisory
-    half of the reply, which is then said out loud; the exact half — the claim
-    conflict — does not depend on the map at all.
+    half of the reply, which is then said out loud; the exact half: the claim
+    conflict: does not depend on the map at all.
     """
     if not path.is_file():
         return None
@@ -254,7 +254,7 @@ def _parse_flags(argv: list[str]) -> tuple[list[str], dict[str, str]]:
             i += 1
     # ONE place, for every verb. Every surface PRINTS an actor as "@name", so
     # "@name" is exactly the spelling an agent copies back out of `status` and
-    # passes to --as — the tool trains you into the broken form. Stripping it in
+    # passes to --as: the tool trains you into the broken form. Stripping it in
     # `_actor` alone was not enough: `check --staged` and the hook path read the
     # flag directly, so `--as @me` compared "@me" against a stored "me" and
     # reported an agent's own eleven files as "claimed by somebody else", while
@@ -270,11 +270,11 @@ def _parse_flags(argv: list[str]) -> tuple[list[str], dict[str, str]]:
 def _actor(flags: dict[str, str]) -> str:
     name = (flags.get("as") or os.environ.get("COMMS_ACTOR") or "").strip()
     # Every surface PRINTS an actor as "@name", so an agent copying its own name
-    # off the board and passing it back arrives here as "@name" — and a stored
+    # off the board and passing it back arrives here as "@name", and a stored
     # "@name" is a different agent from "name". Measured on a real store: one
     # agent held 24 events under "@claude-karte-fachebenen" while everyone else
     # was plain, so `check` refused it access to its own files and, worse,
-    # `release --all-mine` answered "nothing to release" — a failure that reads
+    # `release --all-mine` answered "nothing to release": a failure that reads
     # exactly like success. The @ is display, never identity.
     name = name.lstrip("@").strip()
     if not name:
@@ -293,8 +293,8 @@ def _store(root: Path, *, create: bool = True) -> tuple[Path, Path]:
     """The log and lock paths for a repo. Only creates the store when writing.
 
     `check` is a pure read and must not mkdir. It did, and because the hook
-    wrapper turns any exception into a block, one unwritable data home — a
-    read-only HOME, a file where the store directory should be — denied every
+    wrapper turns any exception into a block, one unwritable data home: a
+    read-only HOME, a file where the store directory should be: denied every
     Edit and Write in EVERY repository on the machine, including repos with no
     claims and no log at all. Failing closed is right when we cannot read the
     log; it is not right when we were never going to read one.
@@ -305,12 +305,12 @@ def _store(root: Path, *, create: bool = True) -> tuple[Path, Path]:
             store.mkdir(parents=True, exist_ok=True)
             # Leave the repo's name next to its log. The store is keyed by a
             # hash of the path, so without this a store is a 12-hex directory
-            # and nothing on the machine can say which project it belongs to —
+            # and nothing on the machine can say which project it belongs to:
             # the Go build writes it, this one did not, and a board listing
             # every project on the machine would have shown ours as UNNAMED.
             _log.write_repo_path(store, root)
         except OSError as exc:
-            # A raw traceback here exited 1 — the code the usage text reserves
+            # A raw traceback here exited 1: the code the usage text reserves
             # for "somebody else holds this". A wrapper trusting the exit code
             # read an unreachable store as a live conflict, and one that retries
             # on conflict looped. Say what is wrong and use the code that means
@@ -388,7 +388,7 @@ def _disk_spelling(target: Path) -> str | None:
     answers the same question for the whole path at once, in 0.013ms.
 
     Opened with O_NONBLOCK because a FIFO opened for reading BLOCKS until a
-    writer appears — a hook that hangs is worse than one that answers wrongly,
+    writer appears: a hook that hangs is worse than one that answers wrongly,
     since nothing times it out. O_CLOEXEC so a descriptor cannot leak into a
     child. Any failure returns None and the caller falls back.
     """
@@ -423,13 +423,13 @@ def _canonical_relpath(target: Path, root: Path) -> str:
     * Ask the filesystem for the spelling of the DEEPEST PART THAT EXISTS, and
       append whatever does not exist yet exactly as typed. An earlier version
       bailed out entirely when the leaf was missing, which stopped correcting the
-      DIRECTORIES above it — so a claim on the directory `src` did not block an
+      DIRECTORIES above it, so a claim on the directory `src` did not block an
       edit to `SRC/newfile.py`, and two agents could claim one not-yet-created
       file under two spellings.
     * Canonicalise the ROOT the same way before making the path relative to it.
       Comparing the kernel's fully-normalised answer against a raw
       os.path.realpath silently threw the whole canonicalisation away whenever
-      the two disagreed — a differently-cased repo root, or a
+      the two disagreed: a differently-cased repo root, or a
       /System/Volumes/Data firmlink prefix, was enough.
     * A path that does not exist at all is kept exactly as typed. A file about
       to be created has no spelling on disk to defer to, and this is the cheap
@@ -476,7 +476,7 @@ def _canonical_relpath(target: Path, root: Path) -> str:
             head = Path(spelled).relative_to(Path(root_real)).as_posix()
             return "/".join([head, *tail]) if tail else head
         except ValueError:
-            # Resolved outside the repo — a symlink out, most likely. Not ours
+            # Resolved outside the repo: a symlink out, most likely. Not ours
             # to rename; the caller's outside-the-repo guard handles it.
             return "/".join(parts)
 
@@ -507,7 +507,7 @@ def _case_blind_here(directory: Path) -> bool:
     Asked of the filesystem rather than guessed from the platform: a Mac can
     mount a case-sensitive volume and a Linux box the reverse.
 
-    The probe swaps the case of a directory's own name and compares inodes —
+    The probe swaps the case of a directory's own name and compares inodes:
     but it can only do that on a name that HAS cased letters, and the first
     version gave up when the deepest existing directory did not. Directories
     named `2026`, `20260820`, `0005` are ordinary (dates, ticket numbers,
@@ -517,7 +517,7 @@ def _case_blind_here(directory: Path) -> bool:
 
     Case-sensitivity is a property of the volume, so any ancestor on the same
     volume answers the same question. The exception is a differently-mounted
-    subtree — a case-sensitive image mounted inside a case-blind checkout — and
+    subtree: a case-sensitive image mounted inside a case-blind checkout: and
     there this can be wrong in either direction. That is a documented limit
     rather than something a name probe can settle.
     """
@@ -549,7 +549,7 @@ def _uncreated_twin(st, scope_str: str, root: Path, actor: str):
 
     THE HOLE THIS CLOSES. Everything below the deepest existing directory is
     kept exactly as typed, because a file with no spelling on disk has nothing
-    to defer to — so on a case-blind filesystem `src/NewFeature.py` and
+    to defer to, so on a case-blind filesystem `src/NewFeature.py` and
     `src/newfeature.py` were two scopes for one file. Both agents were told they
     held it, the board listed it twice, and the hook cleared both to write it,
     for exactly the window they were both writing. Claiming the file you are
@@ -585,7 +585,7 @@ def _rooted_scope(raw: str, root: Path) -> str:
     """Re-express a scope's path relative to the repo root.
 
     THE BUG THIS EXISTS TO PREVENT. The STORE is keyed by the git root, so two
-    agents in one checkout share a board — see :func:`_repo_root`. The scope
+    agents in one checkout share a board: see :func:`_repo_root`. The scope
     STRING was not given the same treatment, so it was recorded exactly as
     typed. An agent standing at the root claiming ``src/alpha.py`` and one
     standing in ``src/`` claiming ``alpha.py`` are naming the same file, but the
@@ -598,7 +598,7 @@ def _rooted_scope(raw: str, root: Path) -> str:
     refused rather than recorded, because the board it would appear on belongs
     to a different checkout.
 
-    The anchor (``#symbol`` or ``#L10-40``) is split off untouched — it is not a
+    The anchor (``#symbol`` or ``#L10-40``) is split off untouched: it is not a
     path and must never be resolved as one.
     """
     text = str(raw or "").strip()
@@ -639,7 +639,7 @@ def _single_scope_or_exit(positional: list[str], verb: str) -> str:
       told it had claimed, believed it held its whole working set, and left two
       files advertised as free ground for somebody else to take.
     * ``claim "a.py,b.py"`` recorded the comma string as ONE scope. It matches no
-      file, so it can never conflict with anything and never protects anything —
+      file, so it can never conflict with anything and never protects anything:
       a claim that is inert by construction.
     """
     if len(positional) > 1:
@@ -660,23 +660,23 @@ def _single_scope_or_exit(positional: list[str], verb: str) -> str:
 def _hello_if_unknown(st, actor: str) -> "object | None":
     """A hello event when this agent session has not yet been tied to this actor.
 
-    WHY THIS EXISTS AT ALL — the integration failure it fixes. The pre-edit hook
+    WHY THIS EXISTS AT ALL: the integration failure it fixes. The pre-edit hook
     that actually ENFORCES claims is a separate process with no COMMS_ACTOR of
     its own: it inherits the session environment, not the per-command prefix
     agents use. To learn who is asking, it looks up the agent session id from the
     hook payload against the ``hello`` events in the log, and takes that actor.
 
     This CLI never wrote a hello. So the lookup found nothing, the hook fell back
-    to a sentinel actor that matches nobody, and every claim in the repo — the
-    caller's OWN included — came back as somebody else's. The result was the
+    to a sentinel actor that matches nobody, and every claim in the repo: the
+    caller's OWN included: came back as somebody else's. The result was the
     exact opposite of the tool's purpose: an agent claimed a file and was then
     blocked from editing the file it had just claimed, with a conflict message
     naming itself. Observed in a four-agent run; every one of them would have
     hit it.
 
     Written implicitly rather than left to a ``hello`` verb because nothing tells
-    an agent to run one — the always-on instructions describe claim and release
-    and nothing else — and an identity record that agents must remember to write
+    an agent to run one: the always-on instructions describe claim and release
+    and nothing else, and an identity record that agents must remember to write
     is one they will not write.
 
     Emitted only when the pairing is not already recorded, so a long session adds
@@ -697,7 +697,7 @@ def _hello_if_unknown(st, actor: str) -> "object | None":
     # know it, and left ABSENT when unset rather than guessed: independence_of
     # reports "unknown" for a missing vendor and that is the honest answer.
     # Verified, and verified by another instance of the same model, are
-    # different claims — inferring the stronger one from a naming convention
+    # different claims: inferring the stronger one from a naming convention
     # would be manufacturing evidence.
     vendor = os.environ.get("COMMS_VENDOR", "").strip()
     if vendor:
@@ -744,8 +744,8 @@ def _render_conflicts(conflicts: list, scope_str: str) -> str:
 def _cmd_claim_many(positional: list[str], flags: dict) -> int:
     """Claim several scopes atomically: all of them, or none of them.
 
-    A task boundary is usually more than one file — the route, the handler and
-    its test — and taking them one at a time is not the same thing. Half a
+    A task boundary is usually more than one file: the route, the handler and
+    its test, and taking them one at a time is not the same thing. Half a
     boundary is the bad state: you hold two of three, somebody else holds the
     third, and neither of you can finish without giving something back.
 
@@ -901,14 +901,14 @@ def _cmd_claim(argv: list[str]) -> int:
                 else:
                     _err("  Declare one first with `comms-graph task add <id>`.")
                 return EXIT_USAGE
-            # ONE TASK, ONE AGENT — enforced here rather than counted.
+            # ONE TASK, ONE AGENT: enforced here rather than counted.
             #
             # Two agents sharing a task produced every severity-1 the task
             # graph ever had: a review that covered half the work, a gate you
             # could opt out of by never submitting, a rejection that un-did the
             # bookkeeping, and a plain file release that silently closed a task
             # somebody else was still writing. None of them were separately
-            # fixable — they were the same fact wearing different clothes.
+            # fixable: they were the same fact wearing different clothes.
             #
             # Nothing is lost. Two agents on one task still take DIFFERENT
             # files, so the file lock already gives the parallelism; sharing a
@@ -917,8 +917,8 @@ def _cmd_claim(argv: list[str]) -> int:
             # go wrong this way.
             #
             # Sequential handoff is still fine: this only refuses while
-            # somebody else is HOLDING ground. When they release — or you free
-            # an abandoned claim with `release --force` — the task is yours.
+            # somebody else is HOLDING ground. When they release, or you free
+            # an abandoned claim with `release --force`: the task is yours.
             on_it = sorted({c.actor for c in st.claims.values()
                             if (getattr(c, "task", "") or "") == task_tag
                             and c.actor != actor})
@@ -934,8 +934,8 @@ def _cmd_claim(argv: list[str]) -> int:
                 return EXIT_CONFLICT
         conflicts = st.conflicts_for(scope, actor)
         # Taking ground off somebody who is not coming back. The fold has always
-        # understood this — a claim carrying `steals` displaces the named one
-        # atomically — and nothing wrote it, so an abandoned claim could only be
+        # understood this: a claim carrying `steals` displaces the named one
+        # atomically, and nothing wrote it, so an abandoned claim could only be
         # ended by the agent that left. That was already bad; once a task-tagged
         # claim began holding its successors blocked, one crashed agent stalled
         # the whole downstream graph with no command anybody else could run.
@@ -1004,7 +1004,7 @@ def _cmd_claim(argv: list[str]) -> int:
         # if we still hold the lock we read it under. See LockHandle.compromised:
         # a lock file deleted mid-hold leaves us flocked to an orphan inode while
         # somebody else flocks a fresh one at the same path, and both of us then
-        # write a claim on the same scope. Fail closed — refusing a claim costs
+        # write a claim on the same scope. Fail closed: refusing a claim costs
         # one retry, recording a second holder costs two agents editing at once.
         broken = handle.compromised()
         if broken:
@@ -1014,7 +1014,7 @@ def _cmd_claim(argv: list[str]) -> int:
         # --task is what makes task state DERIVED rather than a second set of
         # books somebody has to remember to update: doers come from live claims
         # tagged this way, so releasing the file empties them for free. It was
-        # accepted and then dropped on the floor — _parse_flags takes any flag,
+        # accepted and then dropped on the floor: _parse_flags takes any flag,
         # so `--task auth-api` exited 0 having recorded nothing, which left
         # PHASE_DOING unreachable and the task never showing a doer.
         claim_data: dict = dict(claim_data_steal)
@@ -1023,7 +1023,7 @@ def _cmd_claim(argv: list[str]) -> int:
         if task_tag:
             claim_data["task"] = task_tag
         # Minted BEFORE the event it explains. fold() sorts by TIMESTAMP, so
-        # putting the greeting first in the list is not enough — it has to be
+        # putting the greeting first in the list is not enough: it has to be
         # first in time. It was created second, landed second, and every reader
         # that needed the session (independence, the session half of the
         # self-review gate) saw an actor with no hello on record yet.
@@ -1031,8 +1031,8 @@ def _cmd_claim(argv: list[str]) -> int:
         event = _tagged(st, actor, _log.TYPE_CLAIM, [str(scope)], claim_data)
         # Re-claiming ground you already hold REPLACES your claim on it; it does
         # not add a second. Two rows for one file made the board's claim count
-        # wrong, left it ambiguous which intent was current, and — since a claim
-        # carries a task tag — put one agent on two tasks from one file, which
+        # wrong, left it ambiguous which intent was current, and: since a claim
+        # carries a task tag: put one agent on two tasks from one file, which
         # the phase derivation reads as two people still working.
         #
         # Recorded as a release rather than dropped in the fold, so the audit
@@ -1076,7 +1076,7 @@ def _staleness_note(root: Path, map_path: Path, rel_path: str) -> str:
 
     README-COMMS.md sells this as one of the tool's honest limits: "a claim
     pointing at code that changed since the last graphify extract is reported as
-    out of date, not as truth". The implementation existed — view._stale_note —
+    out of date, not as truth". The implementation existed: view._stale_note:
     but nothing outside its own test ever imported that module, so the promise
     was never kept on the path anybody actually uses. A map built a month ago
     printed exactly the same confident all-clear as one built a second ago.
@@ -1206,8 +1206,8 @@ def _cmd_release(argv: list[str]) -> int:
     with _lock.file_lock(lock_file):
         st = _read_state(log_file)
         # Freeing ground somebody ELSE left behind. Until this existed the only
-        # ways were to steal it and hand it back — two writes, and you briefly
-        # own work you did not do — or to pass `--as` their name, which the CLI
+        # ways were to steal it and hand it back: two writes, and you briefly
+        # own work you did not do, or to pass `--as` their name, which the CLI
         # accepts and which writes a lie into an append-only log. A person
         # clearing up after a crashed agent should not have to impersonate it.
         #
@@ -1232,14 +1232,14 @@ def _cmd_release(argv: list[str]) -> int:
                 # Rooted the same way claim roots it, and for the same reason: a
                 # claim taken at the repo root must be releasable from a
                 # subdirectory. Without this the two spellings of one file stop
-                # matching and an agent cannot give back ground it holds — the
+                # matching and an agent cannot give back ground it holds: the
                 # claim then sits there until it goes stale, blocking everybody.
                 # Only reached when the target was not a claim id, so an id is
                 # never mangled by path resolution.
                 # Try the canonicalised spelling AND the raw one. The scope was
                 # frozen into the log at claim time; the canonicaliser answers
                 # from the disk as it is NOW. After a case-only rename those two
-                # disagree, and the holder could not release her own claim —
+                # disagree, and the holder could not release her own claim:
                 # the refusal even printed "holds nothing matching
                 # 'src/Widget.py'  Held: src/Widget.py", naming the string it
                 # had just said matched nothing. Only the claim id worked, so
@@ -1326,13 +1326,13 @@ def _task_runtime(flags: dict) -> tuple[Path, Path, Path]:
 
 
 # ---------------------------------------------------------------------------
-# check — the pre-edit hook
+# check: the pre-edit hook
 # ---------------------------------------------------------------------------
 
 #: Claude Code reads exit 2 from a PreToolUse hook as "block this tool call and
 #: show stderr to the model". EVERY OTHER non-zero code means "the hook itself
 #: errored" and the edit proceeds anyway. So 2 is the only code that stops an
-#: edit, and anything we cannot answer confidently must also be 2 — a
+#: edit, and anything we cannot answer confidently must also be 2: a
 #: coordination tool that cannot read its log has not established that the file
 #: is free, and waving the edit through would be the one wrong direction to fail
 #: in.
@@ -1368,7 +1368,7 @@ def _repo_root_for_file(target: Path) -> Path | None:
 
     A hook does not run where the file lives. The host agent's working directory
     is wherever the session was started, routinely a parent folder holding
-    several checkouts and very often not a repository at all — so resolving from
+    several checkouts and very often not a repository at all, so resolving from
     the process made the hook fail on every edit whenever that was true,
     including for files plainly inside a repository.
 
@@ -1389,7 +1389,7 @@ def _hook_actor(st, agent_session: str, explicit: str) -> str:
     """Who is asking, when the caller is a hook with no environment of its own.
 
     An explicit actor wins. Otherwise the agent session id from the payload is
-    matched against the hello events in the log — which is the entire reason
+    matched against the hello events in the log, which is the entire reason
     claim writes one. With no match we deliberately return a sentinel that can
     never equal a real actor, so the caller's own claims are NOT excluded and it
     is blocked by its own work rather than waved through on somebody else's.
@@ -1449,7 +1449,7 @@ def _cmd_check(argv: list[str]) -> int:
 
     Exit 2 is the only code that stops an edit; every other non-zero code tells
     Claude Code the hook itself errored, and the edit proceeds. So an unhandled
-    exception here does not merely produce an ugly traceback — it turns the
+    exception here does not merely produce an ugly traceback: it turns the
     enforcement layer OFF for that call, silently, on ground somebody holds.
 
     Measured before this wrapper: a filename containing a tab, a 300-byte path
@@ -1463,7 +1463,7 @@ def _cmd_check(argv: list[str]) -> int:
         return _cmd_check_inner(argv)
     except SystemExit:
         raise
-    except BaseException as exc:  # noqa: BLE001 — deliberately everything
+    except BaseException as exc:  # noqa: BLE001: deliberately everything
         _err(f"check: refusing to answer: {type(exc).__name__}: {exc}")
         _err("  comms could not establish that this path is free, so it is not "
              "saying that it is.")
@@ -1476,7 +1476,7 @@ def _cmd_check_staged(flags: dict) -> int:
     A DIFFERENT exit code on purpose. The hook path must answer 2, because that
     is the only code Claude Code reads as "block this tool call". Git is the
     opposite: a pre-commit hook aborts on ANY non-zero, so a conflict answers 1
-    and 2 is kept for "comms could not find out" — which also aborts, and should,
+    and 2 is kept for "comms could not find out", which also aborts, and should,
     because a guard that cannot read its log has not established anything.
 
     Every blocked path is listed, not just the first. A commit guard that reports
@@ -1516,7 +1516,7 @@ def _cmd_check_staged(flags: dict) -> int:
     except FileNotFoundError:
         # Third way to exit 0 without checking anything, and the quietest.
         # Nobody has ever coordinated in this repo, so there is nothing to
-        # collide with — but a silent pass here looks identical to a real one.
+        # collide with, but a silent pass here looks identical to a real one.
         print("check --staged: no coordination log in this repo yet, "
               "so there are no claims to collide with.")
         return EXIT_OK
@@ -1533,7 +1533,7 @@ def _cmd_check_staged(flags: dict) -> int:
     # has no environment of its own either. Without this the caller is a stranger
     # to its own claims: an agent that claimed its files, wrote them and staged
     # them was told "3 staged file(s) are claimed by somebody else" and handed a
-    # command to unstage its own work. That is not a small bug — it rewards not
+    # command to unstage its own work. That is not a small bug: it rewards not
     # claiming, which is the one behaviour the tool exists to encourage.
     #
     # `--as` cannot be the answer on its own: a pre-commit hook does not know
@@ -1599,8 +1599,8 @@ def _cmd_check_staged(flags: dict) -> int:
         # Something staged is claimed, and we do not know whether it is yours.
         # Saying "claimed by somebody else" here would be a guess stated as a
         # fact, and the guess is wrong exactly for the agent that did the right
-        # thing. Report the identity problem instead, and use 2 — this command's
-        # code for "could not find out" — rather than 1, which means conflict.
+        # thing. Report the identity problem instead, and use 2: this command's
+        # code for "could not find out": rather than 1, which means conflict.
         _err("check --staged: cannot establish who is committing, so it cannot "
              "tell your own claims from somebody else's.")
         for rel_text, holder in blocked:
@@ -1678,14 +1678,14 @@ def _cmd_check_inner(argv: list[str]) -> int:
     except FileNotFoundError:
         # Genuinely absent: nobody has ever coordinated in this repo, so there
         # is nothing this edit can collide with. Do NOT create the store to
-        # find that out — check never writes, and mkdir'ing here meant an
+        # find that out: check never writes, and mkdir'ing here meant an
         # unwritable data home denied every edit on the machine.
         return EXIT_OK
     except OSError as exc:
         # ANY OTHER failure means we could not find out. Path.is_file() was used
         # here and returns False for ENOTDIR, ELOOP and ENOENT alike, so a store
-        # that was merely UNREACHABLE — a stray file where the directory should
-        # be, a symlink loop — read as "nobody has ever coordinated here" and
+        # that was merely UNREACHABLE: a stray file where the directory should
+        # be, a symlink loop: read as "nobody has ever coordinated here" and
         # the edit was allowed while a live claim sat on disk the whole time.
         # One stray file in the data home turned enforcement off for every
         # repository, silently, with exit 0. Absent and unreachable are not the
@@ -1713,7 +1713,7 @@ def _cmd_check_inner(argv: list[str]) -> int:
     when = holder.ts.isoformat().replace("+00:00", "Z")
     # WHO WE THINK YOU ARE changes what this message can honestly say. With no
     # actor and no session that resolves, the answer is not "somebody else holds
-    # this" — we do not know that. It was saying exactly that, and naming the
+    # this": we do not know that. It was saying exactly that, and naming the
     # caller as the holder in the next line: "Holder: @you ... Do not edit ground
     # you were refused." An agent read that about a file it had just claimed and
     # believed it was locked out of its own work.
@@ -1928,8 +1928,8 @@ def _task_done(argv: list[str]) -> int:
         if t is None:
             _err(f"error: no task called {slug!r}")
             return EXIT_USAGE
-        # Say no here as well as in the fold. The fold is the authority — a
-        # second writer must not be able to sneak past a rule by not asking —
+        # Say no here as well as in the fold. The fold is the authority: a
+        # second writer must not be able to sneak past a rule by not asking:
         # but a refusal the user never sees is a command that silently did
         # nothing, and exit 0 would be a lie.
         missing = [c for c in t.checks
@@ -1937,7 +1937,7 @@ def _task_done(argv: list[str]) -> int:
         if missing:
             # Write the refusal down, exactly as claim records a blocked event.
             # The CLI declines before the fold ever sees this transition, so
-            # without a record the gate fired in complete silence — and a rule
+            # without a record the gate fired in complete silence, and a rule
             # that leaves no trace when it works looks like a rule nobody wrote.
             try:
                 _log.append(log_file, _tagged(st, actor, _log.TYPE_BLOCKED, None, {
@@ -2015,7 +2015,7 @@ def _task_review(argv: list[str]) -> int:
         # Remember whether this actor really IS an author, because the reducer
         # decides from that and not from the flag. Printing SELF-SIGNED off the
         # flag alone meant a genuine third party who passed it was told they had
-        # recorded a self-sign while the log recorded a full independent review —
+        # recorded a self-sign while the log recorded a full independent review:
         # wrong in the exact direction the disclosure exists to prevent, on the
         # one surface the acting agent definitely reads.
         is_author = author is not None
@@ -2034,8 +2034,8 @@ def _task_review(argv: list[str]) -> int:
                 pass
             # Two different bars, two different sentences. Somebody who holds
             # ground on the task but has never pressed `done` was told they
-            # "cannot verify work done by @themselves" — work they had not
-            # submitted — which reads as a bug in the tool rather than a rule.
+            # "cannot verify work done by @themselves": work they had not
+            # submitted, which reads as a bug in the tool rather than a rule.
             submitted = [x for x in ([t.did] if t.did else [])
                          + list(getattr(t, "submitters", [])) if x]
             worked = [x for x in getattr(t, "workers", []) if x]
@@ -2046,7 +2046,7 @@ def _task_review(argv: list[str]) -> int:
             by_submission = any(_task.same_agent(actor, x, st.sessions) for x in submitted)
             by_ground = any(_task.same_agent(actor, x, st.sessions) for x in worked)
             if by_ground and not by_submission:
-                # Not "you hold ground" — the bar is permanent and survives a
+                # Not "you hold ground": the bar is permanent and survives a
                 # release, so that sentence was false for anybody who had
                 # already let go, and the remedy it named (submit your half)
                 # would have made them a real co-author of work they had
@@ -2066,7 +2066,7 @@ def _task_review(argv: list[str]) -> int:
                      "name is not a different set of blind spots.")
             # Everyone the gate bars, not just everyone who SUBMITTED. Holding
             # ground on a task now bars you too, so a task can be unverifiable
-            # with a single submitter — and the actor was then refused, told to
+            # with a single submitter, and the actor was then refused, told to
             # "let somebody who did not write it check", and never told the
             # escape exists. On a two-agent project that advice cannot be
             # followed and the task stops forever.
@@ -2089,7 +2089,7 @@ def _task_review(argv: list[str]) -> int:
                 data["findings"] = [{"what": flags["evidence"]}]
         # The greeting is what ties this actor to a process. Without it a
         # reviewer has no session on record, so the fold's session comparison
-        # has nothing to compare and falls back to the name alone — which is
+        # has nothing to compare and falls back to the name alone, which is
         # exactly the hole a homoglyph walks through.
         greeting = _hello_if_unknown(st, actor)
         events = [_tagged(st, actor, _log.TYPE_TASK_STATE, None, data)]
@@ -2098,7 +2098,7 @@ def _task_review(argv: list[str]) -> int:
         _log.append_batch(log_file, events)
     # Report what the LOG says happened, not what we were about to do. The CLI's
     # pre-check and the fold's are two implementations of one rule and they can
-    # disagree — the CLI reads sessions as they stand, the fold reads them after
+    # disagree: the CLI reads sessions as they stand, the fold reads them after
     # this actor's own hello has landed in the same batch. When they did, the
     # banner said VERIFIED and exit 0 while the fold had refused the transition
     # and recorded nothing: an agent reads its own output, believes the work is
@@ -2145,7 +2145,7 @@ def _task_review(argv: list[str]) -> int:
 
 
 # ---------------------------------------------------------------------------
-# find / note — what an agent learned, for the person watching
+# find / note: what an agent learned, for the person watching
 # ---------------------------------------------------------------------------
 
 #: The five that earn their own word. Not a taxonomy for its own sake: each one
@@ -2212,7 +2212,7 @@ def _cmd_find(argv: list[str]) -> int:
 
 #: Notes and findings are one line somebody reads later, not the writeup.
 #: Measured on 469 real notes: median 171 characters, p90 194, longest 352. So
-#: the cap is not tight — nothing written normally has ever come close to it,
+#: the cap is not tight: nothing written normally has ever come close to it,
 #: and everything that hit it was a handoff being posted to the wrong verb.
 NOTE_MAX = 400
 
@@ -2223,7 +2223,7 @@ def _too_long(kind: str, text: str, cap: int) -> int:
     The old message said only "that note is 586 characters; keep it under 400",
     which is true and useless: it does not say what to drop, and it does not say
     that the thing being written is not a note. Three agents reported it and one
-    did the predictable thing — split the handoff into two notes, which then read
+    did the predictable thing: split the handoff into two notes, which then read
     OUT OF ORDER in the feed, because the feed is ordered by time and the second
     half was written first in their head.
 
@@ -2239,7 +2239,7 @@ def _too_long(kind: str, text: str, cap: int) -> int:
          "is longer than that, it is probably one of:")
     # Every route here is checked to actually accept a long body. `doc --edit`
     # is NOT one of them: it hands control to $EDITOR, which an agent cannot
-    # drive, so the file is named instead — docs are plain repo files and writing
+    # drive, so the file is named instead: docs are plain repo files and writing
     # one directly is how an agent gets a long thing written down.
     _err('    why a task ended the way it did   →  comms-graph task done <id> --note "…"')
     _err("    something the repo should keep     →  write .comms/docs/<slug>.md")
@@ -2357,7 +2357,7 @@ def _cmd_brief(argv: list[str]) -> int:
     if t.did and not t.verified_by:
         # Only while it really is awaiting one. Emitting this whenever a doer is
         # recorded meant every CLOSED task announced it was awaiting review in
-        # the same breath as naming its verifier — and now that review is opt-in,
+        # the same breath as naming its verifier, and now that review is opt-in,
         # a task that never asked for one is finished, not waiting.
         bits.append(f"awaiting review of @{t.did}'s work"
                     if getattr(t, "needs_review", False)
@@ -2421,7 +2421,7 @@ def _cmd_brief(argv: list[str]) -> int:
 
     # WHO ELSE IS IN THIS NEIGHBOURHOOD, from the code map rather than from
     # anybody declaring it. This lived only on the board, and agents read CLI
-    # output, not browsers — so the one thing that could warn you about a peer
+    # output, not browsers, so the one thing that could warn you about a peer
     # before you collide with them was in a place nobody about to edit was
     # looking. An agent found this out the useful way: the two tasks it meets
     # here were exactly the two collisions that had already cost it an afternoon.
@@ -2439,7 +2439,7 @@ def _cmd_brief(argv: list[str]) -> int:
             if rel:
                 print("  meets in the code (nobody declared these):")
                 # Demote your own work, never DROP it. Sorting it last and
-                # then taking the top five deleted it — and the row deleted was
+                # then taking the top five deleted it, and the row deleted was
                 # the one that made the feature pay off: an agent found a peer's
                 # unclaimed task through a file shared with its OWN earlier task.
                 # It also made discovery depend on which end you opened, and the
@@ -2451,7 +2451,7 @@ def _cmd_brief(argv: list[str]) -> int:
                     mark = "  (your own earlier work)" if r.get("same_actor") else ""
                     # NAME them. Three agents independently said the same thing:
                     # "4 shared places" is a number without a noun, and you
-                    # cannot act on it — whether to go and knock on somebody's
+                    # cannot act on it: whether to go and knock on somebody's
                     # door depends entirely on whether the four places are the
                     # component you both edit or four barrels every file
                     # imports. Naming them also lets the reader discount a god
@@ -2516,7 +2516,7 @@ def _cmd_plan(argv: list[str]) -> int:
     declared: set[str] = set()
     # Minted FIRST, before any task event exists, because fold() orders by
     # timestamp. Every other command was fixed for this; the plan path was
-    # missed, and a real five-agent run caught it — the planner's hello carried
+    # missed, and a real five-agent run caught it: the planner's hello carried
     # a timestamp 426us LATER than the tasks it was appended ahead of, so the
     # log's ids and timestamps disagreed about order.
     events: list = []
@@ -2539,7 +2539,7 @@ def _cmd_plan(argv: list[str]) -> int:
             checks = item["checks"]
             if isinstance(checks, str):
                 # A string is iterable, so this used to become one check per
-                # CHARACTER: "test" turned into t, e, s, t — four checks that
+                # CHARACTER: "test" turned into t, e, s, t: four checks that
                 # can never pass, on a field whose entire job is to gate.
                 _err(f"error: task {slug!r} has checks={checks!r}; "
                      "it must be a list, e.g. [\"test\"]")
@@ -2628,11 +2628,11 @@ TASK_USAGE = """Usage: comms-graph task <command>
 
 
 def _release_somebody_elses(st, log_file, actor: str, target: str, reason: str) -> int:
-    """`release <claim-id> --force --reason "..."` — end a claim that is not yours.
+    """`release <claim-id> --force --reason "..."`: end a claim that is not yours.
 
     Deliberately narrow: an exact claim id, never a path. A path can match more
     ground than the reader meant, and the whole point of this verb is that the
-    person running it is making a judgement about somebody else's work — that
+    person running it is making a judgement about somebody else's work: that
     judgement should be about one named thing.
     """
     if not target:
@@ -2754,7 +2754,7 @@ def _cmd_board(argv: list[str]) -> int:
         intent = f'  "{claim.intent}"' if claim.intent else ""
         # The task tag, because an agent cannot otherwise check its own work.
         # The whole case for `--task` is that the board can then show a task's
-        # files — and the CLI printed everything about a claim EXCEPT whether it
+        # files, and the CLI printed everything about a claim EXCEPT whether it
         # was tagged, so the one thing you would want to verify was the one
         # thing you had to take on faith.
         tag = f"  ({getattr(claim, 'task', '') or 'no task'})"
@@ -2782,7 +2782,7 @@ def main(argv: list[str]) -> int:
     """``argv`` is everything after ``comms-graph``."""
     # A GLOBAL --repo/--root, before the verb. The Go build takes it there and
     # the briefing documents `comms --repo /abs/path status` as the recovery
-    # when the working directory cannot be read — which on macOS is not exotic:
+    # when the working directory cannot be read, which on macOS is not exotic:
     # a repo under Desktop, Documents or Downloads loses privacy access and
     # every tool that calls getcwd() starts failing at once. Without this the
     # recovery path simply does not exist in this build, and the one moment you
@@ -2801,7 +2801,7 @@ def main(argv: list[str]) -> int:
     global _GLOBAL_ROOT
     _GLOBAL_ROOT = None
     # Same rule for the environment, normalised once so every reader downstream
-    # — including the ones that never call _actor — sees the canonical form.
+    # (including the ones that never call _actor) sees the canonical form.
     env_actor = os.environ.get("COMMS_ACTOR")
     if env_actor and env_actor.strip() != env_actor.strip().lstrip("@").strip():
         os.environ["COMMS_ACTOR"] = env_actor.strip().lstrip("@").strip()
@@ -2820,7 +2820,7 @@ def main(argv: list[str]) -> int:
         return EXIT_OK if sub else EXIT_USAGE
     # --help on a LEAF verb. Without this, every leaf ignored it: `task done
     # --help` errored with "needs an id", and `board --help` / `tasks --help`
-    # ran the command — `tasks` wrote an HTML file. Asking how a verb works is
+    # ran the command: `tasks` wrote an HTML file. Asking how a verb works is
     # the one thing that must never have a side effect, and for a tool whose
     # users are agents it is the whole discovery path. Exact-match only, so a
     # free-text --intent that mentions --help is unaffected.
@@ -2857,7 +2857,7 @@ def main(argv: list[str]) -> int:
             return _cmd_note(rest)
         # Ported from the Go build, each in its own module. Imported lazily so
         # a broken or missing one cannot stop `claim` and `check` from working
-        # — those two are on the pre-edit path and must survive anything.
+        # because those two are on the pre-edit path and must survive anything.
         if sub == "session":
             from . import session as _session
             return _session.main(rest)

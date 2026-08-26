@@ -103,8 +103,8 @@ func Open(opts OpenOpts) (*Runtime, error) {
 			p.LogDir)
 	}
 	// Bootstrap WRITES (creates the per-machine log dir + the committed .comms
-	// tree, policy.txt, .gitignore). Read-only commands — status, log, and
-	// especially `check`, which runs on every edit via the PreToolUse hook —
+	// tree, policy.txt, .gitignore). Read-only commands: status, log, and
+	// especially `check`, which runs on every edit via the PreToolUse hook:
 	// must not create files as a side effect of inspecting a repo. Only
 	// bootstrap when we're actually going to mutate. Read paths tolerate
 	// missing dirs: event.Read returns an empty log when the file is absent and
@@ -124,7 +124,7 @@ func Open(opts OpenOpts) (*Runtime, error) {
 		rt.lockH = h
 	}
 
-	// Load policy (best effort — missing file is OK; malformed → exit 2).
+	// Load policy (best effort: missing file is OK; malformed → exit 2).
 	pol, err := policy.Load(p.Policy)
 	if err != nil {
 		_ = rt.Close()
@@ -170,7 +170,7 @@ var ErrLockTimeout = errors.New("acquire lock: timed out waiting for the per-rep
 // acquireLock obtains the per-repo flock. With timeout<=0 it keeps the original
 // unbounded blocking acquire (CLI behavior). With timeout>0 it polls a
 // non-blocking acquire on a short backoff until the deadline, returning a clear
-// timeout error if the lock is still held — so no caller goroutine blocks
+// timeout error if the lock is still held, so no caller goroutine blocks
 // forever behind another process that holds the lock.
 func acquireLock(path string, timeout time.Duration) (*lock.Handle, error) {
 	if timeout <= 0 {
@@ -214,7 +214,7 @@ func (r *Runtime) Append(ev event.Event) error {
 // AppendBatch writes several events to the log and re-folds the state ONCE,
 // instead of once per event the way Append does. Use it for multi-event
 // commands (batch claim, release --all-mine) where the intermediate folded
-// state between events is never read — it removes N-1 redundant full replays
+// state between events is never read: it removes N-1 redundant full replays
 // and shortens the flock hold window. Caller MUST hold the flock.
 func (r *Runtime) AppendBatch(evs []event.Event) error {
 	if r.lockH == nil {

@@ -11,8 +11,8 @@ import (
 // inject terminal-escape sequences) embedded in stored text would be replayed
 // verbatim when the field is printed.
 //
-// It returns an error if s contains any control rune — the C0 range and DEL
-// (r < 0x20 || r == 0x7f) plus the C1 range (0x80–0x9f) — or, when maxRunes > 0,
+// It returns an error if s contains any control rune: the C0 range and DEL
+// (r < 0x20 || r == 0x7f) plus the C1 range (0x80–0x9f): or, when maxRunes > 0,
 // if s is longer than maxRunes Unicode runes (scalar values, NOT bytes).
 //
 // Legitimate Unicode (any rune >= 0x100, e.g. "Café", "日本語") passes; only the

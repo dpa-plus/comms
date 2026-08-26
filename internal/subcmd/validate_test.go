@@ -29,12 +29,12 @@ func TestRejectControlText(t *testing.T) {
 		{"nul rejected", "note body", "a\x00b", 280, true},
 		// DEL.
 		{"del rejected", "note body", "a\x7fb", 280, true},
-		// C1 controls — the range Round 1's validateLabel missed.
+		// C1 controls: the range Round 1's validateLabel missed.
 		{"c1 nel 0x85 rejected", "note body", "a\u0085b", 280, true},
 		{"c1 low 0x80 rejected", "note body", "a\u0080b", 280, true},
 		{"c1 high 0x9f rejected", "note body", "a\u009fb", 280, true},
 
-		// Boundary: U+00A0 (NBSP) is the first rune ABOVE the C1 range — must pass.
+		// Boundary: U+00A0 (NBSP) is the first rune ABOVE the C1 range: must pass.
 		{"nbsp 0x00a0 ok", "note body", "a\u00a0b", 280, false},
 
 		{"too long rejected", "note body", strings.Repeat("x", 281), 280, true},

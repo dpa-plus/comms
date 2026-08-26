@@ -1,4 +1,4 @@
-"""``comms-graph mcp`` — the coordination protocol as tools the model already has.
+"""``comms-graph mcp``: the coordination protocol as tools the model already has.
 
 WHY A SECOND SURFACE AT ALL. The CLI is only reached when something tells an
 agent to reach for it, and the always-on block that does the telling is one
@@ -6,14 +6,14 @@ paragraph competing with the whole task. The evidence is in the log: across
 thousands of real claims almost none carried a task, because the skill that
 explains tasks does not auto-trigger. A command an agent must be *told* to run
 loses to a tool sitting in its tool list on every single turn. Same protocol,
-same log, same events — different door.
+same log, same events: different door.
 
 NO CEREMONY. Six verbs that map one-to-one onto commands that already exist. No
 registration, no inbox, no severity ladder. Anything an agent must learn before
 its first call is ceremony and does not belong here.
 
 NO DEPENDENCY. It speaks JSON-RPC 2.0 over stdin/stdout by hand. The subset of
-MCP a tool server needs — initialize, tools/list, tools/call — is small, stable,
+MCP a tool server needs: initialize, tools/list, tools/call: is small, stable,
 and cheaper to own than a dependency is to carry.
 
 TWO RULES THE LOOP MUST NEVER BREAK:
@@ -22,7 +22,7 @@ TWO RULES THE LOOP MUST NEVER BREAK:
     process. A server that exits on a claim conflict takes the agent's whole
     session down with it, and a conflict is the single most expected outcome
     here.
-  * ``comms_check`` is a pure read. It takes no lock and creates nothing — see
+  * ``comms_check`` is a pure read. It takes no lock and creates nothing: see
     :func:`_check`.
 
 STDOUT IS THE WIRE. Every diagnostic in this module goes to stderr. One stray
@@ -99,7 +99,7 @@ MAX_TEXT_RUNES = 280
 
 
 class _Failed(Exception):
-    """The call could not run at all — an unresolvable actor, an unreadable log.
+    """The call could not run at all: an unresolvable actor, an unreadable log.
 
     Distinct from a refusal. A refusal (conflict, missing argument, bad
     category) is an ANSWER and goes back as tool text the model can act on; this
@@ -159,7 +159,7 @@ def serve(inp, out) -> int:
         except Exception as exc:  # noqa: BLE001 - see below
             # Nothing a single tool call can do may end the loop. An unexpected
             # exception here used to be unthinkable and then `_read_state` grew
-            # a `sys.exit` for a corrupt log, which — inside a server — is one
+            # a `sys.exit` for a corrupt log, which: inside a server: is one
             # bad line in the log killing every agent connected to it.
             resp["error"] = _rpc_error(-32603, f"{type(exc).__name__}: {exc}")
         try:
@@ -276,7 +276,7 @@ def tools() -> list[dict]:
 def _text(body: str, is_error: bool) -> dict:
     """The content shape MCP expects for a plain-text result.
 
-    ``isError`` marks a TOOL-level failure — the model sees it, reads the text
+    ``isError`` marks a TOOL-level failure: the model sees it, reads the text
     and can do something about it. A protocol error is invisible to the model,
     so a refusal must never be one.
     """
@@ -314,7 +314,7 @@ def _call(params):
         return handler()
     except SystemExit as exc:
         # The CLI helpers this module reuses report fatal conditions by exiting
-        # the process — right for a command, lethal for a server, where it would
+        # the process: right for a command, lethal for a server, where it would
         # end every other agent's connection over one bad argument. They print
         # the detail to stderr on the way out; turn the exit itself into a
         # protocol error so the caller gets an answer and the loop lives.
@@ -330,7 +330,7 @@ def _call(params):
 
 
 def _quote(s: str) -> str:
-    """A double-quoted, escaped rendering — Go's %q, near enough to be the same
+    """A double-quoted, escaped rendering. Go's %q, near enough to be the same
     string on the wire for anything an agent actually types."""
     return json.dumps(s, ensure_ascii=False)
 
@@ -345,7 +345,7 @@ def _reject_control_text(field: str, s: str, max_runes: int) -> str:
 
     C0, DEL and C1 are refused because status output prints these fields raw: a
     newline forges an output line, an ESC injects a terminal escape sequence,
-    and the log stores whatever it is given forever. Legitimate Unicode passes —
+    and the log stores whatever it is given forever. Legitimate Unicode passes:
     "Café" and "日本語" are not attacks.
     """
     for ch in s:
@@ -378,7 +378,7 @@ def _actor_for(actor_arg: str, *, mutating: bool) -> str:
     process, and one server process fields calls for several agents over one
     connection. Reading only the environment would file every one of their
     claims under a single name, and two agents sharing a name cannot detect a
-    conflict between them — which is the failure comms exists to prevent.
+    conflict between them, which is the failure comms exists to prevent.
     """
     if actor_arg:
         # Same rule as the CLI: a leading "@" is display, never identity.
@@ -434,7 +434,7 @@ def _append(log_file: Path, st, actor: str, etype: str, scope, data: dict):
     by matching the host agent's session id against hello events in the log. An
     agent that only ever touches the MCP tools would have written none, so the
     hook would fail to recognise it and block it from editing the file it had
-    just claimed — a conflict message naming itself.
+    just claimed: a conflict message naming itself.
 
     Minted before the event it explains, because `fold` sorts by TIMESTAMP;
     being first in the list is not enough. Appended as one batch so the identity
@@ -453,7 +453,7 @@ def _stamp_session(st, actor: str, data: dict) -> None:
     """Tag the event with the coordination window its actor is in, if any.
 
     Shared-log detail: `comms session start` is a Go-build verb, so the session
-    id can only ever arrive from over there — but once it has, events this build
+    id can only ever arrive from over there, but once it has, events this build
     writes must carry it too, or half an agent's work falls outside the window
     and the window's own archive undercounts what happened in it.
     """
@@ -486,7 +486,7 @@ def _findings_on_scopes(st, scopes, limit: int) -> list:
 
 
 # ---------------------------------------------------------------------------
-# comms_check — the one that runs constantly
+# comms_check: the one that runs constantly
 # ---------------------------------------------------------------------------
 
 
@@ -500,7 +500,7 @@ def _check(actor_arg: str, path: str):
     NO MKDIR: `_store(create=False)` on purpose. The store was created here once,
     and because the pre-edit hook turns any failure into a block, a single
     unwritable data home then denied every Edit and Write in EVERY repository on
-    the machine — including repos with no claims and no log at all.
+    the machine: including repos with no claims and no log at all.
     """
     if not path:
         return _text("path is required", True)
@@ -672,7 +672,7 @@ def _parse_ref(raw: str):
 
     Kind and value, never a bare string, because a bare string cannot say which
     of the two it is and that is the useful half. Control characters are refused
-    on the same grounds as every other stored field — a ref value must not be
+    on the same grounds as every other stored field: a ref value must not be
     able to smuggle escape bytes into output that prints it raw.
     """
     kind, sep, value = raw.partition(":")

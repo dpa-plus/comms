@@ -1,11 +1,11 @@
-"""Advisory file locking — the per-repo serialization primitive for the log.
+"""Advisory file locking: the per-repo serialization primitive for the log.
 
 Ported from comms `internal/lock/flock.go`.
 
 The contract: every command that reads-and-appends the coordination log first
 takes an exclusive flock on ``<logdir>/.lock`` and holds it for the whole
 read-modify-append cycle. The lock lives in the kernel, not in a file we
-maintain, so it is released even on ``kill -9`` — there is no stale-lock file
+maintain, so it is released even on ``kill -9``: there is no stale-lock file
 to garbage-collect and no PID liveness heuristic to get wrong.
 
 Three deliberate departures from the Go, each load-bearing:
@@ -13,7 +13,7 @@ Three deliberate departures from the Go, each load-bearing:
 1. There is no unbounded blocking acquire. Go keeps ``lock.Acquire`` (plain
    ``LOCK_EX``) for the CLI, where hanging is at least visible to a human, and
    only its UI server passes a ``LockTimeout``. Here every caller is library
-   code inside somebody else's process — a watcher thread, an editor hook — so
+   code inside somebody else's process: a watcher thread, an editor hook: so
    a wait that never ends is indistinguishable from a hang and gets blamed on
    graphify. Every acquire is bounded and names the path it waited on.
 
@@ -24,7 +24,7 @@ Three deliberate departures from the Go, each load-bearing:
    Leaving one empty file behind forever is much cheaper than that race.
 
 3. Missing ``fcntl`` is a hard error. ``watch.py`` degrades to ``yield True``,
-   a lock that was never taken — tolerable for a rebuild (you lose parallelism
+   a lock that was never taken: tolerable for a rebuild (you lose parallelism
    safety on a derived artifact), fatal here (concurrent writers silently
    interleave into the log, which is the one thing that must never be lost).
    graphify ships Windows installers; comms does not support Windows. Say so
@@ -74,11 +74,11 @@ __all__ = [
 POLL_INTERVAL = 0.025
 
 # Generous relative to a real hold time (milliseconds), so a timeout means
-# something is genuinely wrong — a peer wedged mid-append, or a caller that
-# nested two acquires — rather than ordinary contention.
+# something is genuinely wrong: a peer wedged mid-append, or a caller that
+# nested two acquires: rather than ordinary contention.
 DEFAULT_TIMEOUT = 10.0
 
-# The lock file carries no data — it is a name to hang an inode off — so the
+# The lock file carries no data: it is a name to hang an inode off, so the
 # owner needs exactly rw and nobody else needs anything. The directory needs
 # the execute bit on top, or nothing inside it can be opened.
 _LOCK_MODE = 0o600
@@ -104,7 +104,7 @@ class LockUnsupportedError(LockError):
 class LockHandle:
     """An owned, exclusively-held lock. Releasing twice is safe.
 
-    WHY this is an object and not the ``int`` fd it wraps — this module used to
+    WHY this is an object and not the ``int`` fd it wraps: this module used to
     return the bare fd, and that shape lost a write:
 
         with file_lock(p) as fd:
@@ -121,7 +121,7 @@ class LockHandle:
     instant it is free. A handle is an identity, so a stale one can be detected
     (``held``) and a second release can be a no-op instead of a stranger's
     close(). The log is the one thing in comms that must never be lost, and
-    this is the failure mode that loses it silently — the write vanishes and
+    this is the failure mode that loses it silently: the write vanishes and
     the only symptom is an EBADF somewhere else entirely.
 
     Mirrors the Go's ``*Handle``, whose ``Close`` is documented safe to call
@@ -155,7 +155,7 @@ class LockHandle:
         THE HOLE THIS CLOSES. flock is held on an INODE, not on a name. If
         anything unlinks the lock file while we hold it, the next process to
         come along finds nothing at that path, creates a FRESH inode there, and
-        flocks that instead — a different inode, so a different lock. Both
+        flocks that instead: a different inode, so a different lock. Both
         processes are then inside the critical section, both read "no conflict",
         and both append. Measured: with one ``rm`` of the lock file at any point
         during a hold, ten concurrent agents were each told CLAIMED on the same
@@ -165,7 +165,7 @@ class LockHandle:
         The removal does not have to be malicious or even unusual. A person who
         finds a tool wedged and deletes a file called ``.lock`` is doing the
         obvious thing, and stores routinely live under /tmp or /var/folders,
-        which the OS reaps on a schedule — ``log.is_ephemeral_store`` exists
+        which the OS reaps on a schedule: ``log.is_ephemeral_store`` exists
         because that is where they land.
 
         WHY THE CHECK IS THIS ONE, AND WHY IT BELONGS AT THE END. Comparing our
@@ -174,8 +174,8 @@ class LockHandle:
         healthy from where it stands. The party that can always tell is the
         INCUMBENT, because unlinking its file drops that inode's link count to
         zero and ``fstat`` on the fd it already holds says so. Which means the
-        check is worth nothing at acquire time — the damage happens during the
-        hold — and must be made at the far end of the critical section, in the
+        check is worth nothing at acquire time: the damage happens during the
+        hold, and must be made at the far end of the critical section, in the
         moment before the write that the exclusion was protecting.
         """
         fd = self._fd
@@ -235,7 +235,7 @@ class LockHandle:
             with contextlib.suppress(OSError):
                 fcntl.flock(fd, fcntl.LOCK_UN)
             # Not suppressed: this handle is the sole owner of the fd, so an
-            # EBADF here means something else closed it — a bug worth hearing
+            # EBADF here means something else closed it: a bug worth hearing
             # about, and the state above is already consistent, so raising
             # cannot strand the handle.
             os.close(fd)
@@ -270,7 +270,7 @@ def _make_lock_dir(parent: str) -> None:
     mkdir subtracts the umask from its mode argument exactly as open() does, so
     under a umask that strips the owner execute bit a plain makedirs() creates a
     directory nothing can descend into. chmod ignores the umask, so the repair is
-    to fix what we just made — and only what we just made, since directories that
+    to fix what we just made, and only what we just made, since directories that
     already existed are somebody else's setup.
 
     ONE LEVEL AT A TIME, TOP DOWN. makedirs() creates the whole chain in one call
@@ -278,7 +278,7 @@ def _make_lock_dir(parent: str) -> None:
     execute bit and then cannot descend into it to make ``<repo hash>``, so it
     raises EPERM having left the outer directory unusable and the store wedged
     for every later command. The first comms command on a fresh machine creates
-    exactly those two levels, so this is not an edge case — it is every first run
+    exactly those two levels, so this is not an edge case: it is every first run
     under a strict umask. Creating and repairing each level before moving into it
     is the only order that works.
     """
@@ -299,7 +299,7 @@ def _make_lock_dir(parent: str) -> None:
         except OSError as exc:
             raise LockError(f"lock: mkdir {created}: {exc}") from exc
         # Suppressed: a filesystem without POSIX modes has nothing to repair, and
-        # losing the race is not a failure — 0o700 is what the winner made too.
+        # losing the race is not a failure: 0o700 is what the winner made too.
         with contextlib.suppress(OSError):
             os.chmod(created, _DIR_MODE)
 
@@ -313,7 +313,7 @@ def _heal_lock_dir_mode(parent: str) -> bool:
     WHY this exists alongside _heal_lock_mode: the lock file is not the only
     thing this module creates under the caller's umask. mkdir subtracts the
     umask exactly as open() does, so under umask 0o177 the store directory
-    lands at 0o600 — readable, but with no execute bit, so nothing inside it
+    lands at 0o600: readable, but with no execute bit, so nothing inside it
     can be opened at all and every acquire in that repo fails EACCES forever.
     That is the same permanent wedge one level up, and it is the case the old
     comment in this module pointed at while "proving" it with a umask under
@@ -346,7 +346,7 @@ def _heal_lock_mode(p: str) -> bool:
 
     WHY: a lock file created under a umask that strips owner bits (0o600 leaves
     mode 0000, 0o277 leaves 0400) is unopenable by the *next* process, and the
-    lock file is deliberately never unlinked — so without this, one unlucky
+    lock file is deliberately never unlinked, so without this, one unlucky
     creation wedges every future command in the repo with EACCES and nothing
     ever undoes it. _create_lock_file() no longer produces such a file, but
     files left behind by an older version, or by a process killed inside the
@@ -408,8 +408,8 @@ def _create_lock_file(p: str, flags: int) -> int | None:
     open() and fchmod(). Another process opening in that window gets EACCES,
     and a process killed in that window leaves the file wedged forever (see
     _heal_lock_mode). Fixing the mode while the inode still has only a
-    throwaway name, and then giving it its real name with link() — which is
-    atomic and refuses to overwrite — means no other process ever observes the
+    throwaway name, and then giving it its real name with link(), which is
+    atomic and refuses to overwrite: means no other process ever observes the
     lock file at a mode it cannot open.
     """
     tmp = f"{p}.{os.getpid()}.{next(_tmp_counter)}.new"
@@ -426,7 +426,7 @@ def _create_lock_file(p: str, flags: int) -> int | None:
         try:
             os.link(tmp, p)
         except FileExistsError:
-            # Somebody else published first. Theirs is as good as ours — and it
+            # Somebody else published first. Theirs is as good as ours, and it
             # must be theirs, because the flock is on the inode, and two
             # processes locking two different inodes both "hold the lock".
             os.close(fd)
@@ -484,7 +484,7 @@ def _open_lock_file(path: str | os.PathLike[str]) -> int:
     flags = os.O_RDWR | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
 
     # Bounded, not a loop: each benign race can only flip the state once from
-    # our side — the file appeared between our open and our create, or it was
+    # our side: the file appeared between our open and our create, or it was
     # wedged and we just healed it. Anything still failing on the second pass
     # is a real problem and must surface as an error rather than spin here.
     for attempt in (1, 2):
@@ -572,7 +572,7 @@ def acquire(
     # `timeout < 0` is NOT sufficient validation, and this is why the check is
     # written against isfinite instead: NaN compares False against everything,
     # so it slips past `< 0` and then past `now + poll > deadline` on every
-    # iteration — the loop polls until the process is killed. +inf passes the
+    # iteration: the loop polls until the process is killed. +inf passes the
     # `< 0` check honestly and does the same. Both are reachable from a
     # config-derived value (a JSON `null` coerced with float(), a missing key
     # defaulted to inf to mean "no limit"), and an unbounded wait is the exact
@@ -620,7 +620,7 @@ def file_lock(
 ) -> Iterator[LockHandle]:
     """Hold the exclusive lock for the duration of the block.
 
-    Yields the handle only when the lock is genuinely held — on any failure this
+    Yields the handle only when the lock is genuinely held: on any failure this
     raises instead of yielding, so a `with` body never runs unprotected. A body
     that releases early is fine: the release below is idempotent.
 

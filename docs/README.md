@@ -3,6 +3,7 @@
 - [`README.md`](../README.md): top-level overview + quick start.
 - [`INSTALL.md`](INSTALL.md): full install + integration steps.
 - [`PROTOCOL.md`](PROTOCOL.md): event log format, scope grammar, recovery rules.
+- [`DASHBOARD.md`](DASHBOARD.md): the board in full, plus what upgrading does to a running session.
 - [`DESIGN.md`](DESIGN.md): why these decisions, what was cut, what's out of scope.
 
 The Claude Code skill lives at [`../skills/using-comms/SKILL.md`](../skills/using-comms/SKILL.md).

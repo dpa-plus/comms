@@ -2,13 +2,13 @@
 
 WHY A SERVER AND NOT JUST FILES. ``view.py`` and ``taskview.py`` each write a
 complete standalone page, which is the right shape for sending somebody a
-snapshot. What they cannot do is change when the log changes — and the whole
+snapshot. What they cannot do is change when the log changes, and the whole
 value of a coordination board is that you leave it open while agents work. This
 adds the one thing files cannot have: it notices a write and pushes.
 
 WHY THE TWO GRAPHS ARE IFRAMES. Each is a finished page with its own vis-network
 instance, its own layout, and its own interaction state. Inlining them into one
-document would mean two vis instances fighting over one global, and — worse —
+document would mean two vis instances fighting over one global, and: worse:
 every push would have to avoid destroying pan, zoom and selection in both of
 them. An iframe reloads only when its own data changed, and its internal state
 is its own business. The cost is two extra requests; the alternative was
@@ -49,7 +49,7 @@ POLL_SECONDS = 0.5
 #: How long a holder must be silent before their claim reads as quiet. One hour,
 #: matching the Go build's stale rule, and deliberately advisory: quiet is a
 #: prompt to look, never a licence for the board to act. Nothing expires on its
-#: own — a claim ends only when somebody names it in a release or a steal.
+#: own: a claim ends only when somebody names it in a release or a steal.
 QUIET_AFTER_SECONDS = 3600
 
 
@@ -62,7 +62,7 @@ def _string(data: Any, key: str) -> str:
 
     Event data is agent-written and only conventionally shaped: a key can be
     missing, null, a number, or a nested object. The board must render it
-    either way — this is the surface that must never go blank.
+    either way: this is the surface that must never go blank.
     """
     if not isinstance(data, dict):
         return ""
@@ -110,7 +110,7 @@ def _snapshot(root: Path, log_file: Path, graph_path: Path | None = None) -> dic
     now = datetime.now(timezone.utc)
     # From EVERY event the actor wrote, not from their hello. A hello only
     # exists when the host reports a session id, which in practice means Claude
-    # Code — so an agent on any other harness had no `last_seen` at all, and
+    # Code, so an agent on any other harness had no `last_seen` at all, and
     # its claim went quiet an hour after it was taken no matter how hard that
     # agent was working. The board then contradicted itself on one screen
     # ("last seen 10 seconds ago" beside "idle 3 hours") and its one
@@ -149,7 +149,7 @@ def _snapshot(root: Path, log_file: Path, graph_path: Path | None = None) -> dic
     # A hello is only written when the host reports a session id, which in
     # practice means Claude Code. So an agent on any other harness could claim,
     # release and get refused all day while the panel said "Nobody has said
-    # hello in this repo" — a board reporting an empty room to somebody watching
+    # hello in this repo": a board reporting an empty room to somebody watching
     # four agents work in it.
     #
     # A hello still matters and is still shown: it is what ties an actor to a
@@ -177,7 +177,7 @@ def _snapshot(root: Path, log_file: Path, graph_path: Path | None = None) -> dic
 
     # WHICH FILES A TASK TOUCHES. Nothing carried this, and it is the first
     # question anybody opening a task asks. It is not stored on the task: it is
-    # derived from claims tagged `--task <id>`, which is the point of that flag —
+    # derived from claims tagged `--task <id>`, which is the point of that flag:
     # the task tracks itself from work the agent was doing anyway.
     #
     # Built from the LOG, not from live claims alone, so a file stays on the task
@@ -226,7 +226,7 @@ def _snapshot(root: Path, log_file: Path, graph_path: Path | None = None) -> dic
 
     # THE JOIN. The log knows which files a task touched; the map knows how files
     # reach each other. Neither knew the other, so the task graph could only show
-    # dependencies somebody typed by hand — and nobody ever typed one: eight
+    # dependencies somebody typed by hand, and nobody ever typed one: eight
     # tasks, zero declared edges, in a log with thousands of events. Derived, it
     # is true whether or not anybody noticed.
     #
@@ -261,7 +261,7 @@ def _snapshot(root: Path, log_file: Path, graph_path: Path | None = None) -> dic
     # HOW OLD THE MAP IS. Raised by an agent that called `explain` on a symbol
     # and got a line number ~100 lines stale and three of its connections: the
     # map had been extracted once and the file had moved under it. Their point is
-    # the right one — a map that is confidently wrong is worse than no map,
+    # the right one: a map that is confidently wrong is worse than no map,
     # because "meets nothing" and "meets nothing I know about" read identically,
     # and the recall caveat covers presence, not freshness.
     map_age = None
@@ -279,7 +279,7 @@ def _snapshot(root: Path, log_file: Path, graph_path: Path | None = None) -> dic
         })
 
     # The log itself, most recent first, as a readable feed. The board had no
-    # answer at all to "what just happened" — the one question somebody who has
+    # answer at all to "what just happened": the one question somebody who has
     # been away asks first, and the log is nothing but the answer to it.
     # One atomic claim is ONE thing that happened. `claim a b c` appends an
     # event per scope, so claiming eleven files filled the feed with eleven
@@ -315,7 +315,7 @@ def _snapshot(root: Path, log_file: Path, graph_path: Path | None = None) -> dic
             "intent": _string(ev.data, "intent"),
             "reason": _string(ev.data, "reason"),
             "result": _string(ev.data, "result"),
-            # A note's text is `body`; a FINDING's is `summary` — that is what
+            # A note's text is `body`; a FINDING's is `summary`: that is what
             # `find` has always written (cli.py, and the Go build before it) and
             # what the findings panel below already reads. The feed looked only
             # at `body`, so every finding in it rendered as an empty quote line:
@@ -337,7 +337,7 @@ def _snapshot(root: Path, log_file: Path, graph_path: Path | None = None) -> dic
 
     # Things that are WRONG with the plan itself, as opposed to slow. Both are
     # computed by the task-graph page and both live inside its side panel,
-    # which the board hides to give the drawing room — so a dependency loop, the
+    # which the board hides to give the drawing room, so a dependency loop, the
     # one state a plan cannot recover from on its own, was invisible on the
     # surface somebody actually watches.
     alerts = []
@@ -380,7 +380,7 @@ def _snapshot(root: Path, log_file: Path, graph_path: Path | None = None) -> dic
         })
 
     # Every project on this machine, so the board can be a place you watch
-    # rather than a page you open per repo. Filesystem only — folding 180 logs
+    # rather than a page you open per repo. Filesystem only: folding 180 logs
     # to draw a sidebar would cost seconds and the sidebar only needs a name
     # and a recency.
     here = _log.repo_hash(root)
@@ -388,7 +388,7 @@ def _snapshot(root: Path, log_file: Path, graph_path: Path | None = None) -> dic
     hidden = 0
     for st_info in _log.known_stores():
         # A store is not a project just because it exists. Measured on this
-        # machine: 215 stores, of which 213 were throwaway — 193 whose directory
+        # machine: 215 stores, of which 213 were throwaway: 193 whose directory
         # has already been deleted, and the rest scratch repos under a temp dir
         # from running the test suite. The rail listed all of them, so the two
         # real projects sat among 26 entries called "repo" and 156 with no name
@@ -475,7 +475,7 @@ def _snapshot(root: Path, log_file: Path, graph_path: Path | None = None) -> dic
         },
         # `summary`, not `body`. The field was read by a name Finding does not
         # have, so every finding would have rendered as a category and a blank
-        # line — and nothing caught it, because there was no way to write a
+        # line, and nothing caught it, because there was no way to write a
         # finding in this build for a test to have one to render.
         "findings": [
             {"actor": f.actor, "category": getattr(f, "category", ""),
@@ -494,7 +494,7 @@ def _snapshot(root: Path, log_file: Path, graph_path: Path | None = None) -> dic
         ],
         # Carry the task and the reason too. A refusal recorded against a TASK
         # (a self-review, a failing check) has no scope, so the panel rendered
-        # rows saying only "@alice was refused" — the two facts worth having,
+        # rows saying only "@alice was refused": the two facts worth having,
         # what and why, were dropped on the way out. It also called those
         # "collisions prevented", which a failed check is not.
         "blocked_events": [
@@ -1280,7 +1280,22 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 .afiles.loose .afrow { justify-content: flex-start; gap: var(--sp-2); }
 .afiles.loose .how { color: var(--ink-4); font-size: 11.5px; }
 .afiles.loose .how.amber { color: var(--amber); }
-.afiles.loose .who { color: var(--ink-4); font-size: 11px; }
+.afiles.loose .who { color: var(--ink-4); font-size: 11px; margin-left: auto; }
+/* Aligned, not scattered. The paths were ragged across the full width with the
+   state column floating wherever each name happened to end. */
+.afiles.loose .afrow { display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: var(--sp-2); align-items: baseline; }
+.afiles.loose .afrow .how { justify-self: end; }
+.afiles.loose .afrow .who { grid-column: 2; justify-self: end; }
+/* Its own column order: the count is a label on the left and the sample of
+   paths fills the rest. Inheriting .afrow's grid put the label in the flexible
+   column and the paths in the rigid one, so "8 new paths not in git yet"
+   wrapped to one word per line. */
+.afiles.loose .afrow.freshrow { grid-template-columns: auto minmax(0, 1fr);
+  color: var(--ink-4); }
+.afiles.loose .afrow.freshrow .how { justify-self: start; white-space: nowrap; }
+.freshlist { color: var(--ink-4); font-size: 11px; opacity: .8;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .guardwarn { padding: var(--sp-h) var(--sp-2); border-top: 1px solid var(--line);
   color: var(--amber); font-size: 11.5px; }
 .guardwarn .mono { color: var(--ink-4); }
@@ -1348,59 +1363,61 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 .seg-ready { background: var(--green); }
 .seg-closed { background: var(--line-2); }
 .tally { display: flex; padding: 0 var(--sp-2) var(--sp-1); gap: var(--sp-1); }
-.tcell { flex: 1 1 0; min-width: 0; }
+.tcell { flex: 1 1 0; min-width: 0; border-top: 2px solid var(--line); padding-top: 5px; }
+.tcell.c-doing   { border-top-color: var(--amber); }
+.tcell.c-review  { border-top-color: var(--accent); }
+.tcell.c-blocked { border-top-color: var(--red); }
+.tcell.c-ready   { border-top-color: var(--green); }
+.tcell.c-closed  { border-top-color: var(--line-2); }
+/* A count of zero is not news, and at full contrast it competed with the ones
+   that are. */
+.tcell.zero { border-top-color: var(--line-hair); }
+.tcell.zero .tn { color: var(--ink-4); }
 .tn { font-size: 15px; color: var(--ink); }
 .tl { font-size: 9.5px; letter-spacing: .06em; color: var(--ink-4); }
 .stuck { border-top: 1px solid var(--line-hair); padding: var(--sp-1) var(--sp-2); }
 
 /* the task list, and one task in full */
 .tlist { border-top: 1px solid var(--line-hair); }
-.trow { display: flex; align-items: baseline; gap: var(--sp-1);
-  padding: 5px var(--sp-2); font-size: 12.5px; cursor: pointer;
-  border-bottom: 1px solid var(--line-hair); }
+/* The title gets the row. The phase is a 3px bar down the left edge, because a
+   chip spelling out "CLOSED" cost about a third of the width and pushed the one
+   thing anybody reads into an ellipsis at twenty characters. */
+.trow { padding: 7px var(--sp-2) 7px calc(var(--sp-2) + 5px); position: relative;
+  border-bottom: 1px solid var(--line-hair); cursor: pointer; }
+.trow::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0;
+  width: 3px; background: var(--line-2); }
 .trow:last-child { border-bottom: 0; }
 .trow:hover { background: var(--surface-2); }
-.ttitle { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; }
-.tfiles { color: var(--ink-4); font-size: 11px; flex: none; }
+.trow.p-doing::before   { background: var(--amber); }
+.trow.p-review::before  { background: var(--accent); }
+.trow.p-blocked::before,
+.trow.p-cycle::before   { background: var(--red); }
+.trow.p-ready::before   { background: var(--green); }
+.trow.p-closed::before  { background: var(--line); }
+.trow.p-closed .ttitle  { color: var(--ink-3); }
+/* Two lines, then clamp. Truncating mid-word at one line made every task on a
+   real board indistinguishable from every other. */
+.ttitle { color: var(--ink); line-height: 1.35; display: -webkit-box;
+  -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.tmeta { display: flex; gap: var(--sp-1); align-items: baseline; margin-top: 2px; }
+.tfiles { color: var(--ink-4); font-size: 11px; }
+/* Closed work folds away: it is history, and on a real project it was 23 rows
+   burying the 3 that could still be acted on. */
+.tfold { display: flex; justify-content: space-between; align-items: baseline;
+  padding: 7px var(--sp-2); cursor: pointer; color: var(--ink-4);
+  font-size: 11.5px; border-bottom: 1px solid var(--line-hair); }
+.tfold:hover { background: var(--surface-2); }
+.tfoldc { color: var(--accent); }
+.swhy { color: var(--amber); font-size: 11px; }
+/* Still used by the task DETAIL header, where there is one task and room to
+   spell the phase out. It was only ever wrong in a list. */
 .tphase { flex: none; font-size: 9.5px; letter-spacing: .05em; text-transform: uppercase;
-  border-radius: 3px; padding: 1px 5px; border: 1px solid var(--line-2); color: var(--ink-4); }
+  padding: 1px 6px; border-radius: 3px; border: 1px solid var(--line);
+  color: var(--ink-4); }
 .tphase.p-doing { color: var(--amber); border-color: var(--amber-line); background: var(--amber-wash); }
 .tphase.p-review { color: var(--accent); border-color: var(--accent-line); background: var(--accent-wash); }
 .tphase.p-blocked, .tphase.p-cycle { color: var(--red); border-color: var(--red-line); background: var(--red-wash); }
 .tphase.p-ready { color: var(--green); border-color: var(--green); background: transparent; }
-
-.tdetbox { max-width: 860px; margin: 0 auto; width: 100%; }
-.tdet-hd { display: flex; align-items: center; gap: var(--sp-1);
-  padding: var(--sp-2); border-bottom: 1px solid var(--line); }
-.tdet-title { font-size: 14px; color: var(--ink); }
-.tdet-id { color: var(--ink-4); font-size: 11.5px; }
-.tdet-bd { padding: var(--sp-2); overflow-y: auto; }
-.tdet-state { font-size: 13px; color: var(--ink); padding-bottom: var(--sp-2); }
-.tdet-sec { font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
-  color: var(--ink-4); padding: var(--sp-2) 0 var(--sp-h); }
-.tdet-note { font-size: 12.5px; color: var(--ink-3); }
-.tdet-note.amber { color: var(--amber); }
-.tdet-checks { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
-.chk { font-size: 11.5px; border-radius: 4px; padding: 1px 6px; border: 1px solid var(--line-2); color: var(--ink-3); }
-.chk.ok { color: var(--green); border-color: var(--green); }
-.chk.bad { color: var(--red); border-color: var(--red-line); background: var(--red-wash); }
-.tdet-files { border-top: 1px solid var(--line-hair); }
-.tfrow { display: flex; align-items: baseline; gap: var(--sp-1); padding: 4px 0;
-  border-bottom: 1px solid var(--line-hair); font-size: 12.5px; }
-.tfdot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--line-2); }
-.tfdot.held { background: var(--amber); }
-.tfdot.done { background: var(--green); }
-.tfdot.meet { background: var(--accent); }
-.tfrow.tmeet { cursor: pointer; }
-.tfrow.tmeet:hover .tfpath { color: var(--accent); }
-.tvia { color: var(--ink-4); font-size: 11px; padding: 0 0 4px 14px; }
-.tfpath { color: var(--ink); flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tfactor { color: var(--accent); flex: none; }
-.tfstate { color: var(--ink-4); font-size: 11px; flex: none; }
-.srow { display: flex; gap: var(--sp-1); align-items: baseline; padding: 3px 0; font-size: 12px; }
-.srow .mono { color: var(--ink); flex: none; }
-.stitle { color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.swhy { color: var(--amber); flex: none; margin-left: auto; }
 .allgood { padding: var(--sp-1) var(--sp-2) var(--sp-2); color: var(--green); font-size: 12.5px; }
 
 /* this repo */
@@ -1645,20 +1662,38 @@ function renderNow() {
   // nor "claimed by nobody", so it fell out of the board entirely.
   var loose = (dirt.files || []).filter(function (f) { return f.basis !== "held"; });
   if (loose.length) {
+    // EDITS TO TRACKED FILES ARE THE SIGNAL. Untracked paths are usually build
+    // output (graphify-out/, output/, a tool's cache directory) and git reports
+    // a whole untracked directory as one entry, so they are not edits anybody
+    // made to code. Six of them buried the single row that mattered: a
+    // translation file changed, and released by the agent that had it.
+    var edited = loose.filter(function (f) { return f.how.indexOf("new, not in git") !== 0; });
+    var fresh  = loose.filter(function (f) { return f.how.indexOf("new, not in git") === 0; });
+
     h += '<div class="nowband-hd loosehd"><span>Changed on disk, nobody holding it</span>' +
          '<span class="count">' + loose.length + " of " + dirt.total + "</span></div>";
     h += '<div class="afiles loose">';
-    loose.slice(0, 25).forEach(function (f) {
+    edited.slice(0, 25).forEach(function (f) {
       h += '<div class="afrow">' +
            '<span class="mono afpath">' + esc(shortPath(f.path)) + "</span>" +
            '<span class="how' + (f.deleted ? " amber" : "") + '">' + esc(f.how) + "</span>" +
-           '<span class="grow"></span>' +
-           '<span class="who mono">' +
-           (f.actor ? "@" + esc(f.actor) + " let go of it" : "claimed by nobody") +
-           "</span></div>";
+           // Only when the log HAS something to say. Repeating "claimed by
+           // nobody" on every row restated the heading six times and left no
+           // room for the one row that named an actor.
+           (f.actor ? '<span class="who mono">@' + esc(f.actor) + " let go of it</span>" : "") +
+           "</div>";
     });
-    if (loose.length > 25) {
-      h += '<div class="pmore">and ' + (loose.length - 25) + " more</div>";
+    if (edited.length > 25) {
+      h += '<div class="pmore">and ' + (edited.length - 25) + " more</div>";
+    }
+    if (fresh.length) {
+      h += '<div class="afrow freshrow" title="' +
+           esc(fresh.map(function (f) { return f.path; }).join(String.fromCharCode(10))) + '">' +
+           '<span class="how">' + fresh.length +
+           (fresh.length === 1 ? " new path" : " new paths") + " not in git yet</span>" +
+           '<span class="mono freshlist">' +
+           esc(fresh.slice(0, 4).map(function (f) { return shortPath(f.path); }).join("  ")) +
+           (fresh.length > 4 ? "  +" + (fresh.length - 4) : "") + "</span></div>";
     }
     h += "</div>";
   }
@@ -1981,7 +2016,10 @@ function renderTasks() {
   });
   h += "</div><div class='tally'>";
   order.forEach(function (k) {
-    h += '<div class="tcell"><div class="tn mono">' + (c[k[0]] || 0) + '</div><div class="tl">' + k[1] + "</div></div>";
+    var v = c[k[0]] || 0;
+    h += '<div class="tcell c-' + k[0] + (v ? "" : " zero") + '">' +
+         '<div class="tn mono">' + v + "</div>" +
+         '<div class="tl">' + k[1] + "</div></div>";
   });
   h += "</div>";
 
@@ -1995,25 +2033,54 @@ function renderTasks() {
             (order2[b.phase] === undefined ? 9 : order2[b.phase]);
     return d !== 0 ? d : (a.id < b.id ? -1 : 1);
   });
-  h += '<div class="tlist">';
-  sorted.forEach(function (t) {
+
+  // CLOSED WORK IS HISTORY AND IT WAS DROWNING THE REST. On a real project the
+  // panel was 23 closed rows and 3 live ones, so the three that could still be
+  // acted on were below the fold, and the list read as a wall. Closed work
+  // folds behind one line and opens on click.
+  var live = sorted.filter(function (t) { return t.phase !== "closed"; });
+  var done = sorted.filter(function (t) { return t.phase === "closed"; });
+
+  function taskRow(t) {
     var n = (t.files || []).length;
     var why = t.phase === "review" ? "needs review"
             : t.phase === "cycle" ? "dependency loop"
             : t.phase === "blocked" ? "waiting on " + (t.blocked_by || []).join(", ")
             : "";
-    h += '<div class="trow" data-task="' + esc(t.id) + '">' +
-         '<span class="tphase p-' + esc(t.phase) + '">' + esc(t.phase) + "</span>" +
-         '<span class="ttitle">' + esc(t.title || t.id) + "</span>" +
-         (n ? '<span class="tfiles mono">' + n + (n === 1 ? " file" : " files") + "</span>" : "") +
-         (why ? '<span class="swhy">' + esc(why) + "</span>" : "") +
-         "</div>";
-  });
+    // The phase is the colour of the bar down the left edge, not a chip. The
+    // chip cost about a third of the row and the title, which is the only part
+    // anybody reads, was being truncated to twenty characters to make room.
+    return '<div class="trow p-' + esc(t.phase) + '" data-task="' + esc(t.id) + '" ' +
+           'title="' + esc(t.phase + ": " + (t.title || t.id)) + '">' +
+           '<div class="ttitle">' + esc(t.title || t.id) + "</div>" +
+           '<div class="tmeta">' +
+             (why ? '<span class="swhy">' + esc(why) + "</span>" : "") +
+             (n ? '<span class="tfiles mono">' + n + (n === 1 ? " file" : " files") + "</span>" : "") +
+           "</div></div>";
+  }
+
+  h += '<div class="tlist">';
+  live.forEach(function (t) { h += taskRow(t); });
+  if (done.length) {
+    h += '<div class="tfold" id="tfold">' + done.length + " closed" +
+         '<span class="tfoldc">show</span></div>';
+    h += '<div class="tdone" id="tdone" hidden>';
+    done.forEach(function (t) { h += taskRow(t); });
+    h += "</div>";
+  }
   h += "</div>";
   el("tasks").innerHTML = h;
   Array.prototype.forEach.call(el("tasks").querySelectorAll(".trow"), function (row) {
     row.onclick = function () { openTask(row.getAttribute("data-task")); };
   });
+  var fold = el("tfold");
+  if (fold) {
+    fold.onclick = function () {
+      var box = el("tdone");
+      box.hidden = !box.hidden;
+      fold.querySelector(".tfoldc").textContent = box.hidden ? "show" : "hide";
+    };
+  }
 }
 
 /* One task, in full. Opened from a row rather than always on screen: the list
@@ -2260,11 +2327,11 @@ es.onmessage = function (ev) { renderAll(JSON.parse(ev.data)); };
 #: Appended to each embedded page to give the graph the whole pane.
 #:
 #: Both pages are complete, standalone documents, and each carries its own
-#: right-hand panel — the map has search, node info and a community filter; the
+#: right-hand panel: the map has search, node info and a community filter; the
 #: task graph has its counts and legend. Standalone that is exactly right. Side
 #: by side inside the board, with the board's own rail beside them, it meant
-#: THREE columns of chrome saying overlapping things, and the graphs — the
-#: reason anybody opens this — were squeezed into what was left.
+#: THREE columns of chrome saying overlapping things, and the graphs: the
+#: reason anybody opens this: were squeezed into what was left.
 #:
 #: Hidden rather than removed, so both pages keep working on their own and
 #: neither generator has to know it is inside a frame.
@@ -2273,14 +2340,14 @@ _EMBED_CSS = (
     "#comms-panel,#sidebar,#side{display:none!important}"
     # Collapse the TRACK the panel occupied, not just the panel. #wrap is a grid
     # with a fixed second column, so hiding #side left a 290px empty track and
-    # the graph stayed short by exactly that much — the picture then read as
+    # the graph stayed short by exactly that much: the picture then read as
     # small and left-biased in a pane that looked like it had room.
     "#wrap{grid-template-columns:minmax(0,1fr)!important}"
     "#graph,#wrap{width:100%!important;flex:1 1 auto!important}"
     "body{overflow:hidden!important}"
     "</style>"
     # Hiding the panel widens the canvas, and an ELEMENT resize fires no window
-    # resize event — so vis kept the narrower viewport it had measured at
+    # resize event, so vis kept the narrower viewport it had measured at
     # construction and the picture sat small and off-centre in a pane with room
     # to spare. Both pages already re-fit on window resize; this gives them the
     # event they were waiting for, and a ResizeObserver keeps it true afterwards
@@ -2292,7 +2359,7 @@ _EMBED_CSS = (
     # setSize BEFORE redraw: vis measured its canvas when the panel was still
     # there, and fit() centres inside the CANVAS, not inside the container. So
     # the picture sat centred in a box narrower than the pane and read as
-    # left-biased and small. redraw() alone does not re-measure — setSize is
+    # left-biased and small. redraw() alone does not re-measure: setSize is
     # what makes it look again.
     "if(n){try{n.setSize('100%','100%');n.redraw();"
     "if(n.fit){n.fit({animation:false});}}catch(e){}}};"
@@ -2411,7 +2478,7 @@ class Board:
 
         The log alone was not enough. The map is drawn from graphify-out/graph.json
         as well, so re-running `graphify extract` changed the picture completely
-        while the stamp sat still — and the board went on serving the map it had
+        while the stamp sat still, and the board went on serving the map it had
         cached, with no way for the reader to tell it was looking at the old
         shape of their codebase.
         """
@@ -2427,7 +2494,7 @@ class Board:
     def release(self, claim_id: str, reason: str) -> tuple[int, dict]:
         """Free somebody else's claim, from the board, under the operator's name.
 
-        THE BOARD IS OTHERWISE READ-ONLY AND THAT IS DELIBERATE — the log is
+        THE BOARD IS OTHERWISE READ-ONLY AND THAT IS DELIBERATE: the log is
         written under a lock through a fold that enforces the rules, and a
         dashboard that wrote around either would be a second writer with none of
         those guarantees. So this does not write around them: it takes the same
@@ -2439,7 +2506,7 @@ class Board:
 
         * An exact claim id, never a path. A path can match more ground than the
           person meant, and this verb exists precisely for making a judgement
-          about somebody else's work — that judgement should be about one named
+          about somebody else's work: that judgement should be about one named
           thing.
         * A reason, always. It goes in the log under the operator's name,
           permanently, and "who freed this and why" is the only question anybody
@@ -2489,7 +2556,7 @@ class Board:
         return _snapshot(self.root, self.log_file, graph_path=self._graph_path())
 
     def page(self) -> str:
-        # Returned verbatim. _PAGE is NOT a format string — it is full of CSS and
+        # Returned verbatim. _PAGE is NOT a format string: it is full of CSS and
         # JavaScript braces, and an earlier version doubled them for a .format()
         # call that never happened, so the doubled braces shipped literally and
         # every rule and script block in the page was invalid.
@@ -2499,8 +2566,8 @@ class Board:
         """One builder at a time per page, because building is not side-effect free.
 
         Each build RENDERS TO A FILE and reads it back. Two requests missing the
-        cache together — a browser fetching both frames, or a reload landing on
-        top of a push — had both builders writing the same path at once, and one
+        cache together: a browser fetching both frames, or a reload landing on
+        top of a push: had both builders writing the same path at once, and one
         of them read it half-written: HTTP 200 with a zero-byte body, so the
         frame went blank with nothing in any log to explain it.
 

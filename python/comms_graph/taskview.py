@@ -7,7 +7,7 @@ picture implying order would be the most persuasive possible way to ship that
 coin flip as a fact.
 
 Here the order is DECLARED. An agent wrote down that B comes after A. That is a
-statement somebody made, not something inferred from imports — so arrows are
+statement somebody made, not something inferred from imports, so arrows are
 honest here, and they are the whole content of the picture.
 
 The one question this has to answer at a glance is **what is blocked, and on
@@ -35,8 +35,8 @@ from . import task as _task
 
 DEFAULT_FILENAME = "tasks.comms.html"
 
-#: Phase colours. Chosen so the two that demand action — something you could
-#: start, and something waiting on YOU — are the ones that carry saturation,
+#: Phase colours. Chosen so the two that demand action: something you could
+#: start, and something waiting on YOU: are the ones that carry saturation,
 #: while closed work recedes rather than competing for attention.
 _PHASE_STYLE = {
     _task.PHASE_READY:   ("#7ad39a", "#1c3327", "startable now"),
@@ -115,7 +115,7 @@ def _tooltip(t: Any, edges: list) -> str:
     if t.verified_by:
         lines.append(f"verified by @{t.verified_by} ({t.independence or 'unknown'})")
         # What they say they ran. A person scanning the board for a task to
-        # trust needs this more than the fact of a sign-off — the fact is a
+        # trust needs this more than the fact of a sign-off: the fact is a
         # colour, the method is the reason to believe it.
         if getattr(t, "verification", ""):
             lines.append(f"  checked by: {t.verification}")
@@ -201,7 +201,7 @@ def _json_for_script(obj) -> str:
 
     json.dumps escapes quotes and backslashes; it does NOT escape ``<``. So a
     string containing ``</script>`` closes the block early and everything after
-    it is parsed as HTML — which is live script, from a value somebody else
+    it is parsed as HTML, which is live script, from a value somebody else
     wrote. Every string in here is agent-controlled: task titles, the "provides"
     text on an edge, actor names. Reproduced with a task titled
     ``</title><script>alert(3)</script>``, which executed.
@@ -243,14 +243,14 @@ _PAGE = """<!doctype html>
   html, body {{ margin: 0; background: #0f0f1a; color: #e8eaf2;
     font: 13px/1.5 ui-sans-serif, -apple-system, Segoe UI, Roboto, sans-serif; }}
   /* Viewport units, not percentages. A percentage height only resolves against a
-     parent with a definite height, and vis sizes its canvas to fill this box :
+     parent with a definite height, and vis sizes its canvas to fill this box,
      so a chain of 100% heights let the canvas drive the container that was
      supposed to be driving IT. The canvas grew on every redraw (2036 -> 2072 ->
      2120 px) and painted nothing at all. 100dvh is definite on its own. */
   #wrap {{ display: grid; grid-template-columns: minmax(0, 1fr) 290px;
     height: 100dvh; max-height: 100dvh; }}
   /* The left column STACKS: the drawn graph on top, the tasks that join to
-     nothing as cards underneath. See the comment above the split in render() :
+     nothing as cards underneath. See the comment above the split in render():
      feeding unconnected tasks to a hierarchical layout is what produced the
      single illegible column this replaces. */
   #gcol {{ display: flex; flex-direction: column; min-width: 0; min-height: 0; }}
@@ -271,6 +271,17 @@ _PAGE = """<!doctype html>
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }}
   .lhead {{ font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
     color: #8890b0; margin: 0 0 9px; }}
+  /* Finished work folds. It is the majority on any project that has been
+     running a while, and at full size it is the only thing you can see. */
+  .ldone {{ margin-top: 14px; }}
+  .ldone > summary {{ cursor: pointer; color: #8890b0; font-size: 11.5px;
+    padding: 6px 0; border-top: 1px solid #2a2a4e; list-style: none; }}
+  .ldone > summary::-webkit-details-marker {{ display: none; }}
+  .ldone > summary::before {{ content: "▸ "; }}
+  .ldone[open] > summary::before {{ content: "▾ "; }}
+  .ldone > summary:hover {{ color: #cfd8ff; }}
+  .ldone .lgrid {{ margin-top: 9px; }}
+  .ldone .lcard {{ opacity: .72; }}
   #side {{ border-left: 1px solid #2a2a4e; background: #16162b; overflow-y: auto; padding: 14px 16px; }}
   h1 {{ font-size: 13px; margin: 0 0 2px; letter-spacing: .04em; text-transform: uppercase; color: #cfd8ff; }}
   .headline {{ font-weight: 600; margin-bottom: 12px; }}
@@ -294,16 +305,19 @@ _PAGE = """<!doctype html>
      container on construction, so anything inside #graph is destroyed the
      moment the picture is drawn: the notice was in the HTML, absent from the
      DOM, and invisible for exactly that reason. */
-  #wrap > .warn {{ position: absolute; z-index: 5; left: 16px; top: 12px;
+  /* Floating over the picture while there IS one, in the flow when there is
+     not: over an empty canvas it covered the first row of cards. */
+  #gcol > .warn {{ position: absolute; z-index: 5; left: 16px; top: 12px;
     margin: 0; max-width: 720px; font-size: 12.5px; line-height: 1.45;
     box-shadow: 0 6px 24px rgba(0,0,0,.45); }}
+  #graph.gone ~ .warn {{ position: static; margin: 14px 16px 0; max-width: none;
+    box-shadow: none; }}
   #wrap {{ position: relative; }}
   code {{ background: #24243f; padding: 1px 5px; border-radius: 3px;
     font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; }}
 </style>
 <div id="wrap">
-  <div id="gcol"><div id="graph"></div>{loose_block}</div>
-  {warning}
+  <div id="gcol"><div id="graph"></div>{warning}{loose_block}</div>
   <div id="side">
     <h1>Task graph</h1>
     <div class="headline">{headline}</div>
@@ -446,7 +460,7 @@ def render(state: Any, output_path: str | Path, generated: str = "") -> TaskView
     # A hierarchical layout has nothing to say about a node with no edges: every
     # one of them lands on level 0, so they stack into a single column, and
     # fit() then shrinks that tall thin column until the labels are gone. That
-    # is exactly what the board was showing — 17 empty boxes and no way to read
+    # is exactly what the board was showing: 17 empty boxes and no way to read
     # any of them.
     #
     # So only the connected part is drawn. Tasks that join to nothing are a
@@ -456,20 +470,39 @@ def render(state: Any, output_path: str | Path, generated: str = "") -> TaskView
     loose = [tasks[n["id"]] for n in nodes if n["id"] not in joined and n["id"] in tasks]
 
     if loose:
-        cards = []
-        for t in sorted(loose, key=lambda t: (t.phase != "doing", t.phase != "ready", t.id)):
+        def card(t):
             border, fill, _ = _PHASE_STYLE.get(t.phase, _PHASE_STYLE[_task.PHASE_READY])
-            cards.append(
+            return (
                 f'<div class="lcard" style="border-left-color:{border};background:{fill}"'
                 f' title="{html.escape(_tooltip(t, []))}">'
                 f'<div class="lt">{html.escape((t.title or "").strip() or t.id)}</div>'
                 f'<div class="ls">{html.escape(_state_words(t))}</div>'
                 f'<div class="lid">{html.escape(t.id)}</div></div>'
             )
-        head = (f"On their own: {len(loose)} task(s) nothing waits on"
-                if drawn else f"{len(loose)} task(s), none connected to another")
-        loose_block = (f'<div id="loose"><div class="lhead">{head}</div>'
-                       f'<div class="lgrid">{"".join(cards)}</div></div>')
+
+        # CLOSED WORK IS HISTORY AND IT WAS THE WHOLE PICTURE. On a real project
+        # 24 of 27 cards said "done", so the three that could still be acted on
+        # were three identical-looking tiles in a wall of finished ones. Live
+        # work first, at full size; the finished ones fold away behind a count.
+        live = [t for t in loose if t.phase != _task.PHASE_CLOSED]
+        done = [t for t in loose if t.phase == _task.PHASE_CLOSED]
+        live.sort(key=lambda t: (t.phase != "doing", t.phase != "review",
+                                 t.phase != "ready", t.id))
+        done.sort(key=lambda t: t.id)
+
+        parts = []
+        if live:
+            head = (f"On their own: {len(live)} task(s) nothing waits on"
+                    if drawn else f"{len(live)} task(s) still open, none connected to another")
+            parts.append(f'<div class="lhead">{head}</div>'
+                         f'<div class="lgrid">{"".join(card(t) for t in live)}</div>')
+        if done:
+            parts.append(
+                f'<details class="ldone"><summary>{len(done)} finished'
+                + ("" if live else ", and nothing open")
+                + f'</summary><div class="lgrid">{"".join(card(t) for t in done)}</div></details>'
+            )
+        loose_block = f'<div id="loose">{"".join(parts)}</div>' 
     elif not nodes:
         loose_block = ('<div id="loose"><div class="lhead">Nothing declared yet</div>'
                        '<div class="muted">An agent adds one with '
@@ -514,13 +547,13 @@ def render(state: Any, output_path: str | Path, generated: str = "") -> TaskView
                         '<div class="note">Each of these blocks everything after it.</div>')
 
     # A picture of nodes with no edges is not a graph, it is a list drawn
-    # badly — and it invites the reader to look for connections that are not
+    # badly, and it invites the reader to look for connections that are not
     # there. Measured on the real store: 8 tasks, 0 task_edge events, ever. Say
     # so, and say what would change it, rather than presenting a column of boxes
     # as though the layout meant something.
     # Nothing is broken when no edges exist, so this is stated, not alarmed
     # about. It used to be red, over an empty canvas, next to a column of boxes
-    # nobody could read — three separate ways of implying a fault that was not
+    # nobody could read: three separate ways of implying a fault that was not
     # there.
     if not edges and nodes:
         warning = ('<div class="warn info">Nobody has said any of these tasks waits on '

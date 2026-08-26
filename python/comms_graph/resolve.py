@@ -1,12 +1,12 @@
 """Turn "roughly where my job lands" into real places in the map.
 
-A claim names a slice of the repository — a file, a line range, or a symbol. The
+A claim names a slice of the repository: a file, a line range, or a symbol. The
 map knows about symbols. This module is the join, and deliberately the only place
 that knows how to cross between the two.
 
 WHY IMPLIED SPANS RATHER THAN REAL ONES. The map records where a symbol STARTS
 (``source_location`` is ``L20``) and not where it ends. Recording the end would
-mean editing every per-language extractor — there are dozens, they are the part of
+mean editing every per-language extractor: there are dozens, they are the part of
 the fork most likely to move upstream, and we would be rebasing that change
 forever. Instead a symbol's span runs from its own start to just before the next
 symbol's start in the same file. Measured on a real 82-file corpus the median gap
@@ -19,7 +19,7 @@ extra "you might be near this" line, which costs a glance; it never wrongly stop
 work.
 
 WHY A MISS IS LOUD. A name that resolves to nothing looks exactly like a job with
-no connections — quiet, and apparently fine. In testing, a quarter of names typed
+no connections: quiet, and apparently fine. In testing, a quarter of names typed
 from memory named something that does not exist. So an empty resolution carries
 its own reason and is never an empty list a caller can mistake for "checked,
 nothing there".
@@ -75,7 +75,7 @@ def _node_line(data: dict) -> int | None:
 def _same_symbol(label: str, want: str) -> bool:
     """Does a map label name the symbol a person typed?
 
-    Case-sensitive, to agree with scope.py — but callable-blind. The map labels
+    Case-sensitive, to agree with scope.py, but callable-blind. The map labels
     functions with their call parentheses (``charge()``), while a person claiming
     one writes ``path#charge``: nobody types the brackets. Matching the raw
     strings made every ordinary function claim miss, and a miss reads as "not in
@@ -93,7 +93,7 @@ def _norm(p: str) -> str:
 
     The map stores whatever path the scan walked, which may carry a leading
     ``./``; a claim is written repo-relative. Comparing raw strings makes every
-    claim miss, which then looks like "no connections" — the exact failure this
+    claim miss, which then looks like "no connections": the exact failure this
     module exists to make loud.
     """
     s = str(p or "").replace("\\", "/")
@@ -119,7 +119,7 @@ def implied_spans(graph, source_file: str) -> list[tuple[str, dict, int, int]]:
 
     One symbol's end is the line before the next begins; the last runs to the end
     of the file. Nodes with no recorded line (file-level and rationale nodes) are
-    dropped — they have no span, and treating them as spanning the file would make
+    dropped: they have no span, and treating them as spanning the file would make
     every line-range claim match everything in it.
     """
     located = [(nid, d, ln) for nid, d, ln in file_nodes(graph, source_file) if ln is not None]
@@ -165,7 +165,7 @@ def resolve(graph, scope, root: str | Path | None = None) -> Resolution:
 
     # Read the anchor through scope.py's real shape rather than a guessed one.
     # An earlier draft looked for `scope.anchor_kind` and a bare `scope.anchor`,
-    # which this Scope does not have — every anchored claim then fell through to
+    # which this Scope does not have: every anchored claim then fell through to
     # the whole-file branch and produced a WRONG answer with no error. Ask the
     # anchor what it is.
     a = getattr(scope, "anchor", None)

@@ -3,7 +3,7 @@
 WHY THIS EXISTS. comms already knew two things separately and joined neither:
 the log knows which files a task touched, because claims carry ``--task``; the
 code map knows how files reach each other. Keeping them apart meant the task
-graph could only ever show dependencies somebody had typed in by hand — and
+graph could only ever show dependencies somebody had typed in by hand: and
 measured on a real store, nobody ever typed one: eight tasks, zero declared
 edges, in a log with thousands of events. A graph whose edges depend on
 bookkeeping nobody does is a list.
@@ -16,7 +16,7 @@ What this deliberately does NOT do is treat that as an ordering. A declared edge
 says "this comes after that", which is a judgement; a code connection says "these
 two pieces of work meet", which is a fact with no direction. Presenting the
 second as the first would put made-up sequencing on the board, and the map is
-measured at roughly a third to a half recall — silence from it is weak evidence,
+measured at roughly a third to a half recall: silence from it is weak evidence,
 so an inferred arrow would be confidently wrong a lot of the time.
 """
 
@@ -33,7 +33,7 @@ from .resolve import resolve
 from .scope import parse as parse_scope
 
 #: One hop. Two would connect almost everything to almost everything on a real
-#: codebase — the map is dense enough that a two-hop neighbourhood of a handful
+#: codebase: the map is dense enough that a two-hop neighbourhood of a handful
 #: of files covers most of a module, which says nothing anybody can act on.
 _HOPS = 1
 
@@ -59,7 +59,7 @@ def _files_of(graph, node_ids) -> set[str]:
     Counting NODES instead of files is what made the ranking useless. A hub
     module contributes one node per exported symbol, so two tasks that both
     touched `auftraege/schema.ts` scored 30 while a genuinely specific overlap of
-    two components scored 4 — and 30 sorted first. "You both touched the schema"
+    two components scored 4, and 30 sorted first. "You both touched the schema"
     is true of nearly everything on that backend and carries no information; the
     4 was the collision that actually cost somebody an afternoon.
     """
@@ -76,7 +76,7 @@ def link(graph, tasks: dict[str, Any], task_files: dict[str, list[str]], root,
     """For each task: what its files reach, and which tasks that puts it next to.
 
     Returns ``{task_id: {"touches": int, "related": [{"task", "via", "shared"}]}}``.
-    Absent map, absent answer — an empty dict rather than a guess, because "no
+    Absent map, absent answer: an empty dict rather than a guess, because "no
     connections" and "no map" are different claims and only one of them is
     evidence.
     """
@@ -108,11 +108,11 @@ def link(graph, tasks: dict[str, Any], task_files: dict[str, list[str]], root,
         for other, other_ids in own.items():
             if other == tid or not other_ids:
                 continue
-            # Their code, inside my reach — or mine inside theirs. Either way the
+            # Their code, inside my reach, or mine inside theirs. Either way the
             # two pieces of work meet, and which direction the import happens to
             # point is not a fact about who should go first.
             # Both ends of the meeting. Their files inside my reach, and mine
-            # inside theirs — the union names every place the two touch, which
+            # inside theirs: the union names every place the two touch, which
             # is what "shared places" means on the board. Taking one direction
             # only would make the count depend on which way an import happens to
             # point, and would report a different number to each of the two
@@ -131,7 +131,7 @@ def link(graph, tasks: dict[str, Any], task_files: dict[str, list[str]], root,
                 #
                 # The first version compared the two tasks' owners, which is a
                 # different question and looks right only on your own task. On a
-                # peer's brief it marked all of THEIR work "your own" — and since
+                # peer's brief it marked all of THEIR work "your own", and since
                 # the label means "skip, you already know this", it hid exactly
                 # the rows worth reading and left the caller's own two tasks
                 # unlabelled at the top as though they were the strangers. That
@@ -151,7 +151,7 @@ def files_from_log(events, string_of) -> tuple[dict[str, list[str]], dict[str, s
     """Which files each task touched, and who touched them, out of the log.
 
     Read from claim EVENTS rather than from live claims, so a file stays on the
-    task after it is released — a task that forgets its files the moment the work
+    task after it is released: a task that forgets its files the moment the work
     finishes answers "what did this touch" with "nothing".
 
     One implementation, used by both the board and `brief`. Two would drift, and

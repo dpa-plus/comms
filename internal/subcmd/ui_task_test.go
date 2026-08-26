@@ -181,7 +181,7 @@ func TestUIHTMLHasNoBackticksInTheTaskRenderer(t *testing.T) {
 func TestTopRailInvariants(t *testing.T) {
 	// An alarm chip sets a display, and any display rule outranks the hidden
 	// attribute's UA display:none. Without this reset the rail permanently reads
-	// "0 STALE 0 TO VERIFY 0 DEPENDENCY CYCLE" in red — an alarm that is always
+	// "0 STALE 0 TO VERIFY 0 DEPENDENCY CYCLE" in red: an alarm that is always
 	// on, which is the same as no alarm at all. This shipped broken once.
 	if !strings.Contains(uiHTML, "[hidden] { display: none !important; }") {
 		t.Error("the hidden reset is gone; the alarm chips will render permanently, showing zero")

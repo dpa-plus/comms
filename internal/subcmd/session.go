@@ -301,7 +301,7 @@ func appendLeaderTransfer(rt *Runtime, target, reason string) error {
 	}
 	session := rt.State.Sessions[target]
 	// Gate on the same passive heartbeat as the roster (lastSeenOf), not the
-	// one-shot hello TS — otherwise an agent that hello'd long ago but is busy
+	// one-shot hello TS: otherwise an agent that hello'd long ago but is busy
 	// claiming/finding is shown active everywhere yet rejected here as "not active".
 	if session == nil || !lastSeenOf(session).After(time.Now().Add(-activeWindow)) {
 		return fmt.Errorf("session lead: @%s is not active; run `COMMS_ACTOR=%s comms hello --label \"...\"` first", target, target)

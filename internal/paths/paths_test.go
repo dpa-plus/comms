@@ -7,12 +7,12 @@ func TestIsEphemeralPath(t *testing.T) {
 		path string
 		want bool
 	}{
-		// Throwaway temp roots — a HOME override (HOME=/tmp etc.) lands here.
+		// Throwaway temp roots: a HOME override (HOME=/tmp etc.) lands here.
 		{"/tmp/Library/Application Support/comms/abc123", true},
 		{"/private/tmp/Library/Application Support/comms/abc123", true},
 		{"/var/folders/xy/zz/T/Library/Application Support/comms/abc123", true},
 		{"/private/var/folders/xy/zz/T/.local/share/comms/abc123", true},
-		// Real per-user stores — must NOT warn.
+		// Real per-user stores: must NOT warn.
 		{"/Users/you/Library/Application Support/comms/abc123", false},
 		{"/home/you/.local/share/comms/abc123", false},
 		// Prefix look-alikes must not match the temp roots.

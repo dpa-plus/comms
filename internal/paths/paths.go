@@ -28,7 +28,7 @@ type Paths struct {
 	LogDir   string // ~/Library/Application Support/comms/<hash>/
 	Log      string // <logdir>/log.jsonl
 	Lock     string // <logdir>/.lock
-	RepoPath string // <logdir>/repo-path.txt — collision canary for repo hash reuse
+	RepoPath string // <logdir>/repo-path.txt: collision canary for repo hash reuse
 }
 
 // For computes all paths for the given repo root + hash.
@@ -60,7 +60,7 @@ func For(repoRoot, repoHash string) (Paths, error) {
 
 // EphemeralStore reports whether the per-machine store resolved under a
 // throwaway temp dir. That almost always means $HOME was overridden (e.g.
-// HOME=/tmp) — comms keys its store off $HOME, so the events get written to a
+// HOME=/tmp): comms keys its store off $HOME, so the events get written to a
 // private log that a normally-launched `comms ui` and other agents never see.
 // Callers should warn loudly when this is true.
 func (p Paths) EphemeralStore() bool { return isEphemeralPath(p.LogDir) }

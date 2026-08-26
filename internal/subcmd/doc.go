@@ -150,7 +150,7 @@ func runDocEdit(slug string) error {
 		Fatalf(2, "doc: %v", err)
 	}
 
-	// Sidecar lock — try non-blocking so we can report the existing holder.
+	// Sidecar lock: try non-blocking so we can report the existing holder.
 	sidecarPath := rt.Paths.DocLockPath(slug)
 	sidecar, err := lock.TryAcquire(sidecarPath)
 	if err != nil {
@@ -165,7 +165,7 @@ func runDocEdit(slug string) error {
 	stampSidecar(sidecarPath, rt.Actor)
 	defer func() { _ = sidecar.Close() }()
 
-	// Release the main flock BEFORE invoking the editor — opening $EDITOR is
+	// Release the main flock BEFORE invoking the editor: opening $EDITOR is
 	// arbitrary-duration user interaction; we don't want to hold the per-repo
 	// flock that whole time.
 	_ = rt.Close()
@@ -259,7 +259,7 @@ func newEditorCommand(path string) (*exec.Cmd, error) {
 // and double quotes so a binary path with spaces survives intact, for example
 // `"/Applications/Visual Studio Code.app/.../code" --wait`. Whitespace outside
 // quotes separates tokens; quotes are removed from the resulting words. It is a
-// small hand-rolled state machine — no shell is invoked.
+// small hand-rolled state machine: no shell is invoked.
 func splitEditorSpec(spec string) ([]string, error) {
 	var (
 		tokens []string

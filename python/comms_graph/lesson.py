@@ -1,9 +1,9 @@
-"""``comms-graph lesson`` — the knowledge that outlives one repository.
+"""``comms-graph lesson``: the knowledge that outlives one repository.
 
 A claim, a task, a finding: all of those are about ONE checkout and live in
-that checkout's log. A lesson is the opposite kind of fact — "check the API
+that checkout's log. A lesson is the opposite kind of fact: "check the API
 response before blaming the UI" is true in every project an agent will ever
-touch — so lessons are stored once per user, under the global comms data dir,
+touch, so lessons are stored once per user, under the global comms data dir,
 and are readable from a directory that is not a repository at all. Nothing here
 opens a repo log or takes the repo lock, because a lesson has nothing to do
 with a repo. That is the whole design and it is the one thing not to "fix".
@@ -18,7 +18,7 @@ WRITTEN RARELY, READ WHENEVER. In six months on this machine, zero lessons have
 been written. So the read path is built for the empty shelf: `--list` with no
 lessons prints "(no global lessons yet)" and exits 0, because a fresh install
 reporting an error would teach every agent that the verb is broken. Adding a
-lesson is deliberately a human-in-the-loop act — it opens $EDITOR and stops.
+lesson is deliberately a human-in-the-loop act: it opens $EDITOR and stops.
 """
 
 from __future__ import annotations
@@ -52,7 +52,7 @@ USAGE = """Usage: comms-graph lesson [--list | <slug> [--edit]]
 #: Copied from the Go build's slug rule, NOT this package's ``_SLUG_RE``. Task
 #: ids are 32 chars of ``[a-z0-9-]``; lesson slugs allow dots and underscores up
 #: to 81 chars. Tightening it here would refuse to open lessons the Go build
-#: writes into the very same directory — the file would be listed and then be
+#: writes into the very same directory: the file would be listed and then be
 #: unreadable, which is worse than either build alone.
 #:
 #: It is also the path guard: the slug becomes a filename, and anchored
@@ -73,7 +73,7 @@ def _parse(argv: list[str]) -> tuple[list[str], dict[str, object]]:
 
     Not ``cli._parse_flags``: that one treats the next non-``--`` word as a
     flag's value, so ``lesson --edit my-slug`` parsed as ``edit="my-slug"`` with
-    zero positionals — the slug vanished and the command answered "provide
+    zero positionals: the slug vanished and the command answered "provide
     --list or a slug" for a line that named one. Flag order is not something a
     user should have to get right.
     """
@@ -181,7 +181,7 @@ def _print(directory: Path, slug: str) -> int:
         # one bad byte should not withhold the other forty lines.
         body = path.read_text(encoding="utf-8", errors="replace")
     except FileNotFoundError:
-        # Exit 1, not 2 — "there is no such lesson" is an answer, and a caller
+        # Exit 1, not 2: "there is no such lesson" is an answer, and a caller
         # that retries on failure must not retry this.
         _err(f"error: lesson: no lesson {slug!r} in {directory}")
         _err("  `lesson --list` shows what exists; `lesson "
@@ -231,7 +231,7 @@ def _edit(directory: Path, slug: str, flags: dict) -> int:
         argv = _editor_argv(path)
     except ValueError as exc:
         # Before the stub, deliberately. Checking afterwards left an empty
-        # lesson behind every time $EDITOR was unset — the slug then shows up
+        # lesson behind every time $EDITOR was unset: the slug then shows up
         # in `--list` as real, curated knowledge that nobody ever wrote.
         _err(f"error: lesson: {exc}")
         return EXIT_ERROR
@@ -328,7 +328,7 @@ def _holder(sidecar: Path) -> str:
 
 
 def _editor_argv(path: Path) -> list[str]:
-    """$VISUAL, then $EDITOR, then vi — as an argv, never as a shell string."""
+    """$VISUAL, then $EDITOR, then vi: as an argv, never as a shell string."""
     spec = ""
     for name in ("VISUAL", "EDITOR"):
         spec = os.environ.get(name, "").strip()
@@ -353,7 +353,7 @@ def _editor_argv(path: Path) -> list[str]:
 def _split_editor_spec(spec: str) -> list[str]:
     """Split an editor spec into words, honouring quotes. No shell is invoked.
 
-    $EDITOR routinely carries arguments — ``code --wait``, ``subl -w`` — and the
+    $EDITOR routinely carries arguments: ``code --wait``, ``subl -w``, and the
     binary path may contain spaces (``"/Applications/Visual Studio Code.app/…"``).
     Passing the string to a shell instead would make an editor setting into an
     execution path for whatever else is in it; splitting on whitespace alone

@@ -1,4 +1,4 @@
-"""``hello``, ``version`` and ``help`` — the three verbs that answer, not act.
+"""``hello``, ``version`` and ``help``: the three verbs that answer, not act.
 
 Ported from the Go comms (``internal/subcmd/hello.go``, ``version.go``). They
 live in one module because none of them is big enough to be its own file and
@@ -7,7 +7,7 @@ am I, what am I running, what can I type.
 
 ``hello`` is the one with a side effect, and the side effect is the point. The
 pre-edit hook that enforces claims is a separate process with no ``COMMS_ACTOR``
-of its own — it learns who is asking by looking the host agent's session id up
+of its own: it learns who is asking by looking the host agent's session id up
 against the ``hello`` events in the log. A session with no hello on record is a
 session the hook cannot recognise, so its own claims come back as somebody
 else's and it gets blocked from editing the file it just claimed.
@@ -17,7 +17,7 @@ This build already mints a hello implicitly on an actor's first action (see
 just starts claiming. What the explicit verb adds is the two cases the implicit
 one cannot cover: saying hello BEFORE doing anything (so a human can check the
 actor name is right while it is still cheap to fix), and changing the display
-label of an actor that already said hello — which the implicit path skips
+label of an actor that already said hello, which the implicit path skips
 precisely because it only fires when the pairing is unknown.
 
 THE PAYLOAD IS THE SAME PAYLOAD. Both paths write the same keys with the same
@@ -65,7 +65,7 @@ def _reject_control_text(what: str, value: str, limit: int) -> str | None:
 
     Every value this guards is printed raw into human output, so a newline in a
     label writes a second line that looks like ours and an ESC repaints the
-    terminal — a display name is exactly where an agent would hide "@someone
+    terminal: a display name is exactly where an agent would hide "@someone
     else holds nothing". Unicode category Cc is the whole control range at once:
     C0 including newline and ESC, DEL, and C1 (U+0080-U+009F), which is the half
     that gets forgotten when this is written as a `< 0x20` test.
@@ -99,7 +99,7 @@ def _identity_data(label: str, model: str, vendor: str) -> dict:
 
     Absent, not guessed, is the rule for every optional value here.
     ``independence_of`` reports "unknown" for a missing vendor, and that is the
-    honest answer — inferring anthropic from a name that starts with "claude"
+    honest answer: inferring anthropic from a name that starts with "claude"
     would manufacture the evidence that a verification was independent.
     """
     data: dict = {}
@@ -133,7 +133,7 @@ def cmd_hello(argv: list[str]) -> int:
     # exporting anything. Go implements that by setting the env var; this does
     # not, because the CLI is importable and a verb that mutates the process
     # environment would silently rename the actor of every later call in the
-    # same process — the server and the test suite both make several.
+    # same process: the server and the test suite both make several.
     # An empty name is no name: it falls through to --as / $COMMS_ACTOR, and to
     # the refusal there, rather than registering an actor called "".
     named = positional[0].strip() if positional else ""
@@ -143,7 +143,7 @@ def cmd_hello(argv: list[str]) -> int:
     model = (flags.get("model") or os.environ.get("COMMS_MODEL", "")).strip()
     # Lowercased so `Anthropic` and `anthropic` are one vendor. independence_of
     # compares these strings, and two spellings of one vendor would read as two
-    # different vendors — i.e. as independent verification that is not.
+    # different vendors: i.e. as independent verification that is not.
     vendor = (flags.get("vendor") or os.environ.get("COMMS_VENDOR", "")).strip().lower()
     for what, value, limit in (
         ("--label", label, _MAX_LABEL_CHARS),
@@ -167,7 +167,7 @@ def cmd_hello(argv: list[str]) -> int:
         # Counted as a SET of actor names that includes this one, not as a
         # number of hello events: an agent that says hello twice is still one
         # session, and the state is read before this hello lands, so counting
-        # rows would have reported "1 claude session" to the second claude —
+        # rows would have reported "1 claude session" to the second claude:
         # the exact collision this line exists to warn about.
         family = {name for name in st.sessions if _base_name(name) == base}
         family.add(actor)
@@ -262,7 +262,7 @@ _VERBS = {"hello": cmd_hello, "version": cmd_version, "help": cmd_help}
 def main(argv: list[str]) -> int:
     """Dispatch one of ``hello`` / ``version`` / ``help``.
 
-    ``argv[0]`` is the verb — this module holds three of them, so unlike a
+    ``argv[0]`` is the verb: this module holds three of them, so unlike a
     single-verb module it has to be told which one was typed. A caller that has
     already dispatched can skip this and call ``cmd_hello`` and friends directly.
     """
@@ -272,7 +272,7 @@ def main(argv: list[str]) -> int:
         _cli._err(f"error: unknown comms command {verb!r}")
         _cli._err(_cli.USAGE)
         return _cli.EXIT_USAGE
-    # Asking how a verb works must never have a side effect — `hello --help`
+    # Asking how a verb works must never have a side effect: `hello --help`
     # printing usage instead of writing an identity record is the whole point.
     if any(a in ("-h", "--help", "-?") for a in argv[1:]):
         print(_cli.USAGE)
@@ -290,7 +290,7 @@ if __name__ == "__main__":  # pragma: no cover - parity with the other modules
 
 #: Every verb, and the sub-verbs worth completing. Kept here rather than parsed
 #: out of the usage text, because a completion that silently drifts from the
-#: real command list is worse than none — it teaches a verb that does not exist.
+#: real command list is worse than none: it teaches a verb that does not exist.
 _COMPLETION_VERBS = [
     "claim", "release", "board", "check", "task", "plan", "next", "brief",
     "tasks", "ui", "find", "note", "doc", "lesson", "session", "status",

@@ -1,4 +1,4 @@
-"""Claim scopes and overlap arithmetic — ported from comms/internal/overlap.
+"""Claim scopes and overlap arithmetic: ported from comms/internal/overlap.
 
 Grammar::
 
@@ -53,7 +53,7 @@ class ScopeError(ValueError):
 
 # Matches the line-range anchor shape and nothing else. Anchors that merely
 # start with 'L' and contain '-' ("List-impl", "Loader-2", "L-value") must NOT
-# be read as ranges — they are legitimate symbol names and fall through to the
+# be read as ranges: they are legitimate symbol names and fall through to the
 # symbol branch. [0-9] rather than \d on purpose: \d in Python also matches
 # non-ASCII digits (٣, ３), and int() would happily parse them.
 _LINE_RANGE_RE = re.compile(r"L([0-9]+)-([0-9]+)")
@@ -63,7 +63,7 @@ _LINE_RANGE_RE = re.compile(r"L([0-9]+)-([0-9]+)")
 # NOT str.strip(): Python additionally treats U+001C-U+001F (the C0 file,
 # group, record and unit separators) as whitespace. str.strip() therefore
 # trimmed those bytes off the symbol, the symbol then passed the
-# control-character check below, and the control byte survived in Scope.raw —
+# control-character check below, and the control byte survived in Scope.raw:
 # which is echoed back to a terminal in conflict messages. Trimming exactly
 # Go's set leaves the control byte on the symbol, where the check rejects it
 # and nothing reaches the log. Do not simplify this back to str.strip().
@@ -89,7 +89,7 @@ _MAX_LINE = (1 << 63) - 1
 class AnchorKind(Enum):
     """The three legal anchor shapes (plus whole-file)."""
 
-    WHOLE = "whole"  # no `#` anchor — claims the entire file
+    WHOLE = "whole"  # no `#` anchor: claims the entire file
     LINE = "line"  # L<n>-<m>
     SYMBOL = "symbol"  # symbol-name (opaque string)
 
@@ -133,7 +133,7 @@ class Scope:
         # missing in Go), and a path whose normalized form ends in `\` then
         # swallowed the anchor separator on re-parse: "src/lib\" + "#Handler"
         # came back as a WHOLE-file claim on the nonexistent "src/lib#Handler"
-        # — two agents could hold the same symbol with no conflict reported —
+        # (two agents could hold the same symbol with no conflict reported)
         # and "a\" + "#" came back as a ScopeError, which state.py catches
         # broadly, silently dropping a claim whose event lives in the log
         # forever. Do not drop this replace: the round-trip contract in the
@@ -177,8 +177,8 @@ def _split_on_unescaped_hash(raw: str) -> tuple[str, str, bool]:
     ``\\#`` -> ``#`` and ``\\\\`` -> ``\\``. Together they make the encoding
     invertible, which is what the round-trip contract needs.
 
-    A backslash before anything else — including at the very end of the
-    string — is an ordinary filename byte, not a broken escape. That
+    A backslash before anything else: including at the very end of the
+    string: is an ordinary filename byte, not a broken escape. That
     leniency is deliberate: on POSIX a backslash is a legal character in a
     name, and the append-only log already holds entries written before the
     backslash was escaped at all. Rejecting them would make old logs
@@ -208,9 +208,9 @@ def _split_on_unescaped_hash(raw: str) -> tuple[str, str, bool]:
 def _is_control(ch: str) -> bool:
     """C0 control, DEL, or C1 control.
 
-    These code points can carry terminal-escape sequences — notably C1 CSI
+    These code points can carry terminal-escape sequences: notably C1 CSI
     (U+009B), which many terminals interpret exactly like the two-byte ESC[
-    introducer — so no scope containing one may ever reach the log, which
+    introducer, so no scope containing one may ever reach the log, which
     later gets printed back to a terminal.
 
     Checked per code point, not per byte, so that ordinary printable Unicode
@@ -225,7 +225,7 @@ def _reject_unencodable(s: str, what: str) -> None:
     """Reject lone surrogates.
 
     Go checks utf8.ValidString on symbols; Python strings are already valid
-    Unicode except for surrogates smuggled in by surrogateescape decoding —
+    Unicode except for surrogates smuggled in by surrogateescape decoding:
     which is exactly how sys.argv arrives on macOS when a filename holds an
     undecodable byte. Such a string cannot be UTF-8 encoded, so it would blow
     up at json.dump time, i.e. while appending to the log. Fail here instead,
@@ -256,7 +256,7 @@ def normalize_path(raw: str) -> str:
 
     # posixpath, not os.path: repo paths are POSIX on every platform because
     # that is how git reports them. Note we do NOT translate backslashes to
-    # slashes — on POSIX a backslash is an ordinary filename byte, and Go's
+    # slashes: on POSIX a backslash is an ordinary filename byte, and Go's
     # filepath.ToSlash is likewise a no-op there, so translating would be a
     # divergence, not a port.
     cleaned = posixpath.normpath(raw)
@@ -275,16 +275,16 @@ def _parse_anchor(s: str) -> Anchor:
     # Trim BEFORE the shape test, not only on the symbol branch below.
     # Trimming late made the canonical form non-injective: "L1-1 " missed the
     # range shape, became a SYMBOL named "L1-1", and __str__ wrote it as
-    # "…#L1-1" — which parses back as a LINE range. A symbol claim replayed
+    # "…#L1-1", which parses back as a LINE range. A symbol claim replayed
     # from the log as a line claim. Both spellings must land on the same
     # anchor, so the whitespace goes first.
     #
-    # Go's cutset, not str.strip() — see _GO_SPACE.
+    # Go's cutset, not str.strip(): see _GO_SPACE.
     s = s.strip(_GO_SPACE)
 
     # fullmatch, not match: the pattern has no anchors, so re.match would
     # accept "L1-10junk" as a range on the strength of its prefix. (`$` would
-    # not do either — it also matches before a trailing newline.)
+    # not do either: it also matches before a trailing newline.)
     m = _LINE_RANGE_RE.fullmatch(s)
     if m is not None:
         # Once a string DOES have the range shape we validate the numbers, so
@@ -355,7 +355,7 @@ def paths_overlap(a: str, b: str) -> bool:
     Supporting full glob syntax buys nothing: claims are written by hand.
 
     A pattern whose final segment is a plain literal is ALSO tried as
-    ``pattern/**`` — see _may_name_a_directory for why.
+    ``pattern/**``: see _may_name_a_directory for why.
 
     KNOWN HOLE, accepted deliberately. Directory promotion is withheld from a
     final segment containing ``*``, so::
@@ -366,8 +366,8 @@ def paths_overlap(a: str, b: str) -> bool:
     A claim on ``src/*`` therefore does NOT conflict with a claim on
     ``src/foo/bar.ts``, even though ``src/*`` may well have been meant to
     cover the directory ``src/foo`` and everything under it. This is a real
-    missed conflict, not an oversight: the alternative — promoting starred
-    segments too — makes ``src/*`` and ``src/**`` synonyms and destroys the
+    missed conflict, not an oversight: the alternative: promoting starred
+    segments too: makes ``src/*`` and ``src/**`` synonyms and destroys the
     only way to claim just the files directly inside ``src``. A user who
     wants the recursive meaning has a spelling for it (``src/**``); a user
     who wants the shallow meaning would have none. Write ``src/**`` when you
@@ -388,8 +388,8 @@ def pattern_matches_path(pattern: str, path: str) -> bool:
     """Does a claim pattern cover one concrete repository path?
 
     Only ``pattern`` is interpreted; stars in ``path`` are ordinary filename
-    bytes. Use this for paths that came from git or the filesystem — where a
-    literal ``*`` in a filename is legal and must not be read as a wildcard —
+    bytes. Use this for paths that came from git or the filesystem: where a
+    literal ``*`` in a filename is legal and must not be read as a wildcard:
     and paths_overlap for claim-against-claim.
     """
     pat = _split(pattern)
@@ -423,7 +423,7 @@ def _may_name_a_directory(segs: Sequence[str]) -> bool:
     what keeps ``src/*`` and ``src/**`` distinguishable: a user who writes
     ``src/*`` chose the non-recursive wildcard deliberately, and promoting it
     would erase the only way to say "just the files directly in src". A final
-    LITERAL segment has no such alternative spelling — "src/lib" cannot mean
+    LITERAL segment has no such alternative spelling: "src/lib" cannot mean
     anything but that file or that directory. The missed conflict this leaves
     behind is spelled out in paths_overlap under KNOWN HOLE.
     """
@@ -438,7 +438,7 @@ def _segments_overlap(a: Sequence[str], b: Sequence[str]) -> bool:
     so every cell only reads cells with a larger i or j.
 
     This is deliberately the same recurrence as _globs_can_intersect one level
-    down — segments here, characters there, ``**`` here, ``*`` there. The Go
+    down: segments here, characters there, ``**`` here, ``*`` there. The Go
     original recurses instead, which re-derives the same subproblem
     exponentially often for patterns like "**/**/**/x"; the table costs
     O(len(a) * len(b)) once.
@@ -481,7 +481,7 @@ def _globs_can_intersect(a: str, b: str) -> bool:
     """Is some concrete string matched by BOTH single-segment patterns?
 
     An intersection-emptiness test, NOT a "does a match b" test. Comparing
-    only the leading and trailing literal anchors — the obvious shortcut —
+    only the leading and trailing literal anchors: the obvious shortcut:
     produces false positives whenever interior literals impose required
     characters or a minimum length: "a*a" vs "a" (no room for the trailing
     'a'), or "a*b*c" vs "axc" (the 'b' is mandatory but absent).
@@ -493,8 +493,8 @@ def _globs_can_intersect(a: str, b: str) -> bool:
       - both literal: they must be equal; advance both.
 
     Go compares bytes; we compare code points. The verdict is identical for
-    valid UTF-8 — equal literals are equal either way, and a star that spans a
-    multi-byte rune must span all of it to reach an accept state — and code
+    valid UTF-8: equal literals are equal either way, and a star that spans a
+    multi-byte rune must span all of it to reach an accept state, and code
     points keep us out of encode/decode territory entirely.
     """
     la, lb = len(a), len(b)

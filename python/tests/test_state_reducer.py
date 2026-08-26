@@ -2,12 +2,12 @@
 
 Two properties carry everything else, and both are about failure:
 
-  TOTAL — `fold` runs on the pre-edit hot path, in front of every agent write.
+  TOTAL: `fold` runs on the pre-edit hot path, in front of every agent write.
   If it can raise, one bad line in an append-only log stops every agent in the
   repository from editing anything, permanently. So garbage is dropped, never
   thrown.
 
-  PURE and ORDER-INDEPENDENT — the same events must fold to the same world
+  PURE and ORDER-INDEPENDENT: the same events must fold to the same world
   whatever order they arrive in, because logs get concatenated, replayed and
   read while other processes append to them.
 
@@ -94,7 +94,7 @@ def test_a_scope_array_with_a_number_in_it_does_not_become_a_live_claim():
     """IF THIS FAILS: corruption materialises as authority. A line whose scope is
     `[123, "src/api/server.ts"]` was written by nothing we know, yet salvaging
     the string half hands out an ACTIVE claim on src/api/server.ts that blocks
-    every other agent on ground no writer ever claimed — and no release exists
+    every other agent on ground no writer ever claimed, and no release exists
     that can free it."""
     state = fold([{"ts": at(0), "id": "X", "actor": "a", "type": "claim",
                    "scope": [123, "src/api/server.ts"]}])
@@ -103,7 +103,7 @@ def test_a_scope_array_with_a_number_in_it_does_not_become_a_live_claim():
 
 def test_an_event_that_was_dropped_does_not_prove_its_author_is_alive():
     """IF THIS FAILS: a corrupt line refreshes an actor's heartbeat, so a dead
-    agent looks recently active — which is exactly what suppresses a legitimate
+    agent looks recently active, which is exactly what suppresses a legitimate
     steal of the ground it is still holding. Liveness must come only from events
     we actually understood."""
     events = [
@@ -115,7 +115,7 @@ def test_an_event_that_was_dropped_does_not_prove_its_author_is_alive():
 
 
 def test_a_claim_whose_scope_will_not_parse_is_dropped_whole():
-    """IF THIS FAILS: a claim is half-applied — it exists in the board with no
+    """IF THIS FAILS: a claim is half-applied: it exists in the board with no
     usable territory, so it can never be matched by a conflict check and never
     be found by the release that was meant to close it."""
     assert fold([claim("X", "/etc/passwd")]).claims == {}
@@ -155,7 +155,7 @@ def test_the_same_events_in_any_order_give_the_same_world():
 def test_folding_does_not_consume_or_edit_the_caller_s_events():
     """IF THIS FAILS: the caller's copy of the log is mutated underneath it, so
     the second fold in one command (check, then re-check after appending) sees a
-    different world than the first — and any caller that passes a generator gets
+    different world than the first, and any caller that passes a generator gets
     an empty board on its second use."""
     events = [claim("C1", "src/a.ts", secs=1), release("R1", ["C1"], secs=2)]
     snapshot = [dict(e) for e in events]
@@ -178,8 +178,8 @@ def test_a_release_frees_its_claim():
 
 
 def test_a_release_still_frees_its_claim_when_the_clock_stepped_backwards():
-    """IF THIS FAILS: an NTP correction between two commands — or two machines
-    a second apart — seats the release before the claim it closes. The claim then
+    """IF THIS FAILS: an NTP correction between two commands, or two machines
+    a second apart: seats the release before the claim it closes. The claim then
     folds afterwards and stays ACTIVE FOREVER, blocking every other agent on a
     scope the log plainly says was released, with no command that can free it."""
     state = fold([
@@ -203,8 +203,8 @@ def test_a_steal_leaves_exactly_one_holder():
 
 
 def test_the_string_false_does_not_end_the_session():
-    """IF THIS FAILS: a badly-encoded field — `"comms_session_end": "false"`,
-    which any JSON-by-string-formatting writer can produce — wipes every active
+    """IF THIS FAILS: a badly-encoded field: `"comms_session_end": "false"`,
+    which any JSON-by-string-formatting writer can produce: wipes every active
     claim and every session in the repository. Truthiness is not a protocol."""
     state = fold([
         claim("C1", "src/a.ts", secs=1),
@@ -215,7 +215,7 @@ def test_the_string_false_does_not_end_the_session():
 
 def test_ending_a_session_hands_every_piece_of_ground_back():
     """IF THIS FAILS: the next session starts blocked by claims belonging to
-    agents that no longer exist — and nobody has the claim ids to release them,
+    agents that no longer exist, and nobody has the claim ids to release them,
     so the repository stays locked until somebody deletes the store by hand.
     What was FOUND has to survive the same wipe: findings are the durable output
     of a session, while claims are only its scaffolding."""
@@ -236,8 +236,8 @@ def test_ending_a_session_hands_every_piece_of_ground_back():
 
 
 def test_housekeeping_releases_stay_out_of_the_finished_work_feed():
-    """IF THIS FAILS: "recently completed" fills up with session admin — retires,
-    leader transfers, session ends — and the one thing an agent reads to find out
+    """IF THIS FAILS: "recently completed" fills up with session admin: retires,
+    leader transfers, session ends, and the one thing an agent reads to find out
     what its colleagues actually finished becomes noise."""
     state = fold([
         claim("C1", "src/a.ts", secs=1),
@@ -248,7 +248,7 @@ def test_housekeeping_releases_stay_out_of_the_finished_work_feed():
 
 
 def test_a_refusal_is_recorded_so_the_tool_can_prove_it_did_something():
-    """IF THIS FAILS: a prevented collision leaves no trace — which is how a real
+    """IF THIS FAILS: a prevented collision leaves no trace, which is how a real
     store of thousands of claims could honestly report that it had never stopped
     anything, and how the whole feature looks like pure overhead to whoever pays
     for it."""
@@ -287,7 +287,7 @@ def test_you_are_never_blocked_by_your_own_claim():
 
 def test_everybody_else_s_overlap_is_reported_even_when_it_is_not_identical():
     """IF THIS FAILS: only exact string matches are caught, so the glob claim
-    (`src/api/**`) and the file claim under it are declared independent — the
+    (`src/api/**`) and the file claim under it are declared independent: the
     coarse claim that was meant to protect an area protects nothing."""
     hits = board().conflicts_for(parse_scope("src/api/server.ts#charge"), "dave")
     assert {c.actor for c in hits} == {"alice", "carol"}
@@ -301,7 +301,7 @@ def test_unrelated_ground_is_not_a_conflict():
 
 def test_the_oldest_holder_is_named_first():
     """IF THIS FAILS: the refusal points at whoever happens to come out of a hash
-    map first instead of at the person who has been holding the ground longest —
+    map first instead of at the person who has been holding the ground longest:
     which is the person you actually have to go and talk to."""
     hits = board().conflicts_for(parse_scope("src/api/server.ts"), "dave")
     assert [c.actor for c in hits] == ["alice", "carol"]
@@ -327,7 +327,7 @@ def test_your_own_claims_come_back_oldest_first():
 
 def test_an_ambiguous_claim_id_prefix_is_refused_rather_than_guessed():
     """IF THIS FAILS: an agent typing a short claim id releases or steals a
-    DIFFERENT claim than the one it meant — silently, because both ids start the
+    DIFFERENT claim than the one it meant: silently, because both ids start the
     same way. Refusing costs one retry with more characters."""
     state = fold([
         claim("01ABCDEF", "src/a.ts", secs=1),
@@ -343,7 +343,7 @@ def test_a_steal_folded_before_the_claim_it_displaces_does_not_resurrect_it():
     the pre-edit hook lets both edit.
 
     A steal and the claim it displaces are two events, and fold sorts by
-    timestamp — so a clock step between two machines (or two processes) can put
+    timestamp, so a clock step between two machines (or two processes) can put
     the steal FIRST. It then pops nothing, because the claim it is displacing
     has not folded yet. The record that should have suppressed that claim on
     arrival must therefore survive, which is why displaced ids are remembered
@@ -367,7 +367,7 @@ def test_a_steal_folded_before_the_claim_it_displaces_does_not_resurrect_it():
 
     st = cstate.fold([alice, steal])
     holders = sorted(c.actor for c in st.claims.values())
-    assert holders == ["bob"], f"one file, one holder — got {holders}"
+    assert holders == ["bob"], f"one file, one holder: got {holders}"
 
 
 def test_a_steal_in_the_ordinary_order_still_displaces():
@@ -395,7 +395,7 @@ def test_folding_many_named_session_ends_stays_linear():
     front of every agent tool call.
 
     Measured before the fix: 8,000 named session ends over 8,000 claims took
-    8 seconds. The cost was not the obvious loop — a profile put 3.2s of 4.7s in
+    8 seconds. The cost was not the obvious loop: a profile put 3.2s of 4.7s in
     a single sorted() that ran on EVERY end over every actor ever seen, and was
     then discarded for named ends. Guessing at the hot spot fixed nothing twice;
     the profiler found it in one pass.
@@ -430,7 +430,7 @@ def test_folding_many_named_session_ends_stays_linear():
     # Correctness first: every named session really did close.
     assert st.claims == {}
     assert st.sessions == {}
-    # Then the budget. Generous — this is about catching a return to quadratic,
+    # Then the budget. Generous: this is about catching a return to quadratic,
     # not about pinning a number to one machine. Quadratic put 3,000 at ~0.7s
     # and 8,000 at 8s; linear puts 3,000 well under a tenth of that.
     assert elapsed < 2.0, f"folding {n} session ends took {elapsed:.2f}s"
