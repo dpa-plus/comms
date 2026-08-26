@@ -1280,7 +1280,22 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 .afiles.loose .afrow { justify-content: flex-start; gap: var(--sp-2); }
 .afiles.loose .how { color: var(--ink-4); font-size: 11.5px; }
 .afiles.loose .how.amber { color: var(--amber); }
-.afiles.loose .who { color: var(--ink-4); font-size: 11px; }
+.afiles.loose .who { color: var(--ink-4); font-size: 11px; margin-left: auto; }
+/* Aligned, not scattered. The paths were ragged across the full width with the
+   state column floating wherever each name happened to end. */
+.afiles.loose .afrow { display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: var(--sp-2); align-items: baseline; }
+.afiles.loose .afrow .how { justify-self: end; }
+.afiles.loose .afrow .who { grid-column: 2; justify-self: end; }
+/* Its own column order: the count is a label on the left and the sample of
+   paths fills the rest. Inheriting .afrow's grid put the label in the flexible
+   column and the paths in the rigid one, so "8 new paths not in git yet"
+   wrapped to one word per line. */
+.afiles.loose .afrow.freshrow { grid-template-columns: auto minmax(0, 1fr);
+  color: var(--ink-4); }
+.afiles.loose .afrow.freshrow .how { justify-self: start; white-space: nowrap; }
+.freshlist { color: var(--ink-4); font-size: 11px; opacity: .8;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .guardwarn { padding: var(--sp-h) var(--sp-2); border-top: 1px solid var(--line);
   color: var(--amber); font-size: 11.5px; }
 .guardwarn .mono { color: var(--ink-4); }
@@ -1638,20 +1653,38 @@ function renderNow() {
   // nor "claimed by nobody", so it fell out of the board entirely.
   var loose = (dirt.files || []).filter(function (f) { return f.basis !== "held"; });
   if (loose.length) {
+    // EDITS TO TRACKED FILES ARE THE SIGNAL. Untracked paths are usually build
+    // output (graphify-out/, output/, a tool's cache directory) and git reports
+    // a whole untracked directory as one entry, so they are not edits anybody
+    // made to code. Six of them buried the single row that mattered: a
+    // translation file changed, and released by the agent that had it.
+    var edited = loose.filter(function (f) { return f.how.indexOf("new, not in git") !== 0; });
+    var fresh  = loose.filter(function (f) { return f.how.indexOf("new, not in git") === 0; });
+
     h += '<div class="nowband-hd loosehd"><span>Changed on disk, nobody holding it</span>' +
          '<span class="count">' + loose.length + " of " + dirt.total + "</span></div>";
     h += '<div class="afiles loose">';
-    loose.slice(0, 25).forEach(function (f) {
+    edited.slice(0, 25).forEach(function (f) {
       h += '<div class="afrow">' +
            '<span class="mono afpath">' + esc(shortPath(f.path)) + "</span>" +
            '<span class="how' + (f.deleted ? " amber" : "") + '">' + esc(f.how) + "</span>" +
-           '<span class="grow"></span>' +
-           '<span class="who mono">' +
-           (f.actor ? "@" + esc(f.actor) + " let go of it" : "claimed by nobody") +
-           "</span></div>";
+           // Only when the log HAS something to say. Repeating "claimed by
+           // nobody" on every row restated the heading six times and left no
+           // room for the one row that named an actor.
+           (f.actor ? '<span class="who mono">@' + esc(f.actor) + " let go of it</span>" : "") +
+           "</div>";
     });
-    if (loose.length > 25) {
-      h += '<div class="pmore">and ' + (loose.length - 25) + " more</div>";
+    if (edited.length > 25) {
+      h += '<div class="pmore">and ' + (edited.length - 25) + " more</div>";
+    }
+    if (fresh.length) {
+      h += '<div class="afrow freshrow" title="' +
+           esc(fresh.map(function (f) { return f.path; }).join(String.fromCharCode(10))) + '">' +
+           '<span class="how">' + fresh.length +
+           (fresh.length === 1 ? " new path" : " new paths") + " not in git yet</span>" +
+           '<span class="mono freshlist">' +
+           esc(fresh.slice(0, 4).map(function (f) { return shortPath(f.path); }).join("  ")) +
+           (fresh.length > 4 ? "  +" + (fresh.length - 4) : "") + "</span></div>";
     }
     h += "</div>";
   }
