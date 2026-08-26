@@ -37,6 +37,7 @@ from . import lock as _lock
 from . import log as _log
 from . import state as _state
 from . import task as _task
+from . import taskcode as _taskcode
 
 #: How often the watcher stats the log. The log is appended under a lock and a
 #: human reading a board does not need sub-second latency, so this is chosen to
@@ -80,7 +81,7 @@ def _is_throwaway(root: str) -> bool:
     return any(root.startswith(prefix) for prefix in _THROWAWAY_ROOTS)
 
 
-def _snapshot(root: Path, log_file: Path) -> dict:
+def _snapshot(root: Path, log_file: Path, graph_path: Path | None = None) -> dict:
     """Everything the board shows, as plain JSON.
 
     Never raises: a board that goes blank because one field could not be read is
@@ -220,6 +221,36 @@ def _snapshot(root: Path, log_file: Path) -> dict:
                 for f in (getattr(t, "findings", []) or [])
             ],
         })
+
+    # THE JOIN. The log knows which files a task touched; the map knows how files
+    # reach each other. Neither knew the other, so the task graph could only show
+    # dependencies somebody typed by hand — and nobody ever typed one: eight
+    # tasks, zero declared edges, in a log with thousands of events. Derived, it
+    # is true whether or not anybody noticed.
+    #
+    # Failure here must never take the board down. The map is optional, may be
+    # stale, may be absent, and is somebody else's file format; a board that
+    # disappears because a graph would not load is worse than one that says it
+    # has no map.
+    try:
+        from .cli import _load_graph  # the one loader, undirected view and all
+        graph = _load_graph(graph_path) if graph_path else None
+        links = _taskcode.link(
+            graph, {t["id"]: t for t in tasks},
+            {t["id"]: [f["scope"] for f in t.get("files") or []] for t in tasks},
+            root,
+        ) if graph is not None else {}
+    except Exception as exc:  # pragma: no cover - defensive by intent
+        links = {}
+        alerts.append({
+            "kind": "map",
+            "text": f"the code map could not be read, so tasks are not linked to it: {exc}",
+            "hint": "Rebuild it with `graphify extract . --code-only`.",
+        })
+    for t in tasks:
+        info = links.get(t["id"]) or {}
+        t["touches"] = info.get("touches", 0)
+        t["related"] = info.get("related", [])
 
     # The log itself, most recent first, as a readable feed. The board had no
     # answer at all to "what just happened" — the one question somebody who has
@@ -1246,6 +1277,9 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 .tfdot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--line-2); }
 .tfdot.held { background: var(--amber); }
 .tfdot.done { background: var(--green); }
+.tfdot.meet { background: var(--accent); }
+.tfrow.tmeet { cursor: pointer; }
+.tfrow.tmeet:hover .tfpath { color: var(--accent); }
 .tfpath { color: var(--ink); flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tfactor { color: var(--accent); flex: none; }
 .tfstate { color: var(--ink-4); font-size: 11px; flex: none; }
@@ -1799,6 +1833,36 @@ function openTask(id) {
          '<div class="tdet-note">' + esc(t.verification) + "</div>";
   }
 
+  // WHAT ELSE THIS MEETS, from the code map rather than from anybody declaring
+  // it. This is the join the whole thing was for: the log knows which files the
+  // task touched, the map knows how files reach each other, and neither knew the
+  // other. Nobody has ever declared a task edge on this machine, so without this
+  // the graph could only ever be a list.
+  //
+  // Said as "meets", never as an ordering. A declared edge is a judgement about
+  // sequence; a code connection is a fact with no direction, and the map runs at
+  // roughly a third to a half recall — an inferred arrow would be confidently
+  // wrong often enough to poison the board.
+  var rel = t.related || [];
+  if (rel.length) {
+    h += '<div class="tdet-sec">MEETS IN THE CODE (' + rel.length + ")</div>";
+    h += '<div class="tdet-note">Not declared by anyone — these tasks touch files that ' +
+         "reach each other in the map.</div>";
+    h += '<div class="tdet-files">';
+    rel.slice(0, 8).forEach(function (r) {
+      h += '<div class="tfrow tmeet" data-task="' + esc(r.task) + '">' +
+           '<span class="tfdot meet"></span>' +
+           '<span class="mono tfpath">' + esc(r.task) + "</span>" +
+           '<span class="tfstate">' + r.shared +
+           (r.shared === 1 ? " shared place" : " shared places") + "</span></div>";
+    });
+    h += "</div>";
+  } else if (t.touches) {
+    h += '<div class="tdet-sec">MEETS IN THE CODE</div>' +
+         '<div class="tdet-note">Nothing. Its files reach ' + t.touches +
+         " place(s) in the map, none of them touched by another task.</div>";
+  }
+
   // WHERE IT LIVES. Derived from claims tagged to this task, kept after release
   // so finishing the work does not empty the answer.
   var files = t.files || [];
@@ -1824,6 +1888,11 @@ function openTask(id) {
   el("tdet").innerHTML = h;
   el("tdetWrap").hidden = false;
   el("tdetClose").onclick = closeTask;
+  // Follow the connection. Being told two tasks meet and then having to go and
+  // find the other one by hand is most of the cost of knowing.
+  Array.prototype.forEach.call(el("tdet").querySelectorAll(".tmeet"), function (row) {
+    row.onclick = function () { openTask(row.getAttribute("data-task")); };
+  });
 }
 
 function closeTask() { el("tdetWrap").hidden = true; }
@@ -2160,7 +2229,7 @@ class Board:
         return self.root / "graphify-out" / "graph.json"
 
     def snapshot(self) -> dict:
-        return _snapshot(self.root, self.log_file)
+        return _snapshot(self.root, self.log_file, graph_path=self._graph_path())
 
     def page(self) -> str:
         # Returned verbatim. _PAGE is NOT a format string — it is full of CSS and

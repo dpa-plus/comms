@@ -27,6 +27,15 @@ not run that hook yourself; it runs whether or not you remember it.
 the same file on this disk, and the guard treats them as one, so you cannot get
 round a claim by changing the case of a letter.
 
+**Claim before the first WRITE, not before the first edit you notice.** A
+generator counts. `npm run i18n -- set` counts. A codegen step, a formatter you
+point at one file, a script that rewrites a JSON file — all writes. An agent
+here wrote three keys into a shared `messages/de.json` through an i18n command,
+claimed the file forty minutes later when it got to the tests, and in between a
+peer committed the whole file inside an unrelated change. Nothing was violated:
+at that moment nobody held it. Nothing broke either, which was luck. That agent
+would have said it was following the rule right up until it read the log.
+
 **The hook only sees Edit and Write.** If you change a file with `sed -i`, a
 heredoc, `tee`, or a Python one-liner inside Bash, nothing checks it — and in
 auto mode Bash is the documented default, so this is the normal case, not a
@@ -344,6 +353,54 @@ prints it back and stops there. Reading it is your job: the ticket system that
 owns that reference is the one that knows how, and comms taking a dependency on
 it would mean auth, a CLI that may be absent, and a public tool hard-wired to
 one team's internals.
+
+## How the Task Graph and the Code Map Meet
+
+This is the reason comms sits on graphify at all, so it is worth one paragraph
+of how rather than a list of verbs.
+
+**Two graphs, and only one of them is declared.**
+
+- The **task graph** is what people wrote down. An edge exists because somebody
+  ran `task edge`, and it means *sequence*: the target comes after the source.
+- The **code map** is what the code actually does. `graphify extract` reads the
+  repository into files, symbols and the edges between them. Nobody declares any
+  of it and it is true whether or not anyone noticed.
+
+**They are joined by your claims.** A claim tagged `--task <slug>` puts a file on
+a task. The map already knows how that file reaches other files. So comms can
+say which *tasks* meet in the code — derived, not typed — and the board shows it
+on a task as **MEETS IN THE CODE**, with the count of places the two share.
+
+That is worth stating plainly because it is the difference between the two
+things being connected and merely being installed side by side. Measured on this
+machine: eight tasks and **zero** declared edges in a log with thousands of
+events. Left to declarations alone the task graph is a list. Left to the code
+map alone, nobody knows which work the connections belong to.
+
+**Read them as different kinds of claim.** A declared edge is a judgement about
+order and it blocks: the successor waits. A code connection is a fact with no
+direction — these two pieces of work touch the same neighbourhood — and it blocks
+nothing. It is a reason to go and look, or to talk to whoever holds the other
+task, before you find out by collision.
+
+The map runs at roughly a third to a half recall on this kind of codebase, so
+**silence from it is weak evidence**. "Meets nothing" means "nothing found", not
+"nothing there".
+
+**In practice, before you start a task:**
+
+```bash
+comms-graph brief <slug>          # what it is, what it consumes, decisions upstream
+comms-graph board                 # who holds what, and under which task
+graphify explain "<symbol>"       # what your ground connects to in the code
+```
+
+If the board says your task meets another one, read that task before you edit —
+whoever holds it is working in the same neighbourhood, and that is exactly the
+collision claims cannot prevent on files neither of you has claimed yet.
+
+---
 
 ## Navigating the Code
 
