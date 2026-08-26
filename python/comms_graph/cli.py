@@ -2137,10 +2137,8 @@ def _cmd_find(argv: list[str]) -> int:
     if not summary:
         _err("error: find needs something to say")
         return EXIT_USAGE
-    if len(summary) > 400:
-        _err(f"error: that summary is {len(summary)} characters; keep it under 400")
-        _err("  A finding is the one line somebody reads later, not the writeup.")
-        return EXIT_USAGE
+    if len(summary) > NOTE_MAX:
+        return _too_long("finding", summary, NOTE_MAX)
     actor = _actor(flags)
     root, log_file, lock_file = _task_runtime(flags)
 
@@ -2169,6 +2167,46 @@ def _cmd_find(argv: list[str]) -> int:
     return EXIT_OK
 
 
+
+#: Notes and findings are one line somebody reads later, not the writeup.
+#: Measured on 469 real notes: median 171 characters, p90 194, longest 352. So
+#: the cap is not tight — nothing written normally has ever come close to it,
+#: and everything that hit it was a handoff being posted to the wrong verb.
+NOTE_MAX = 400
+
+
+def _too_long(kind: str, text: str, cap: int) -> int:
+    """Refuse, but show WHERE it would cut and name the verb that fits.
+
+    The old message said only "that note is 586 characters; keep it under 400",
+    which is true and useless: it does not say what to drop, and it does not say
+    that the thing being written is not a note. Three agents reported it and one
+    did the predictable thing — split the handoff into two notes, which then read
+    OUT OF ORDER in the feed, because the feed is ordered by time and the second
+    half was written first in their head.
+
+    That is the damage worth preventing, so it is said explicitly. Splitting is
+    the one option that looks like it works and does not.
+    """
+    over = len(text) - cap
+    _err(f"error: that {kind} is {len(text)} characters, {over} over the {cap} cap.")
+    _err("  It would end here:")
+    _err(f"    …{text[max(0, cap - 60):cap]}")
+    _err(f"    ⟨{over} more character{'s' if over != 1 else ''} after that⟩")
+    _err(f"  A {kind} is the one line somebody reads later, not the writeup. If it "
+         "is longer than that, it is probably one of:")
+    # Every route here is checked to actually accept a long body. `doc --edit`
+    # is NOT one of them: it hands control to $EDITOR, which an agent cannot
+    # drive, so the file is named instead — docs are plain repo files and writing
+    # one directly is how an agent gets a long thing written down.
+    _err('    why a task ended the way it did   →  comms-graph task done <id> --note "…"')
+    _err("    something the repo should keep     →  write .comms/docs/<slug>.md")
+    _err('    a decision, in ONE line            →  comms-graph find decision "…"')
+    _err("  Do not split it into two notes. The feed is ordered by time, so they "
+         "will not read in the order you wrote them.")
+    return EXIT_USAGE
+
+
 def _cmd_note(argv: list[str]) -> int:
     """A short FYI. Deliberately separate from `find`: a note is something you
     would say out loud and forget, a finding is something the next agent needs
@@ -2179,9 +2217,8 @@ def _cmd_note(argv: list[str]) -> int:
         _err("error: note needs something to say")
         _err('  e.g. comms-graph note "schema migration lands next session" --as me')
         return EXIT_USAGE
-    if len(body) > 400:
-        _err(f"error: that note is {len(body)} characters; keep it under 400")
-        return EXIT_USAGE
+    if len(body) > NOTE_MAX:
+        return _too_long("note", body, NOTE_MAX)
     actor = _actor(flags)
     root, log_file, lock_file = _task_runtime(flags)
     with _lock.file_lock(lock_file):

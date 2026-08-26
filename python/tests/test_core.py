@@ -714,3 +714,36 @@ def test_scope_is_hashable_and_immutable():
     with pytest.raises(Exception):
         s.path = "src/b.ts"  # type: ignore[misc]
     assert isinstance(s, Scope)
+
+
+def test_an_over_long_note_says_where_it_would_cut_and_what_to_use(tmp_path, monkeypatch, capsys):
+    """IF THIS FAILS: the refusal is true and useless, and people split the note.
+
+    The old message said only "that note is 586 characters; keep it under 400".
+    It did not say what to drop and did not say that the thing being written was
+    not a note. Three agents reported it, and one did the predictable thing:
+    split a handoff into two notes, which then read OUT OF ORDER in the feed,
+    because the feed is ordered by time and the second half had been written
+    first. Splitting is the option that looks like it works and does not, so it
+    is ruled out explicitly.
+
+    The cap itself is not the problem and is not moved. Measured on 469 real
+    notes: median 171 characters, p90 194, longest 352. Nothing written normally
+    has ever come near it.
+    """
+    from comms_graph import cli
+
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir()
+    monkeypatch.setenv("COMMS_ACTOR", "alice")
+    monkeypatch.chdir(tmp_path)
+
+    assert cli.main(["note", "x" * 500]) != 0
+    err = capsys.readouterr().err
+    assert "500 characters, 100 over" in err, "it should say how far over"
+    assert "It would end here" in err, "it should show where it cuts"
+    # Every route it offers must accept a long body. `doc --edit` hands control
+    # to $EDITOR, which an agent cannot drive, so it must not be one of them.
+    assert "task done" in err and ".comms/docs/" in err
+    assert "--edit" not in err, "offered a route an agent cannot use"
+    assert "Do not split" in err, "the failure mode it caused must be named"
