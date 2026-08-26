@@ -410,6 +410,20 @@ Two consequences worth carrying:
   structure was never looked for". That is actionable in a way the recall caveat
   is not: go and read the file.
 
+**A second gap, on the backend, and it is not the same one.** Suspected rather
+than proven, from a controlled pair: a call made from inside a NAMED function was
+extracted, and a call to a sibling helper made from inside
+`auftraege.flatMap((auftrag) => …)` was not, leaving that helper with no inbound
+caller at all. If a call needs a named enclosing scope to hang off, then every
+call inside a callback loses its caller — and on server code `.map`, `.flatMap`,
+`prisma.$transaction(async (tx) => …)`, express handlers and every `onSuccess`
+are anonymous, so that is most of them.
+
+Treat it as two data points, not a finding. The practical consequence is the same
+either way and is the rule worth remembering: **`explain <symbol>` under-reports
+callers, on components and on server code, for two different reasons.
+`explain <file>` is the reliable form for "who depends on this".**
+
 **And some files are not on the map at all**, which is a different thing from low
 recall and reads the same. The map is built from code: a JSON catalogue, a
 config file, a SQL migration has no symbols and no imports, so it is simply
