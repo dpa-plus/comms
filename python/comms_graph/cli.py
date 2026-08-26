@@ -2359,7 +2359,16 @@ def _cmd_brief(argv: list[str]) -> int:
             rel = (links.get(slug) or {}).get("related") or []
             if rel:
                 print("  meets in the code (nobody declared these):")
-                for r in rel[:5]:
+                # Demote your own work, never DROP it. Sorting it last and
+                # then taking the top five deleted it — and the row deleted was
+                # the one that made the feature pay off: an agent found a peer's
+                # unclaimed task through a file shared with its OWN earlier task.
+                # It also made discovery depend on which end you opened, and the
+                # end you naturally open when investigating somebody else's work
+                # was the blind one.
+                strangers = [r for r in rel if not r.get("same_actor")]
+                own = [r for r in rel if r.get("same_actor")]
+                for r in strangers[:5] + own[:3]:
                     mark = "  (your own earlier work)" if r.get("same_actor") else ""
                     # NAME them. Three agents independently said the same thing:
                     # "4 shared places" is a number without a noun, and you
