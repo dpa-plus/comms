@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/hero.png" alt="comms — agents that do not collide. One append-only log: who holds which file, what work exists, and what it touches in the code." width="100%">
+<img src="assets/hero.png" alt="comms. Agents that do not collide. One append-only log: who holds which file, what work exists, and what it touches in the code." width="100%">
 
 [![CI](https://github.com/dpa-plus/comms/actions/workflows/ci.yml/badge.svg)](https://github.com/dpa-plus/comms/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/dpa-plus/comms?include_prereleases&logo=github&color=6ea2ff)](https://github.com/dpa-plus/comms/releases)
@@ -11,12 +11,12 @@
 </div>
 
 Several coding agents in one repository will edit the same file within minutes of
-each other. Not because they are careless — because nothing tells them the file
+each other. Not because they are careless. Because nothing tells them the file
 is taken. comms is the thing that tells them.
 
 An agent **claims** a file before it edits. A `PreToolUse` hook refuses an edit on
 somebody else's ground. Everything is appended to one file on disk, and every
-view — the board, the task graph, the code map — is read back out of it.
+view (the board, the task graph, the code map) is read back out of it.
 
 **What that buys you beyond a lock.** Because the log records what each agent was
 doing and which files it took, comms can answer questions a lock cannot:
@@ -28,27 +28,28 @@ doing and which files it took, comms can answer questions a lock cannot:
 | Which files did that task actually touch? | claims tagged `--task` |
 | Whose work sits next to mine in the code? | the task graph joined to the code map |
 | Would this commit take somebody else's work? | `check --staged` |
+| What is changed on disk that nobody declared? | `git status`, read by comms itself |
 
 <p align="center">
   <img src="assets/dashboard.png" alt="The comms board: the activity stream, who is holding which files, the task list with the files each task touches, and every project on the machine down the left." width="900">
 </p>
 
-<p align="center"><em>The board (<code>comms-graph ui</code>), on a real project. Everything on it is read out of the append-only log — it writes nothing except one deliberate button.</em></p>
+<p align="center"><em>The board (<code>comms-graph ui</code>), on a real project. Everything on it is read out of the append-only log. It writes nothing except one deliberate button.</em></p>
 
 ---
 
 ## The problem it solves
 
-Modern coding often means running **more than one AI agent on the same codebase at once** — say Claude in one window and Codex in another, plus you. That's powerful, but they're effectively three people editing the same project with no shared awareness:
+Modern coding often means running **more than one AI agent on the same codebase at once**, say Claude in one window and Codex in another, plus you. That's powerful, but they're effectively three people editing the same project with no shared awareness:
 
 - 🥊 **They collide.** Two agents edit the same file and overwrite each other's work.
 - 🔁 **They repeat each other.** One agent fixes a bug the other already fixed.
 - 🧠 **They forget context.** A decision ("the tracker is the source of truth for leads") lives in one agent's head and is lost to the others.
 - 🌫️ **You can't see what's happening.** Who's working on what, right now?
 
-These are the classic problems of people working in parallel — and the classic answer is to **write things down in one shared place.** comms is that shared place, built for agents: small enough that they actually use it, with a live view so *you* can watch.
+These are the classic problems of people working in parallel, and the classic answer is to **write things down in one shared place.** comms is that shared place, built for agents: small enough that they actually use it, with a live view so *you* can watch.
 
-> This is the **third generation** of multi-agent coordination at DPA+. The first was a single 1,632-line `COMMS.md` markdown file — it worked, but grew without bound, had no targeted reads, relied on agents remembering to update it, and iCloud sync kept forking the file. The second was `mcp-agent-mail` — a heavy MCP server with severity ladders and seven identities; too much ceremony, and agents kept forgetting the protocol. **comms is the small version that learned from both.**
+> This is the **third generation** of multi-agent coordination at DPA+. The first was a single 1,632-line `COMMS.md` markdown file. It worked, but grew without bound, had no targeted reads, relied on agents remembering to update it, and iCloud sync kept forking the file. The second was `mcp-agent-mail`, a heavy MCP server with severity ladders and seven identities; too much ceremony, and agents kept forgetting the protocol. **comms is the small version that learned from both.**
 
 ---
 
@@ -56,13 +57,40 @@ These are the classic problems of people working in parallel — and the classic
 
 | Primitive | What it's for | Example |
 |---|---|---|
-| **Claim** | "I'm working on this file — hands off." Several at once is atomic. | `comms-graph claim src/auth.ts src/login.ts --intent "rework auth"` |
+| **Claim** | "I'm working on this file, hands off." Several at once is atomic. | `comms-graph claim src/auth.ts src/login.ts --intent "rework auth"` |
 | **Task** | What the work IS. Claims tagged to it become its file list. | `comms-graph task add auth-api --title "Session create/refresh"` |
 | **Finding** | A durable fact: a bug, a fix, a decision, a gotcha, a release. | `comms-graph find decision "tracker is source of truth for leads"` |
 | **Note** | A short, throwaway heads-up. | `comms-graph note "FYI: schema migration coming next"` |
 | **Session** | A named work window that groups claims/events and can be archived. | `comms-graph session start "dashboard fixes"` |
 | **Doc** | A small per-repo wiki under `.comms/docs`. | `comms-graph doc tracker-architecture` |
 | **Lesson** | Cross-project knowledge that outlives any one repo. | `comms-graph lesson verify-data-before-ui` |
+
+### One signal nobody has to remember to send
+
+Everything above depends on an agent choosing to declare something, and the
+measured behaviour is that they often do not: after a context compaction the
+discipline lapses, and edits made through a shell heredoc or a codegen script
+are invisible to the pre-edit hook by construction.
+
+So comms reads `git status` itself. The board shows what is genuinely changed on
+disk next to what was declared, attributed where the log can attribute it and
+marked **claimed by nobody** where it cannot. It never guesses an author from
+timing or activity, because "we do not know who did this" is the finding.
+
+This closes two measured failures, both of which read as an all-clear:
+
+* The board printed *"no active claims in this repo"* while `git status` showed
+  fifteen changed files, four of which appear nowhere in the log.
+* `check --staged` passed a commit carrying a staged deletion left behind by a
+  departed agent. The check was true on its own terms, the file was unclaimed,
+  and the deletion shipped. A staged deletion of another actor's ground is now
+  refused.
+* An agent committed a translation file while another agent **held the claim on
+  it**, and seventeen of the holder's in-flight keys shipped inside somebody
+  else's commit. `check --staged` would have refused that by name. Nobody ran
+  it, because running it was a sentence in a document rather than a thing that
+  happens. `comms-graph guard install` wires it into git's `pre-commit` hook, and
+  the board says when a repo has a log and no guard.
 
 **Task is the one that changed the shape of the thing.** A claim says who is on a
 file; a task says what the work is, and tagging your claims to it (`--task
@@ -92,16 +120,16 @@ your-repo/.comms/                         ← committed to git (shared design)
   └─ .lock                                 ← a file lock that serializes writes
 ```
 
-> The per-machine log lives outside iCloud on purpose — iCloud Drive forks files that two processes append to at the same time, which would corrupt the log.
+> The per-machine log lives outside iCloud on purpose: iCloud Drive forks files that two processes append to at the same time, which would corrupt the log.
 
 **Every command is the same tiny dance.** When an agent runs `comms-graph claim …`:
 
 1. The binary **starts**, figures out which repo you're in, and finds that repo's `log.jsonl`.
 2. It grabs the **file lock** (so two agents can't write at the same instant).
-3. It **appends one line** — a JSON event — to the end of the log.
+3. It **appends one line**, a JSON event, to the end of the log.
 4. It **releases the lock and exits.**
 
-That's it. A `comms` command is a short-lived program that opens a file, appends a line, and quits. Reading state (`comms-graph status`) just replays the log — no lock needed.
+That's it. A `comms` command is a short-lived program that opens a file, appends a line, and quits. Reading state (`comms-graph status`) just replays the log, and needs no lock.
 
 The dashboard reads those same files into **one continuous persistent history**.
 Selecting a project filters the timeline without changing or hiding its stored
@@ -126,11 +154,11 @@ flowchart LR
 Here's the key idea: **the agents never talk to each other directly.** There's no chat, no messages flying between them, no network connection. They communicate the way a team uses a shared whiteboard:
 
 - **Agent A writes to the board.** `comms-graph claim aggregate.ts` appends a *claim* event to the log.
-- **Agent B reads the board.** `comms-graph status` replays the log and sees A's claim — so B knows to work elsewhere.
+- **Agent B reads the board.** `comms-graph status` replays the log and sees A's claim, so B knows to work elsewhere.
 - **Conflicts are caught by reading, not messaging.** If B tries to claim a file that overlaps A's claim, comms sees the overlap in the log and tells B to back off.
-- **Stale claims can be taken over.** A claim goes **stale after 1 hour idle** — its holder is presumed gone. The `BLOCKED` message says so, and B can steal a stale claim directly (`comms-graph claim … --steal <id>`, no `--reason`). A still-active claim (held < 1h) requires the user's confirmation and a `--reason` to steal.
+- **Stale claims can be taken over.** A claim goes **stale after 1 hour idle**, so its holder is presumed gone. The `BLOCKED` message says so, and B can steal a stale claim directly (`comms-graph claim … --steal <id>`, no `--reason`). A still-active claim (held < 1h) requires the user's confirmation and a `--reason` to steal.
 
-The log is the single source of truth. It's **append-only**, so history is never rewritten — you can always see exactly who did what and when. This "shared ledger" model is what makes coordination reliable without any of the agents needing to know the others exist. They only need to know about **the log**.
+The log is the single source of truth. It's **append-only**, so history is never rewritten, so you can always see exactly who did what and when. This "shared ledger" model is what makes coordination reliable without any of the agents needing to know the others exist. They only need to know about **the log**.
 
 The board (`comms-graph ui`) is simply a **live read-only view** of that same log.
 
@@ -139,7 +167,7 @@ The board (`comms-graph ui`) is simply a **live read-only view** of that same lo
 ## The live dashboard
 
 ```bash
-COMMS_ACTOR=human-you comms-graph ui   # http://127.0.0.1:7878 — every project, one tab
+COMMS_ACTOR=human-you comms-graph ui   # http://127.0.0.1:7878, every project in one tab
 ```
 
 It opens on **what just happened**, newest first, with the things that need
@@ -147,7 +175,7 @@ somebody pulled to the top. Around it: who is holding which files right now, the
 roster of who is actually here, the tasks with the files each one touches, and
 every project on this machine down the left side.
 
-**It reads. It does not write** — with exactly one exception. The log is appended
+**It reads. It does not write**, with exactly one exception. The log is appended
 under a lock, through a fold that enforces the rules, and a dashboard writing
 around either would be a second writer with none of those guarantees. So the only
 button that changes anything is **Release**, which frees a claim somebody else is
@@ -160,11 +188,11 @@ question anybody asks afterwards.
 > board refuses to release at all: a release with no author is worse than no
 > release, because the ground is gone and the log cannot say who took it.
 
-It is **unified by default**: one window for every comms project on the machine. The **Projects** rail lists them and clicking one scopes the whole view. It lists real projects only — a store whose directory has been deleted, or which lives in a temp folder, is not a project, and before that filter existed two real projects sat among 213 that were not.
+It is **unified by default**: one window for every comms project on the machine. The **Projects** rail lists them and clicking one scopes the whole view. It lists real projects only. A store whose directory has been deleted, or which lives in a temp folder, is not a project, and before that filter existed two real projects sat among 213 that were not.
 
-The **Roster** shows who is here, meaning the last hour, plus anyone holding a claim whatever their age — a stale claim is the one thing on the board that needs a person, and hiding its holder would hide the only name that can free it. Agents take a fresh name each session, so everyone who has ever said hello is a much longer and much less useful list; it is one click away.
+The **Roster** shows who is here, meaning the last hour, plus anyone holding a claim whatever their age, because a stale claim is the one thing on the board that needs a person, and hiding its holder would hide the only name that can free it. Agents take a fresh name each session, so everyone who has ever said hello is a much longer and much less useful list; it is one click away.
 
-Run it **once** and watch every repo. Agents never open anything — they write to their logs, which this board already sees.
+Run it **once** and watch every repo. Agents never open anything. They write to their logs, which this board already sees.
 
 The **work graph** shows the tasks in the selected project: an arrow means the
 task it points at comes afterwards, and tasks joined to nothing sit apart from
@@ -172,19 +200,19 @@ the rest, because they are. Finished work compresses to a dashed outline so the
 board shrinks as the project progresses; work waiting for a verifier is the
 loudest thing on it, because it is finished *and* holding up everything
 downstream. Layout is computed on the server, so an arrow can only point
-rightward — there is no geometry to get wrong in the browser.
+rightward, so there is no geometry to get wrong in the browser.
 
 It updates by **push, not polling.** A file watcher inside `comms ui` is notified by the operating system the instant any project's `log.jsonl` changes; it rebuilds the snapshot once and streams it to every open browser tab over [Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events). So when any agent anywhere appends an event, the right project lights up in the sidebar **immediately**, and your laptop isn't burning cycles re-reading logs on a timer.
 
-Every snapshot carries the server's **front-end build fingerprint**, and the page remembers the one it loaded with. So when you replace the binary and restart `comms ui`, every open tab notices the new build on the next push and **reloads itself** to the new dashboard — no more stale UI lingering after an upgrade.
+Every snapshot carries the server's **front-end build fingerprint**, and the page remembers the one it loaded with. So when you replace the binary and restart `comms ui`, every open tab notices the new build on the next push and **reloads itself** to the new dashboard, so no stale UI is lingering after an upgrade.
 
 It **opens your browser automatically** when run interactively (`--no-open` to suppress). On macOS you can also double-click a **Comms Dashboard** launcher instead of using the terminal. The header shows the active **session name** (the name agents use, e.g. `acme-build`) next to the repo.
 
 **Which dashboard the flags belong to.** The push/reload behaviour and the flags above are the **Go** build's
 `comms ui`, which is still here and still works:
 
-- `comms ui --repo /path/to/repo` — scope to a single repo (no sidebar).
-- `comms ui --demo` — explore with sample data (read-only; writes nothing real).
+- `comms ui --repo /path/to/repo` scopes to a single repo (no sidebar).
+- `comms ui --demo` explores sample data (read-only; writes nothing real).
 
 The Python board is `comms-graph ui [--port 7878] [--host 127.0.0.1] [--graph <graph.json>]`. It has no
 `--demo` and no `--repo`; scope it by running it from the repo, or name one with the global
@@ -192,7 +220,7 @@ The Python board is `comms-graph ui [--port 7878] [--host 127.0.0.1] [--graph <g
 
 ### Run the dashboard as a login service (macOS)
 
-So the dashboard is always up — survives reboots, and is restarted automatically if it ever exits — install it as a per-user `launchd` agent. The template sets `COMMS_ACTOR` (so the operator buttons work — see the note above); change it from `operator` to your own name first:
+So the dashboard is always up. It survives reboots, and is restarted automatically if it ever exits. Install it as a per-user `launchd` agent. The template sets `COMMS_ACTOR` (so the operator buttons work, see the note above); change it from `operator` to your own name first:
 
 ```bash
 # Set your operator name (and point at your binary if it is not Homebrew, `which comms`):
@@ -240,7 +268,7 @@ See [`docs/INSTALL.md`](docs/INSTALL.md) for manual + optional automated (hook/s
 
 ## Teach your agents to use it
 
-comms ships a **skill** — [`skills/using-comms/SKILL.md`](skills/using-comms/SKILL.md) — that teaches an AI agent the protocol: when to `claim`, what to record as a `finding`, how to coordinate, and how to recover. There's one for **Claude** and one for **Codex** — the same file works for both (they share the skill format), so install it for whichever agents you run:
+comms ships a **skill**. [`skills/using-comms/SKILL.md`](skills/using-comms/SKILL.md) teaches an AI agent the protocol: when to `claim`, what to record as a `finding`, how to coordinate, and how to recover. There's one for **Claude** and one for **Codex**. The same file works for both (they share the skill format), so install it for whichever agents you run:
 
 ```bash
 cp -r skills/using-comms ~/.claude/skills/    # Claude
@@ -273,7 +301,8 @@ comms brief <slug>                            # what you inherit before starting
 comms claim "<scope>" --task <slug> --intent "..."   # tagging a claim is what puts you on a task
 comms check <path>                            # PreToolUse hook (also: --stdin-json); exits 2 to block
 comms mcp                                     # serve the same verbs as MCP tools over stdio
-comms check --staged                         # pre-commit guard: block peer-claimed staged paths
+comms check --staged                         # commit guard: block peer-claimed staged paths
+comms-graph guard install                    # make it run on every commit, automatically
 comms status [--json]
 comms log [--actor X] [--since 1h] [--scope path] [--type list] [--category cat]
 comms note [--priority] "<=200-char FYI>"
@@ -300,8 +329,8 @@ COMMS_ACTOR=claude-dev comms session lead --reason "let Claude Dev lead"
 Because `comms` is just a binary that runs fresh on every command, upgrading is painless and **never disturbs an in-flight session**:
 
 - **The session lives in the log file, not in the binary.** Claims, findings, and notes are on disk. Replacing the binary doesn't touch them.
-- **CLI commands pick up the new version instantly** — the *next* `comms …` an agent runs uses the new binary. No restart, no re-join.
-- **Only the dashboard's *process* needs a nudge.** `comms ui` is the one long-running process; it holds the old binary until you restart it. But once you do, the browser doesn't: every open tab sees the new build fingerprint on the next push and **reloads itself** (see [The live dashboard](#the-live-dashboard)). Restarting loses nothing — it just re-reads the same log.
+- **CLI commands pick up the new version instantly**: the *next* `comms …` an agent runs uses the new binary. No restart, no re-join.
+- **Only the dashboard's *process* needs a nudge.** `comms ui` is the one long-running process; it holds the old binary until you restart it. But once you do, the browser doesn't: every open tab sees the new build fingerprint on the next push and **reloads itself** (see [The live dashboard](#the-live-dashboard)). Restarting loses nothing. It just re-reads the same log.
 
 ```bash
 go install github.com/dpa-plus/comms/cmd/comms@latest   # agents use it on their next command
@@ -316,9 +345,9 @@ launchctl kickstart -k "gui/$(id -u)/plus.dpa.comms-ui"  # if installed as a log
 
 - **uuid-free, dependency-light.** The core is the Go standard library plus a CLI framework, a ULID generator, and a file watcher.
 - **Append-only + `flock`.** Writes are serialized by a per-repo file lock; the log is never rewritten, so history and audit are free.
-- **Recoverable by design.** Blank lines are skipped, a torn final line is ignored, duplicate event IDs are dropped — a half-written line never breaks a read.
-- **Enforced, not suggested — if you wire the hook.** Nothing installs itself. But a `PreToolUse` hook running `comms-graph check --stdin-json` REFUSES an Edit or Write on somebody else's ground: it exits 2, which is the only code Claude Code treats as "block this tool call". It fails closed, and it spells paths the way the filesystem does, so two agents cannot hold one file under two capitalisations of its name.
-- **The hook cannot see Bash.** An edit made with `sed`, a heredoc or a one-liner never reaches it — and in agent auto-modes Bash is the documented default, so this is the normal case rather than a corner. Measured on one real session: ~35 edits, the hook fired zero times. `comms-graph check --staged` in a git `pre-commit` hook is the backstop that a heredoc cannot argue with, and it refuses a commit whose index holds another actor's claimed files.
+- **Recoverable by design.** Blank lines are skipped, a torn final line is ignored, duplicate event IDs are dropped, so a half-written line never breaks a read.
+- **Enforced, not suggested, if you wire the hook.** Nothing installs itself. But a `PreToolUse` hook running `comms-graph check --stdin-json` REFUSES an Edit or Write on somebody else's ground: it exits 2, which is the only code Claude Code treats as "block this tool call". It fails closed, and it spells paths the way the filesystem does, so two agents cannot hold one file under two capitalisations of its name.
+- **The hook cannot see Bash.** An edit made with `sed`, a heredoc or a one-liner never reaches it, and in agent auto-modes Bash is the documented default, so this is the normal case rather than a corner. Measured on one real session: ~35 edits, the hook fired zero times. `comms-graph guard install` is the backstop that a heredoc cannot argue with: it wires `check --staged` into git's `pre-commit` hook, and a commit whose index holds another actor's claimed files is refused.
 
 More in [`docs/DESIGN.md`](docs/DESIGN.md) and [`docs/PROTOCOL.md`](docs/PROTOCOL.md).
 
@@ -326,8 +355,20 @@ More in [`docs/DESIGN.md`](docs/DESIGN.md) and [`docs/PROTOCOL.md`](docs/PROTOCO
 
 ## What the graph adds
 
+<p align="center">
+  <img src="assets/task-graph.png" alt="The task graph: rounding money is done and feeds the pricing work codex-dev is on; the cart summary waits behind that; two tasks nothing waits on sit as cards below." width="900">
+</p>
+
+<p align="center"><em><strong>The task graph.</strong> A solid arrow means the target <em>consumes</em> something from the source, so reworking the source puts the target back in question. A dashed arrow is ordering only. Tasks nothing waits on are listed underneath rather than drawn, because a node with no edges is not a graph. It is a list, and a list can be read.</em></p>
+
+<p align="center">
+  <img src="assets/code-map.png" alt="The code map of this repository: 2,924 files and symbols, 7,169 edges, coloured by community, with the ones somebody is holding right now picked out in white." width="820">
+</p>
+
+<p align="center"><em><strong>The code map</strong>, this repository, 2,924 files and symbols joined by 7,169 edges, built by <a href="https://pypi.org/project/graphifyy/">graphify</a> and coloured by community. The white nodes are the ones somebody holds a claim on <em>right now</em>. That overlay is the join: the map knows the structure, the log knows who is standing where.</em></p>
+
 The log answers *who is touching what*. It cannot answer *what is this work, where
-does it live, and is any of it connected* — those are questions about the code and
+does it live, and is any of it connected*. Those are questions about the code and
 the plan, not about the last five minutes. Two graphs answer them, and both are
 built from things the agents were already doing.
 
@@ -336,7 +377,7 @@ files with `--task <id>`. That flag is the only bookkeeping in the whole tool th
 is not derived for you, and it is one word on a command you were running anyway.
 In return the board can open a task and show what it is, whether it is finished,
 whether somebody *other than the author* checked it, and the exact files it
-touched — including the ones already released, because a task that forgets its
+touched, including the ones already released, because a task that forgets its
 files when the work ends answers "what did this change?" with "nothing".
 
 Tasks connect to each other too. An edge says one task comes after another and
@@ -346,7 +387,7 @@ them differently.
 
 **The code map is built by [graphify](https://pypi.org/project/graphifyy/).** It
 reads the repository into a graph of files, symbols and the edges between them, so
-a claim can also report what sits *next to* the ground you just took — the callers,
+a claim can also report what sits *next to* the ground you just took: the callers,
 the importers, the tests. Run it once per repo:
 
 ```bash
@@ -356,7 +397,7 @@ graphify extract . --code-only     # local AST, no API key
 Two honest limits, both measured rather than assumed. The map misses between a
 third and a half of the file pairs that really do change together, so **silence
 from it is weak evidence, not a clear signal**. And of the pairs it does flag,
-well under half turn out to matter — it is a prompt to look, never a verdict.
+well under half turn out to matter. It is a prompt to look, never a verdict.
 Anything it has not indexed (SQL migrations, for instance, without the optional
 parser) reports "no connections" when the truth is "not looked at".
 
@@ -368,19 +409,19 @@ what those files touch.
 ## Two implementations, one log
 
 This repository holds two builds of comms, and they are not a port and its
-original — they run side by side against **the same store**, read each other's
+original. They run side by side against **the same store**, read each other's
 events, and block each other's claims.
 
-- **Go** — everything outside `python/`, installed as the `comms` binary. This is
+- **Go**, everything outside `python/`, installed as the `comms` binary. This is
   what the shipped `PreToolUse` hook runs.
-- **Python** — [`python/`](python/README.md), installed as `comms-graph`. Answers
+- **Python**, [`python/`](python/README.md), installed as `comms-graph`. Answers
   every verb the Go build does, plus `board` and `tasks`: a task graph with a
   review gate, and a board for the person watching. Built on
   [graphify](https://pypi.org/project/graphifyy/), so a claim can also report
   what sits *next to* the code you took.
 
 Because the log is the interface, moving a hook from one to the other is a
-one-line change and reversible — the events already interleave. Both are covered
+one-line change and reversible, because the events already interleave. Both are covered
 by [CI](.github/workflows/ci.yml).
 
 ---

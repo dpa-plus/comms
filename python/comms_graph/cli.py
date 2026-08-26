@@ -55,6 +55,8 @@ from . import taskcode as _taskcode
 from . import taskview as _taskview
 from . import resolve as _resolve
 from . import scope as _scope
+from . import guard as _guard
+from . import tree as _tree
 from . import state as _state
 
 USAGE = """Usage: comms-graph <command>
@@ -1063,7 +1065,9 @@ def _cmd_claim(argv: list[str]) -> int:
         print(f"  TAKEN FROM @{stolen_from_actor} — their claim {claim_data['steals']} is ended.")
         print("  Recorded as a steal under your name, with your reason. If they come")
         print("  back and re-claim it, they will be told the same way you were.")
-    print(_advice(root, flags.get("graph"), scope, others))
+    advice = _advice(root, flags.get("graph"), scope, others)
+    if advice:
+        print(advice)
     return EXIT_OK
 
 
@@ -1150,26 +1154,34 @@ def _newest_source_mtime(root: Path) -> float | None:
 
 
 def _advice(root: Path, graph_flag: str | None, scope: _scope.Scope, others: list) -> str:
-    """The contact block: a prompt to look, never a verdict, never an order."""
+    """The contact block: a prompt to look, never a verdict, never an order.
+
+    SILENT WHEN IT HAS NOTHING TO SAY, which used to be most of the time. This
+    printed three lines of NOT ON THE MAP on every claim in any repo without a
+    graphify map, including when nobody else held anything at all, so the
+    commonest claim in the commonest repo carried a paragraph explaining why a
+    check nobody had asked for could not be run. An agent that made ~9 claims
+    reported reading none of it and using the map zero times.
+
+    The check only ever answers one question: does the ground you just took sit
+    next to ground somebody ELSE is holding. With no other claims there is no
+    question, so there is no answer worth printing, whatever the map says.
+    """
+    # Nothing to be in contact with. This is the case that was drowning the rest.
+    if not others:
+        return ""
+
     map_path = _graph_path(root, graph_flag)
     graph = _load_graph(map_path)
     stale = _staleness_note(root, map_path, getattr(scope, "path", "") or "") if graph is not None else ""
     mine = _resolve.resolve(graph, scope, root)
     if mine.miss_reason:
-        # Loud. This is the reply that must never be mistaken for "all clear".
-        # The hint has to match the reason: telling somebody to check their
-        # spelling when the real problem is that no map exists sends them
-        # hunting for a typo that is not there.
-        if graph is None:
-            hint = "  Nothing is wrong with the claim — there is just nothing to check it against."
-        else:
-            hint = "  Check the name: a typo looks exactly like code nothing else touches."
-        body = (
-            f"  NOT ON THE MAP — the claim is recorded, but no contact check was possible:\n"
-            f"    {mine.miss_reason}\n"
-            f"{hint}"
-        )
-        return (stale + "\n" + body) if stale else body
+        # Still said, because somebody else IS holding ground and "we could not
+        # check" must never be mistaken for "you are clear". One line, though:
+        # the three-line version was explaining itself to nobody.
+        held = f"{len(others)} other claim" + ("s" if len(others) != 1 else "")
+        return (f"  not on the map, so contact with the {held} could not be "
+                f"checked: {mine.miss_reason}")
     resolved_others = []
     for actor, scope_str, other_scope in others:
         res = _resolve.resolve(graph, other_scope, root)
@@ -1546,11 +1558,41 @@ def _cmd_check_staged(flags: dict) -> int:
             blocked.append((canon, conflicts[0]))
 
     if not blocked:
-        # Safe even when we could not identify the caller: nothing staged is
-        # claimed by ANYBODY, so there is no question of whose it is.
+        # "Nothing staged is claimed by anybody else" was the whole answer, and
+        # it passed a commit carrying a staged DELETION left behind by an agent
+        # that had already released. The check was true and the deletion
+        # shipped: unclaimed is not the same as yours.
+        survey = _tree.attribute(_tree.read(root), st)
+        foreign = ([] if unidentified
+                   else _tree.foreign_staged_deletions(survey, actor))
+        if foreign:
+            _err(f"BLOCKED: {len(foreign)} staged deletion(s) remove files the log "
+                 "ties to somebody else.")
+            for a in foreign:
+                _err(f"  {a.change.path} — last {a.basis} by @{a.actor}")
+            _err("  You are about to commit somebody else's removal. Unstage it, "
+                 "or confirm with them that it was meant to go:")
+            for a in foreign:
+                _err(f"    git restore --staged -- "
+                     f"{shlex.quote(':(literal)' + a.change.path)}")
+            return EXIT_CONFLICT
+
         n = len(staged)
         print(f"check --staged: {n} staged path{'s' if n != 1 else ''} checked, "
               f"none held by anybody else.")
+        # Said out loud rather than passed over. These are the paths the log
+        # knows nothing about, which after a compaction or a run of shell
+        # heredoc edits is most of them, and a guard that stays silent about
+        # what it could not check reads as a guard that checked everything.
+        unknown = [a for a in survey.staged if not a.known]
+        if unknown:
+            was = "is" if len(unknown) == 1 else "are"
+            print(f"  {len(unknown)} of them {was} claimed by nobody, so nothing "
+                  "was verified about who wrote them:")
+            for a in unknown[:12]:
+                print(f"    {a.change.path}  {a.change.how()}")
+            if len(unknown) > 12:
+                print(f"    ... and {len(unknown) - 12} more")
         return EXIT_OK
 
     if unidentified:
@@ -2567,6 +2609,9 @@ def _cmd_plan(argv: list[str]) -> int:
 TASK_USAGE = """Usage: comms-graph task <command>
 
   add <id> --as <actor> [--title "..."] [--size S|M|L]   (a rough scale, not a gate)
+        --title is what people read on the board: plain English, no file or
+        function names, no jargon, short enough to say out loud. The id is
+        just what you type.
                         [--review]        somebody else must check it to close
                         [--probe]         a diagnostic; kept out of derived neighbours
                         [--check <name>]... [--ref "tracker:PROJ-1234"]
@@ -2618,6 +2663,52 @@ def _release_somebody_elses(st, log_file, actor: str, target: str, reason: str) 
     return EXIT_OK
 
 
+GUARD_USAGE = """Usage: comms-graph guard <command>
+
+  install [--chain]   put the commit check into this repo's git hooks, so it
+                      runs on every commit whether anybody remembers or not.
+                      --chain keeps a pre-commit hook that is already there and
+                      runs it first.
+  status              is it wired in, and where
+  uninstall           take it out, restoring any hook it displaced
+
+  Without it, `check --staged` only ever runs when somebody types it. Measured:
+  three separate incidents where the check would have refused the commit and
+  nobody ran it.
+"""
+
+
+def _cmd_guard(argv: list[str]) -> int:
+    positional, flags = _parse_flags(argv)
+    sub = positional[0] if positional else "status"
+    root = _repo_root(flags.get("root"))
+
+    if sub == "status":
+        st = _guard.status(root)
+        print(_guard.describe(st))
+        if st.path is not None:
+            print(f"  hook path: {st.path}")
+        # Exit 1 when it is NOT wired in, so a setup script can branch on it
+        # without parsing prose. Not 2: nothing failed, the answer is just no.
+        return EXIT_OK if st.installed else EXIT_CONFLICT
+
+    if sub == "install":
+        ok, lines = _guard.install(root, chain="chain" in flags)
+        for line in lines:
+            (print if ok else _err)(line)
+        return EXIT_OK if ok else EXIT_CONFLICT
+
+    if sub == "uninstall":
+        ok, lines = _guard.uninstall(root)
+        for line in lines:
+            (print if ok else _err)(line)
+        return EXIT_OK if ok else EXIT_CONFLICT
+
+    _err(f"error: unknown guard command {sub!r}")
+    _err(GUARD_USAGE)
+    return EXIT_BLOCK
+
+
 def _cmd_board(argv: list[str]) -> int:
     _, flags = _parse_flags(argv)
     me = (flags.get("as") or os.environ.get("COMMS_ACTOR") or "").strip()
@@ -2626,8 +2717,35 @@ def _cmd_board(argv: list[str]) -> int:
     _warn_if_ephemeral(log_file)
     st = _read_state(log_file)
     claims = sorted(st.claims.values(), key=lambda c: c.ts)
+
+    # The tree, not just the log. "No active claims" was measured saying the
+    # repo was quiet while git status showed fifteen changed files, four of
+    # which appear nowhere in the log at all. A board that reports the absence
+    # of declarations as the absence of work is worse than no board, because it
+    # is believed.
+    survey = _tree.survey(root, st)
+    head = _tree.headline(survey)
+
+    # And whether anything is actually ENFORCING the commit check here. The
+    # check has always been correct and has caught nothing three times, because
+    # it only runs when somebody types it. An unenforced guard should not be
+    # invisible on the board that is supposed to be telling you the truth.
+    guard = _guard.status(root)
+    guard_line = "" if guard.installed else "  " + _guard.describe(guard)
+
     if not claims:
-        print("no active claims in this repo")
+        if head:
+            print("no active claims in this repo, but the tree is not quiet:")
+            print(f"  {head}")
+            for line in _tree.lines(survey):
+                print(line)
+        else:
+            print("no active claims in this repo"
+                  + (" and no uncommitted changes" if survey.readable else ""))
+            if not survey.readable:
+                print(f"  {head or survey.unavailable}")
+        if guard_line:
+            print(guard_line)
         return EXIT_OK
     print(f"active claims ({len(claims)}):")
     for claim in claims:
@@ -2641,6 +2759,17 @@ def _cmd_board(argv: list[str]) -> int:
         # thing you had to take on faith.
         tag = f"  ({getattr(claim, 'task', '') or 'no task'})"
         print(f"  {claim.scope}  @{claim.actor}  {when}  [{claim.id}]{tag}{intent}{mark}")
+
+    # And what is actually changed on disk, which is a different question. A
+    # claim is a statement of intent; this is the evidence.
+    if head:
+        print()
+        print(head + ":")
+        for line in _tree.lines(survey):
+            print(line)
+    if guard_line:
+        print()
+        print(guard_line.strip())
     return EXIT_OK
 
 
@@ -2696,7 +2825,8 @@ def main(argv: list[str]) -> int:
     # users are agents it is the whole discovery path. Exact-match only, so a
     # free-text --intent that mentions --help is unaffected.
     if any(a in ("-h", "--help", "-?") for a in rest):
-        print(TASK_USAGE if sub == "task" else USAGE)
+        print(TASK_USAGE if sub == "task"
+              else GUARD_USAGE if sub == "guard" else USAGE)
         return EXIT_OK
     try:
         if sub == "claim":
@@ -2715,6 +2845,8 @@ def main(argv: list[str]) -> int:
             return _cmd_tasks(rest)
         if sub == "check":
             return _cmd_check(rest)
+        if sub == "guard":
+            return _cmd_guard(rest)
         if sub == "ui":
             return _cmd_ui(rest)
         if sub == "plan":

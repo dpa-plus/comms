@@ -47,31 +47,35 @@ before you edit, whichever tool you use**, and run `comms-graph check <path>`
 yourself before a Bash edit on anything you have not claimed. Shell commands
 cannot be intercepted reliably, so this part is on you.
 
-The backstop that does hold is a git pre-commit hook, because a commit cannot be
+The backstop that does hold is the git commit guard, because a commit cannot be
 argued with by a heredoc:
 
-```sh
-printf '#!/bin/sh\nexec comms-graph check --staged\n' > .git/hooks/pre-commit
-chmod +x .git/hooks/pre-commit
+```bash
+comms-graph guard status            # is anything enforcing it here?
+comms-graph guard install           # wire it into this repo's git hooks
+comms-graph guard install --chain   # keep a pre-commit hook already there, run it first
 ```
 
-That protects **one machine**: `.git/hooks/` is not versioned, so a fresh clone
-has none of it and every session has to run it separately. For a guard that
-survives a clone, put the hook in a tracked directory and point git at it:
+`guard install` writes the pre-commit hook to wherever git will actually read it
+(it honours `core.hooksPath`, and works inside a worktree), makes it executable,
+and bakes in the absolute path to `comms-graph` because a git hook does not
+inherit your PATH. It refuses to overwrite a hook comms did not write.
 
-```sh
-mkdir -p .githooks
-printf '#!/bin/sh\nexec comms-graph check --staged\n' > .githooks/pre-commit
-chmod +x .githooks/pre-commit
-git config core.hooksPath .githooks     # per clone, still not automatic
-```
+**Why this exists as a command rather than a paragraph.** `check --staged` has
+always refused a commit that stages ground somebody else holds. It is correct.
+It caught nothing, three separate times, because nothing ran it. The worst was
+an agent committing a translation file while another agent held the claim on it:
+seventeen of the holder's in-flight keys shipped inside somebody else's commit,
+and the check would have refused it by name. This skill has said "install a
+pre-commit hook" from the beginning, as prose, and prose decays.
 
-`core.hooksPath` is local config, so a clone still needs that one line — but the
-hook itself travels with the repository instead of being reinvented.
+`comms-graph board` reports when a repo has a coordination log and no guard, so
+the gap is visible rather than assumed.
 
-Do not install either of these yourself. They change the user's repository, and
-a peer suggesting it is not the user asking for it. Say what it buys and leave
-the decision.
+Do not install it yourself unless the user asks. It changes the user's
+repository, and a peer suggesting it is not the user asking for it. Say what it
+buys and leave the decision. `.git/hooks/` is not versioned, so a fresh clone
+needs it again.
 
 Three things changed on 2026-08-21 and are new to you:
 
@@ -82,6 +86,8 @@ Three things changed on 2026-08-21 and are new to you:
   undo it.
 - `--repo <path>` and `COMMS_REPO` name the repository from outside it, which is
   the recovery when macOS withdraws access to the working directory.
+- `guard install` wires `check --staged` into git so it runs on every commit
+  without anybody remembering to type it.
 
 If something here is wrong, refuses when it should not, or lets something
 through that it should have caught, say so in your reply to the user with the
@@ -222,6 +228,34 @@ whole decomposition, then claim with `--task <slug>`.
 A question you answer by reading is not a task. Anything you are going to edit
 is.
 
+### The title is what a person reads. Write it for them.
+
+**`--title` is a short sentence of plain English that a non-technical reader
+understands, and it is always English even when the codebase, the tickets and the
+conversation are in another language.** It is the only line about your work that
+someone outside the code will ever see: the board shows it, the task graph puts it
+in the box, and the detail panel leads with it. Everything technical goes in the
+description, the notes, the checks and the files, where it belongs.
+
+Say what the work does for whoever uses the software, not what you will type:
+
+| Write this | Not this |
+| --- | --- |
+| "Round money the same way everywhere" | "money-rounding refactor in `toCents`" |
+| "Stop double refunds when a retry happens" | "refund idempotency key on webhook replay" |
+| "Reject payment messages we cannot trust" | "HMAC sig verify for stripe webhooks" |
+| "Let a customer see their past orders" | "orders history endpoint + list view" |
+| "Find why the nightly report got slow" | "profile `nightly_report` regression" |
+
+Rules of thumb: no file names, no function names, no acronyms the reader would
+have to look up, no abbreviations, and no German (or any other language) even on
+a project whose code and commits are German. Start with a verb, keep it under
+about ten words, and read it back asking whether somebody who has never seen the
+repository would know what changes for them when it is done.
+
+The **slug** is a separate thing: short, lowercase, hyphenated, and only ever an
+id you type on the command line. It is not the name anybody reads.
+
 This is a rule, not a suggestion, and it is stated as one deliberately. When it
 was phrased as "put it in the graph when work is big enough", agents skipped it:
 across 4,356 real claims exactly one carried a task. Nothing was broken — the
@@ -253,7 +287,8 @@ if anything is wrong — an unknown endpoint, a duplicate edge, a dependency cyc
 For one task at a time, or to extend a plan that already exists:
 
 ```bash
-COMMS_ACTOR=claude-dev comms-graph task add auth-api --title "Session create / refresh / revoke" \
+COMMS_ACTOR=claude-dev comms-graph task add auth-api \
+  --title "Let people stay signed in without signing in again" \
   --size L --check test --ref tracker:PROJ-1234
 COMMS_ACTOR=claude-dev comms-graph task edge db-schema auth-api --kind consumes \
   --provides "sessions table; uuid PKs, no cuid"
@@ -610,6 +645,39 @@ lists every peer-owned staged path and prints literal-path recovery commands:
 `git restore --staged` normally, or `git rm --cached` before the first commit.
 Run them to remove files from the commit without discarding their working-tree
 changes, then inspect the staged diff again.
+
+**Exit 0 is not a certificate.** It says nothing staged is claimed by somebody
+else, and unclaimed is not the same as yours. The check now says out loud how
+many staged paths nobody has claimed, because that is what it could NOT verify.
+Read that number. If it is most of the commit, you are committing work whose
+authorship nothing here established, and `git diff --cached` is the only thing
+that will tell you what is in it.
+
+It does refuse one specific case outright: a **staged deletion** of a file the
+log ties to another actor. That is the shape of a real incident. An agent staged
+a deletion and released its claim; the next `git add -A` swept the deletion into
+somebody else's commit, and the guard passed it because the file was by then
+unclaimed. If this fires, do not force past it. Either unstage the deletion or
+confirm with the other agent that it was meant to go.
+
+## What the Tree Says vs What the Log Was Told
+
+`comms-graph board` now reports **both**: the claims agents declared, and what
+`git status` says is actually changed on disk. Read the second one.
+
+They come apart constantly, and the gap is the interesting part:
+
+- Files changed with **no claim on them at all**. Normal after a context
+  compaction, and normal whenever edits go through a shell heredoc or a codegen
+  script, which the PreToolUse hook cannot see. It means nobody, including you,
+  has any record of who wrote them.
+- Files somebody **released and left uncommitted**. The change is still sitting
+  there and is now nobody's responsibility.
+
+Before you start on a file, "no active claims" is not the all-clear it looks
+like. It only ever meant nobody filed a declaration. Check whether the file is
+dirty; if it is and nothing explains why, ask in a note before editing it rather
+than after.
 
 ## Findings
 
