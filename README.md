@@ -1,28 +1,39 @@
 <div align="center">
 
-<img src="assets/logo.svg" alt="comms logo" width="128" height="128">
-
-# comms
-
-**Coordinate parallel coding agents through one shared, append-only log.**
+<img src="assets/hero.png" alt="comms — agents that do not collide. One append-only log: who holds which file, what work exists, and what it touches in the code." width="100%">
 
 [![CI](https://github.com/dpa-plus/comms/actions/workflows/ci.yml/badge.svg)](https://github.com/dpa-plus/comms/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/dpa-plus/comms?include_prereleases&logo=github&color=0f766e)](https://github.com/dpa-plus/comms/releases)
-[![Go Reference](https://pkg.go.dev/badge/github.com/dpa-plus/comms.svg)](https://pkg.go.dev/github.com/dpa-plus/comms)
-[![License](https://img.shields.io/badge/license-MIT-0f766e)](LICENSE)
-[![Go](https://img.shields.io/badge/Go-1.25+-0f766e?logo=go&logoColor=white)](go.mod)
-[![No daemon](https://img.shields.io/badge/runtime-a%20file%20on%20disk-0f766e)](#how-it-actually-runs-on-your-machine)
-[![No daemon](https://img.shields.io/badge/no-daemon%20%C2%B7%20no%20server-0f766e)](#how-it-actually-runs-on-your-machine)
+[![Release](https://img.shields.io/github/v/release/dpa-plus/comms?include_prereleases&logo=github&color=6ea2ff)](https://github.com/dpa-plus/comms/releases)
+[![License](https://img.shields.io/badge/license-MIT-6ea2ff)](LICENSE)
+[![Go + Python](https://img.shields.io/badge/builds-Go%20%2B%20Python-6ea2ff)](#two-implementations-one-log)
+[![No daemon](https://img.shields.io/badge/runtime-a%20file%20on%20disk-6ea2ff)](#how-it-actually-runs-on-your-machine)
 
 </div>
 
-> **comms is a tiny command-line tool that lets several AI coding agents — and you — work in the same repository at the same time without stepping on each other.**
+Several coding agents in one repository will edit the same file within minutes of
+each other. Not because they are careless — because nothing tells them the file
+is taken. comms is the thing that tells them.
+
+An agent **claims** a file before it edits. A `PreToolUse` hook refuses an edit on
+somebody else's ground. Everything is appended to one file on disk, and every
+view — the board, the task graph, the code map — is read back out of it.
+
+**What that buys you beyond a lock.** Because the log records what each agent was
+doing and which files it took, comms can answer questions a lock cannot:
+
+| Question | Answered by |
+|---|---|
+| Who is holding this file right now? | the log, exactly |
+| What work exists, and is any of it finished? | the task graph |
+| Which files did that task actually touch? | claims tagged `--task` |
+| Whose work sits next to mine in the code? | the task graph joined to the code map |
+| Would this commit take somebody else's work? | `check --staged` |
 
 <p align="center">
-  <img src="assets/dashboard.png" alt="The comms dashboard: team roster, active claims, findings, notes, and one continuous persistent history." width="900">
+  <img src="assets/dashboard.png" alt="The comms board: the activity stream, who is holding which files, the task list with the files each task touches, and every project on the machine down the left." width="900">
 </p>
 
-<p align="center"><em>The board (<code>comms-graph ui</code>): what just happened, who is holding which files right now, the tasks with the files each one touches, and every project on the machine down the left. Everything on it is read out of the append-only log.</em></p>
+<p align="center"><em>The board (<code>comms-graph ui</code>), on a real project. Everything on it is read out of the append-only log — it writes nothing except one deliberate button.</em></p>
 
 ---
 
@@ -45,14 +56,21 @@ These are the classic problems of people working in parallel — and the classic
 
 | Primitive | What it's for | Example |
 |---|---|---|
-| **Claim** | "I'm working on this file — hands off." | `comms claim "src/auth.ts" --intent "fix JWT expiry"` |
-| **Finding** | A durable fact: a bug, a fix, a decision, a gotcha, a release. | `comms find decision "tracker is source of truth for leads"` |
-| **Note** | A short, throwaway heads-up. | `comms note "FYI: schema migration coming next"` |
-| **Session** | A named work window that groups claims/events and can be archived. | `comms session start "dashboard fixes"` |
-| **Doc** | A small per-repo wiki under `.comms/docs`. | `comms doc tracker-architecture` |
-| **Lesson** | Cross-project knowledge that outlives any one repo. | `comms lesson verify-data-before-ui` |
+| **Claim** | "I'm working on this file — hands off." Several at once is atomic. | `comms-graph claim src/auth.ts src/login.ts --intent "rework auth"` |
+| **Task** | What the work IS. Claims tagged to it become its file list. | `comms-graph task add auth-api --title "Session create/refresh"` |
+| **Finding** | A durable fact: a bug, a fix, a decision, a gotcha, a release. | `comms-graph find decision "tracker is source of truth for leads"` |
+| **Note** | A short, throwaway heads-up. | `comms-graph note "FYI: schema migration coming next"` |
+| **Session** | A named work window that groups claims/events and can be archived. | `comms-graph session start "dashboard fixes"` |
+| **Doc** | A small per-repo wiki under `.comms/docs`. | `comms-graph doc tracker-architecture` |
+| **Lesson** | Cross-project knowledge that outlives any one repo. | `comms-graph lesson verify-data-before-ui` |
 
-Before an agent edits a file it **claims** it. Before it forgets a decision it records a **finding**. Another agent (or you) runs `comms status` and instantly sees the whole picture. The first active participant becomes a lightweight **leader** whose only extra power is pinning `--priority` notes to the top.
+**Task is the one that changed the shape of the thing.** A claim says who is on a
+file; a task says what the work is, and tagging your claims to it (`--task
+<slug>`) is what lets the board answer "which files did this touch" and "whose
+work sits next to mine". It costs one flag on a command you were running anyway,
+and it is the only bookkeeping here that is not derived for you.
+
+Before an agent edits a file it **claims** it. Before it forgets a decision it records a **finding**. Another agent (or you) runs `comms-graph status` and instantly sees the whole picture. The first active participant becomes a lightweight **leader** whose only extra power is pinning `--priority` notes to the top.
 
 ---
 
@@ -76,14 +94,14 @@ your-repo/.comms/                         ← committed to git (shared design)
 
 > The per-machine log lives outside iCloud on purpose — iCloud Drive forks files that two processes append to at the same time, which would corrupt the log.
 
-**Every command is the same tiny dance.** When an agent runs `comms claim …`:
+**Every command is the same tiny dance.** When an agent runs `comms-graph claim …`:
 
 1. The binary **starts**, figures out which repo you're in, and finds that repo's `log.jsonl`.
 2. It grabs the **file lock** (so two agents can't write at the same instant).
 3. It **appends one line** — a JSON event — to the end of the log.
 4. It **releases the lock and exits.**
 
-That's it. A `comms` command is a short-lived program that opens a file, appends a line, and quits. Reading state (`comms status`) just replays the log — no lock needed.
+That's it. A `comms` command is a short-lived program that opens a file, appends a line, and quits. Reading state (`comms-graph status`) just replays the log — no lock needed.
 
 The dashboard reads those same files into **one continuous persistent history**.
 Selecting a project filters the timeline without changing or hiding its stored
@@ -95,8 +113,10 @@ flowchart LR
     A["Claude<br/>(comms claim …)"] -- append --> L[("log.jsonl<br/>append-only<br/>+ file lock")]
     B["Codex<br/>(comms find …)"] -- append --> L
     C["You<br/>(comms note …)"] -- append --> L
-    L -- replay/read --> D["comms status"]
-    L -- watched live --> U["comms ui<br/>(dashboard)"]
+    L -- replay/read --> D["comms-graph status"]
+    L -- watched live --> U["comms-graph ui<br/>(the board)"]
+    L -- joined to --> G[("graphify-out/graph.json<br/>the code map")]
+    G -- which tasks meet --> U
 ```
 
 ---
@@ -105,14 +125,14 @@ flowchart LR
 
 Here's the key idea: **the agents never talk to each other directly.** There's no chat, no messages flying between them, no network connection. They communicate the way a team uses a shared whiteboard:
 
-- **Agent A writes to the board.** `comms claim "aggregate.ts"` appends a *claim* event to the log.
-- **Agent B reads the board.** `comms status` replays the log and sees A's claim — so B knows to work elsewhere.
+- **Agent A writes to the board.** `comms-graph claim aggregate.ts` appends a *claim* event to the log.
+- **Agent B reads the board.** `comms-graph status` replays the log and sees A's claim — so B knows to work elsewhere.
 - **Conflicts are caught by reading, not messaging.** If B tries to claim a file that overlaps A's claim, comms sees the overlap in the log and tells B to back off.
-- **Stale claims can be taken over.** A claim goes **stale after 1 hour idle** — its holder is presumed gone. The `BLOCKED` message says so, and B can steal a stale claim directly (`comms claim … --steal <id>`, no `--reason`). A still-active claim (held < 1h) requires the user's confirmation and a `--reason` to steal.
+- **Stale claims can be taken over.** A claim goes **stale after 1 hour idle** — its holder is presumed gone. The `BLOCKED` message says so, and B can steal a stale claim directly (`comms-graph claim … --steal <id>`, no `--reason`). A still-active claim (held < 1h) requires the user's confirmation and a `--reason` to steal.
 
 The log is the single source of truth. It's **append-only**, so history is never rewritten — you can always see exactly who did what and when. This "shared ledger" model is what makes coordination reliable without any of the agents needing to know the others exist. They only need to know about **the log**.
 
-The dashboard (`comms ui`) is simply a **live read-only view** of that same log.
+The board (`comms-graph ui`) is simply a **live read-only view** of that same log.
 
 ---
 
@@ -297,7 +317,8 @@ launchctl kickstart -k "gui/$(id -u)/plus.dpa.comms-ui"  # if installed as a log
 - **uuid-free, dependency-light.** The core is the Go standard library plus a CLI framework, a ULID generator, and a file watcher.
 - **Append-only + `flock`.** Writes are serialized by a per-repo file lock; the log is never rewritten, so history and audit are free.
 - **Recoverable by design.** Blank lines are skipped, a torn final line is ignored, duplicate event IDs are dropped — a half-written line never breaks a read.
-- **Opt-in, not enforced.** comms suggests and records; it doesn't block your editor. A `PreToolUse` hook (`comms check`) can warn before an agent touches a claimed path, and `comms check --staged` can stop a commit when its Git index contains another actor's claimed files.
+- **Enforced, not suggested — if you wire the hook.** Nothing installs itself. But a `PreToolUse` hook running `comms-graph check --stdin-json` REFUSES an Edit or Write on somebody else's ground: it exits 2, which is the only code Claude Code treats as "block this tool call". It fails closed, and it spells paths the way the filesystem does, so two agents cannot hold one file under two capitalisations of its name.
+- **The hook cannot see Bash.** An edit made with `sed`, a heredoc or a one-liner never reaches it — and in agent auto-modes Bash is the documented default, so this is the normal case rather than a corner. Measured on one real session: ~35 edits, the hook fired zero times. `comms-graph check --staged` in a git `pre-commit` hook is the backstop that a heredoc cannot argue with, and it refuses a commit whose index holds another actor's claimed files.
 
 More in [`docs/DESIGN.md`](docs/DESIGN.md) and [`docs/PROTOCOL.md`](docs/PROTOCOL.md).
 
