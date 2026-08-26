@@ -281,9 +281,32 @@ def _snapshot(root: Path, log_file: Path, graph_path: Path | None = None) -> dic
     # The log itself, most recent first, as a readable feed. The board had no
     # answer at all to "what just happened" — the one question somebody who has
     # been away asks first, and the log is nothing but the answer to it.
+    # One atomic claim is ONE thing that happened. `claim a b c` appends an
+    # event per scope, so claiming eleven files filled the feed with eleven
+    # consecutive rows carrying the same actor, the same second and the same
+    # intent, and pushed everything else out of the window. Collapsed on the way
+    # out only: the per-scope events are what make a claim checkable path by
+    # path and are untouched. The same grouping is in `log`.
+    def _same_action(a, b) -> bool:
+        return (a.type == b.type == _log.TYPE_CLAIM
+                and a.actor == b.actor
+                and _string(a.data, "intent") == _string(b.data, "intent")
+                and abs((a.ts - b.ts).total_seconds()) <= 1.0
+                and not _string(a.data, "steals") and not _string(b.data, "steals"))
+
+    grouped: list = []
+    for ev in events[-120:]:
+        if grouped and _same_action(grouped[-1][0], ev):
+            grouped[-1].append(ev)
+            continue
+        grouped.append([ev])
+
     feed = []
-    for ev in events[-60:][::-1]:
+    for run in grouped[-60:][::-1]:
+        ev = run[0]
+        scopes = [(e.scope or [""])[0] if e.scope else "" for e in run]
         feed.append({
+            "scopes": [x for x in scopes if x],
             "type": ev.type,
             "actor": ev.actor,
             "scope": (ev.scope or [""])[0] if ev.scope else "",
@@ -1261,6 +1284,9 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 .guardwarn { padding: var(--sp-h) var(--sp-2); border-top: 1px solid var(--line);
   color: var(--amber); font-size: 11.5px; }
 .guardwarn .mono { color: var(--ink-4); }
+.alsocount { color: var(--ink-4); font-size: 11px; margin-left: 6px; }
+.alsopaths { color: var(--ink-4); font-size: 11px; margin: 1px 0 0;
+  overflow-wrap: anywhere; }
 .hrow { display: flex; align-items: baseline; gap: var(--sp-1);
   padding: 3px var(--sp-2); font-size: 12.5px; }
 .hrow:last-child { padding-bottom: var(--sp-1); }
@@ -1640,8 +1666,9 @@ function renderNow() {
   // somebody commits over a live claim. Say which this repo is.
   var g = D.guard || {};
   if (g.installed === false) {
-    h += '<div class="guardwarn">' + esc(g.text || "") +
-         '<span class="mono"> comms-graph guard install</span></div>';
+    // describe() already carries the command, so appending it again printed it
+    // twice on one line.
+    h += '<div class="guardwarn">' + esc(g.text || "") + "</div>";
   }
   h += "</div>";
   el("nowBand").innerHTML = h;
@@ -1779,7 +1806,19 @@ function eventRow(e, isLast) {
   if (e.type === "claim" || e.type === "release") {
     var verb = e.type === "claim" ? "claimed" : "released";
     s += '<div class="l1"><span class="verb ' + (e.type === "claim" ? "a" : "g") + '">' + verb + "</span>";
-    s += '<span class="path mono">' + esc(shortPath(e.scope)) + "</span></div>";
+    // One atomic claim of several files is one row. The paths are all named
+    // rather than counted, because a count is exactly what nobody can act on.
+    var many = (e.scopes && e.scopes.length > 1) ? e.scopes : null;
+    s += '<span class="path mono">' + esc(shortPath(many ? many[0] : e.scope)) + "</span>";
+    if (many) {
+      s += '<span class="alsocount">+' + (many.length - 1) + " more</span>";
+    }
+    s += "</div>";
+    if (many) {
+      s += '<div class="alsopaths mono">' +
+           many.slice(1).map(function (x) { return esc(shortPath(x)); }).join(", ") +
+           "</div>";
+    }
     s += '<div class="l2"><span class="actor">@' + esc(e.actor) + "</span>";
     if (e.task) { s += '<span class="dot"></span><span class="proj mono">' + esc(e.task) + "</span>"; }
     var tail = e.intent || e.result || "";

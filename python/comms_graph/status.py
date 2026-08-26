@@ -756,6 +756,7 @@ def log_main(argv: list[str]) -> int:
 
     cutoff = datetime.now(timezone.utc) - since
     as_json = "json" in flags
+    shown: list = []
     for ev in events:
         if ev.ts < cutoff:
             continue
@@ -779,7 +780,9 @@ def log_main(argv: list[str]) -> int:
             # change what it says.
             sys.stdout.write(ev.encode().decode("utf-8"))
         else:
-            _print_event_human(ev)
+            shown.append(ev)
+    if not as_json:
+        _print_events_human(shown)
     return EXIT_OK
 
 
@@ -872,7 +875,50 @@ def _short_id(value: str) -> str:
     return value[:6] if len(value) > 6 else value
 
 
-def _print_event_human(ev) -> None:
+def _print_events_human(events: list) -> None:
+    """Rows, with one atomic claim rendered as one row.
+
+    `claim a b c` appends one event per scope, which is correct in the log and
+    unreadable on the way out: claiming eleven files produced eleven consecutive
+    rows carrying the same actor, the same second and the same intent, so a
+    single decision arrived as eleven facts. An agent reading its own history
+    described it as one fact rendered as twenty-one rows.
+
+    Grouped at RENDER time, not in the log. The per-scope events are what make a
+    claim checkable path by path, so they stay exactly as written; this only
+    stops the reader from having to collapse them by eye. It works on logs
+    already on disk for the same reason.
+
+    The test for "one action" is deliberately strict: adjacent in the file, same
+    actor, same type, same intent, and within a second. append_batch writes a
+    batch contiguously and microseconds apart, so anything looser would start
+    merging decisions that were genuinely separate.
+    """
+    run: list = []
+
+    def flush() -> None:
+        if run:
+            _print_event_human(run[0], extra_scopes=[e.scope for e in run[1:]])
+            run.clear()
+
+    for ev in events:
+        if run:
+            first = run[0]
+            same = (ev.type == first.type == _log.TYPE_CLAIM
+                    and ev.actor == first.actor
+                    and (ev.data or {}).get("intent") == (first.data or {}).get("intent")
+                    and abs((ev.ts - first.ts).total_seconds()) <= 1.0
+                    and not (ev.data or {}).get("steals")
+                    and not (first.data or {}).get("steals"))
+            if same:
+                run.append(ev)
+                continue
+            flush()
+        run.append(ev)
+    flush()
+
+
+def _print_event_human(ev, extra_scopes: list | None = None) -> None:
     """One readable row per event.
 
     Every branch renders a type this build UNDERSTANDS. The fallback exists for
@@ -892,7 +938,13 @@ def _print_event_human(ev) -> None:
     elif ev.type == _log.TYPE_CLAIM:
         stole = text("steals") or text("stole_id")
         tail = f"  (stole {_short_id(stole)})" if stole else ""
-        print(f'{ts}  claim    @{ev.actor}  {_join_scope(ev.scope)}  "{text("intent")}"{tail}')
+        scopes = _join_scope(ev.scope)
+        if extra_scopes:
+            # Named, not counted. "+5 more" would hide exactly the thing
+            # somebody greps this output for.
+            more = ", ".join(_join_scope(x) for x in extra_scopes)
+            scopes = f"{scopes}, {more}"
+        print(f'{ts}  claim    @{ev.actor}  {scopes}  "{text("intent")}"{tail}')
     elif ev.type == _log.TYPE_RELEASE:
         original = text("original_actor")
         summary = _release_summary(data)

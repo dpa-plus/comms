@@ -1065,7 +1065,9 @@ def _cmd_claim(argv: list[str]) -> int:
         print(f"  TAKEN FROM @{stolen_from_actor} — their claim {claim_data['steals']} is ended.")
         print("  Recorded as a steal under your name, with your reason. If they come")
         print("  back and re-claim it, they will be told the same way you were.")
-    print(_advice(root, flags.get("graph"), scope, others))
+    advice = _advice(root, flags.get("graph"), scope, others)
+    if advice:
+        print(advice)
     return EXIT_OK
 
 
@@ -1152,26 +1154,34 @@ def _newest_source_mtime(root: Path) -> float | None:
 
 
 def _advice(root: Path, graph_flag: str | None, scope: _scope.Scope, others: list) -> str:
-    """The contact block: a prompt to look, never a verdict, never an order."""
+    """The contact block: a prompt to look, never a verdict, never an order.
+
+    SILENT WHEN IT HAS NOTHING TO SAY, which used to be most of the time. This
+    printed three lines of NOT ON THE MAP on every claim in any repo without a
+    graphify map, including when nobody else held anything at all, so the
+    commonest claim in the commonest repo carried a paragraph explaining why a
+    check nobody had asked for could not be run. An agent that made ~9 claims
+    reported reading none of it and using the map zero times.
+
+    The check only ever answers one question: does the ground you just took sit
+    next to ground somebody ELSE is holding. With no other claims there is no
+    question, so there is no answer worth printing, whatever the map says.
+    """
+    # Nothing to be in contact with. This is the case that was drowning the rest.
+    if not others:
+        return ""
+
     map_path = _graph_path(root, graph_flag)
     graph = _load_graph(map_path)
     stale = _staleness_note(root, map_path, getattr(scope, "path", "") or "") if graph is not None else ""
     mine = _resolve.resolve(graph, scope, root)
     if mine.miss_reason:
-        # Loud. This is the reply that must never be mistaken for "all clear".
-        # The hint has to match the reason: telling somebody to check their
-        # spelling when the real problem is that no map exists sends them
-        # hunting for a typo that is not there.
-        if graph is None:
-            hint = "  Nothing is wrong with the claim — there is just nothing to check it against."
-        else:
-            hint = "  Check the name: a typo looks exactly like code nothing else touches."
-        body = (
-            f"  NOT ON THE MAP — the claim is recorded, but no contact check was possible:\n"
-            f"    {mine.miss_reason}\n"
-            f"{hint}"
-        )
-        return (stale + "\n" + body) if stale else body
+        # Still said, because somebody else IS holding ground and "we could not
+        # check" must never be mistaken for "you are clear". One line, though:
+        # the three-line version was explaining itself to nobody.
+        held = f"{len(others)} other claim" + ("s" if len(others) != 1 else "")
+        return (f"  not on the map, so contact with the {held} could not be "
+                f"checked: {mine.miss_reason}")
     resolved_others = []
     for actor, scope_str, other_scope in others:
         res = _resolve.resolve(graph, other_scope, root)

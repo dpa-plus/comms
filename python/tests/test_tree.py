@@ -63,6 +63,27 @@ def _cli(repo, *args, session=None):
     return code, out.getvalue()
 
 
+def _said(out: str) -> int:
+    """Lines the command actually said, ignoring the temp-HOME store warning.
+
+    The tests override HOME, which makes every command print a two-line notice
+    about the store living under a temporary directory. Counting raw lines would
+    measure that instead of the output under test.
+    """
+    lines = [ln for ln in out.splitlines() if ln.strip()]
+    keep, skipping = [], False
+    for ln in lines:
+        if ln.startswith("warning: the comms store is under a temporary"):
+            skipping = True
+            continue
+        if skipping and (ln.startswith(" ") or ln.startswith("That usually")
+                         or ln.startswith("log and will not")):
+            continue
+        skipping = False
+        keep.append(ln)
+    return len(keep)
+
+
 def _state(repo):
     from comms_graph import cli as ccli
 
@@ -253,3 +274,78 @@ def test_staged_paths_nobody_claimed_are_named_rather_than_passed_over(tmp_path,
     assert code == 0, out
     assert "claimed by nobody" in out, out
     assert "a_ts" in out and "new_ts" in out, out
+
+
+# ---------------------------------------------------------------------------
+# what gets printed at all
+# ---------------------------------------------------------------------------
+
+
+def test_a_claim_says_nothing_about_the_map_when_nobody_else_holds_anything(
+    tmp_path, monkeypatch
+):
+    """IF THIS FAILS: every claim in every repo without a graphify map carries
+    three lines explaining why a check nobody asked for could not run. Measured:
+    an agent making nine claims read none of it and used the map zero times.
+
+    The check answers one question, does your ground touch somebody ELSE's. With
+    no other claims there is no question."""
+    repo = _repo(tmp_path, monkeypatch)
+    _commit(repo, a_ts="x\n")
+
+    code, out = _cli(repo, "claim", "a_ts", "--as", "alpha", "--intent", "i", session="sA")
+    assert code == 0, out
+    assert "not on the map" not in out.lower(), out
+    assert _said(out) == 1, f"more than the one CLAIMED line:\n{out}"
+
+
+def test_a_claim_still_says_it_could_not_check_when_somebody_else_does_hold(
+    tmp_path, monkeypatch
+):
+    """IF THIS FAILS: silence covers the one case where it matters, and "we
+    could not check" becomes indistinguishable from "you are clear"."""
+    repo = _repo(tmp_path, monkeypatch)
+    _commit(repo, a_ts="x\n", b_ts="x\n")
+    _cli(repo, "claim", "b_ts", "--as", "peer", "--intent", "theirs", session="sP")
+
+    code, out = _cli(repo, "claim", "a_ts", "--as", "alpha", "--intent", "i", session="sA")
+    assert code == 0, out
+    assert "not on the map" in out, out
+    # One line about it, not a paragraph.
+    assert _said(out) == 2, out
+
+
+def test_one_atomic_claim_is_one_row_in_the_log(tmp_path, monkeypatch):
+    """IF THIS FAILS: claiming eleven files renders as eleven consecutive rows
+    with the same actor, second and intent, which is one decision reported as
+    eleven facts. The per-scope EVENTS must stay, though: they are what makes a
+    claim checkable path by path."""
+    repo = _repo(tmp_path, monkeypatch)
+    _commit(repo, a_ts="x\n", b_ts="x\n", c_ts="x\n")
+    _cli(repo, "claim", "a_ts", "b_ts", "c_ts", "--as", "alpha",
+         "--intent", "one boundary", session="sA")
+
+    code, out = _cli(repo, "log", "--as", "alpha", session="sA")
+    assert code == 0, out
+    rows = [ln for ln in out.splitlines() if "  claim  " in ln]
+    assert len(rows) == 1, out
+    # Every path named, because a count is what nobody can act on.
+    for name in ("a_ts", "b_ts", "c_ts"):
+        assert name in rows[0], rows[0]
+
+    # The log itself is untouched: still one event per scope.
+    code, raw = _cli(repo, "log", "--json", "--as", "alpha", session="sA")
+    assert raw.count('"type":"claim"') == 3, raw
+
+
+def test_two_separate_claims_are_not_merged_into_one_row(tmp_path, monkeypatch):
+    """IF THIS FAILS: grouping has started collapsing decisions that were
+    genuinely separate, which loses history rather than tidying it."""
+    repo = _repo(tmp_path, monkeypatch)
+    _commit(repo, a_ts="x\n", b_ts="x\n")
+    _cli(repo, "claim", "a_ts", "--as", "alpha", "--intent", "first", session="sA")
+    _cli(repo, "claim", "b_ts", "--as", "alpha", "--intent", "second", session="sA")
+
+    code, out = _cli(repo, "log", "--as", "alpha", session="sA")
+    rows = [ln for ln in out.splitlines() if "  claim  " in ln]
+    assert len(rows) == 2, out
