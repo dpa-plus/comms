@@ -12,17 +12,17 @@
 
 ### What we cut
 
-- **Severity ladders, threaded inboxes, registration tokens, deputies** — `mcp-agent-mail` had all of these. They added ceremony that agents kept skipping.
-- **An MCP server** — cut for the same reason, and later *reversed*. See below.
-- **A single unbounded markdown file** — `COMMS.md` grew to 1632 lines, had no targeted reads, and iCloud forked it on concurrent writes.
-- **Heartbeats and TTLs** — agents don't have a sense of time; claims would expire mid-session. We replaced this with "user arbitrates dead sessions" — see below.
+- **Severity ladders, threaded inboxes, registration tokens, deputies**: `mcp-agent-mail` had all of these. They added ceremony that agents kept skipping.
+- **An MCP server**: cut for the same reason, and later *reversed*. See below.
+- **A single unbounded markdown file**: `COMMS.md` grew to 1632 lines, had no targeted reads, and iCloud forked it on concurrent writes.
+- **Heartbeats and TTLs**: agents don't have a sense of time, so claims would expire mid-session. We replaced this with "user arbitrates dead sessions" (see below).
 
 ### What we cut and then brought back
 
 **The MCP server.** It was cut with the rest of `mcp-agent-mail`'s apparatus, on
 the grounds that it was ceremony agents skipped. The ceremony judgement was
 right. The transport judgement was wrong, and the log says so: across 4,356 real
-claims exactly **one** carried a task. Not because the task graph was broken —
+claims exactly **one** carried a task. Not because the task graph was broken:
 because the instruction to use it lived in a skill that forbids auto-triggering
 and only loads when a human types its name. A CLI an agent has to be told to run
 loses to a tool sitting in its tool list every turn.
@@ -49,13 +49,13 @@ So:
 - `$COMMS_ACTOR` MUST be a concrete per-session identifier: `claude-3a1f`, `codex-9b2c`, `human-eli`.
 - Generic names (`eli`, `claude`, `codex`, `agent`, `user`, `$USER`) are rejected by default. Override with `COMMS_ALLOW_GENERIC_ACTOR=1` for emergencies.
 - We use shell wrappers (`cc`, `cdx`) that inject `COMMS_ACTOR=claude-<random>` per launch. The env var inherits through the whole process tree.
-- Human shells use `COMMS_ACTOR=human-eli` directly — the human's identity doesn't rotate.
+- Human shells use `COMMS_ACTOR=human-eli` directly: the human's identity doesn't rotate.
 
-The hook approach (`SessionStart` does `export COMMS_ACTOR=...`) doesn't work because each hook fires in an isolated subshell — the export doesn't propagate to other tool subprocesses.
+The hook approach (`SessionStart` does `export COMMS_ACTOR=...`) doesn't work because each hook fires in an isolated subshell: the export doesn't propagate to other tool subprocesses.
 
 ### No TTL, no heartbeat, no daemon
 
-Agents don't have a clock — they can't send heartbeats reliably. Adding a timeout means an agent's claim expires mid-session, surprising it.
+Agents don't have a clock: they can't send heartbeats reliably. Adding a timeout means an agent's claim expires mid-session, surprising it.
 
 Instead:
 
@@ -76,12 +76,12 @@ One log line, atomic, no race window.
 We need exactly-one-winner semantics for concurrent `claim` invocations. `flock(2)` is:
 
 - POSIX-portable (works on macOS + Linux).
-- Released by the kernel on FD close — including `kill -9`. No stale-lock cleanup needed.
+- Released by the kernel on FD close: including `kill -9`. No stale-lock cleanup needed.
 - Simple Go API via `golang.org/x/sys/unix.Flock`.
 
 The lock is per-repo (the log directory's `.lock` file). Every mutating command acquires-then-appends-then-releases.
 
-Read-only `comms check` deliberately skips the lock — it reads the log without writing, so blocking on a long-running `claim` would defeat the point of being fast in the PreToolUse hook.
+Read-only `comms check` deliberately skips the lock: it reads the log without writing, so blocking on a long-running `claim` would defeat the point of being fast in the PreToolUse hook.
 
 ### JSONL, not SQLite
 
@@ -91,7 +91,7 @@ A `comms compact` operation (future) can rotate or summarize old events without 
 
 ### Log lives OUTSIDE iCloud, docs live INSIDE the repo
 
-iCloud Drive forks files that are written concurrently — we got `log 2.jsonl`-style filename collisions in the `COMMS.md` era. To avoid that, the JSONL log lives at `~/Library/Application Support/comms/<repo-hash>/log.jsonl` (per-machine, outside iCloud).
+iCloud Drive forks files that are written concurrently: we got `log 2.jsonl`-style filename collisions in the `COMMS.md` era. To avoid that, the JSONL log lives at `~/Library/Application Support/comms/<repo-hash>/log.jsonl` (per-machine, outside iCloud).
 
 But docs (`.comms/docs/*.md`) are committed and need to travel with the repo via git. They're rarely concurrent-written (only `comms doc --edit` writes them, and that's flocked).
 
@@ -107,7 +107,7 @@ So we compute glob ∩ glob purely as a string operation. `src/**` overlaps `src
 
 ### `comms doc` has three forms only
 
-`--list`, `<slug>`, `<slug> --edit`. The `--edit` form takes a sidecar flock so two editors can't clobber each other. No `--diff`, `--history`, `--delete`, `--rename` in MVP — docs are plain Markdown in git, so use `git log .comms/docs/` for history and `git rm` for deletion.
+`--list`, `<slug>`, `<slug> --edit`. The `--edit` form takes a sidecar flock so two editors can't clobber each other. No `--diff`, `--history`, `--delete`, `--rename` in MVP: docs are plain Markdown in git, so use `git log .comms/docs/` for history and `git rm` for deletion.
 
 ## What's deliberately out of scope
 
@@ -115,4 +115,4 @@ So we compute glob ∩ glob purely as a string operation. `src/**` overlaps `src
 - Cross-machine sync (Eli works on one Mac for now).
 - LSP integration for symbol anchors (string equality is good enough).
 - Web UI (CLI + grep + `git log` are sufficient).
-- Replacing this design is cheap if it doesn't work — the on-disk shape is JSONL + Markdown, both of which any tool can read.
+- Replacing this design is cheap if it doesn't work: the on-disk shape is JSONL + Markdown, both of which any tool can read.

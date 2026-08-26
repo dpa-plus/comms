@@ -17,7 +17,7 @@ exit code needs to know.
 - `comms mcp` serves the coordination verbs as MCP tools over stdio, so claiming,
   checking and releasing sit in an agent's tool list every turn instead of being
   commands somebody has to remember to run. Six verbs mapping one-to-one onto
-  existing commands — no registration, no inbox, no severity ladder. JSON-RPC with
+  existing commands: no registration, no inbox, no severity ladder. JSON-RPC with
   no SDK, so the dependency list is unchanged. `docs/DESIGN.md` cut an MCP server
   originally and now records why that was reversed.
 - Every tool takes an `actor`, and `Open` accepts a per-request actor override.
@@ -27,7 +27,7 @@ exit code needs to know.
   tool prevents anything, and `comms status` reports it as COLLISIONS PREVENTED.
 - A task graph. `task`, `task_edge` and `task_state` events describe what work
   exists, the order it must happen in, and how far along it is. State is computed
-  by replaying the log — nothing writes "ready" or "blocked" into an event.
+  by replaying the log: nothing writes "ready" or "blocked" into an event.
 - Every task is two steps: an agent does it, then a **different** agent verifies
   it. A task unblocks what comes after it only once it has been **verified**, not
   when it is merely finished, which puts review on the critical path rather than
@@ -44,7 +44,7 @@ exit code needs to know.
 - `comms plan --from` appends a whole decomposition atomically, validating slugs,
   sizes, unknown endpoints, duplicate edges and dependency cycles first. A cyclic
   plan writes nothing.
-- `comms next` — work waiting to be verified first, and never work you did
+- `comms next`: work waiting to be verified first, and never work you did
   yourself. `comms task show` groups the graph by what can be done about it.
 - `comms claim --task <slug>` ties a file claim to a task, so who is working on
   what is derived from work agents already do rather than a second bookkeeping
@@ -64,19 +64,19 @@ exit code needs to know.
 ### Changed
 
 - The top of the dashboard is one 46px rail. It was 163px: a header carrying two
-  filesystem paths, and under it a summary band that was 78% empty background —
+  filesystem paths, and under it a summary band that was 78% empty background:
   312px of tiles stretched across 1425. The paths moved into the title of the
   project name that already identifies the checkout, and the counts moved into
   the headings of the two panels that render the things being counted.
 - Stale claims, work waiting to be verified, and dependency cycles are now filled
-  red chips on that rail — the only filled shapes on it. All three exist at all
+  red chips on that rail: the only filled shapes on it. All three exist at all
   times and only toggle hidden, and the alert wash is an inset shadow rather than
   a border, so an alarm appearing never moves the page by a pixel. In the
   all-projects view they sum across projects, because a task graph belongs to one
   repository and the merged snapshot carries no board of its own.
 - Active claims are grouped by whose work it is and why. One agent editing eight
   files for one reason used to print that reason eight times and squeeze the
-  paths — the part you are scanning for — into a scrollbar; now the intent and
+  paths, the part you are scanning for, into a scrollbar; now the intent and
   the directory every path shares are printed once, and each file is one line.
 - The dashboard's summary tiles only count what the page does not already show
   in full. Findings, notes and the session archive are rendered a few hundred
@@ -105,7 +105,7 @@ exit code needs to know.
   frames carry only rows appended since the previous frame, marked
   `events_delta`, and the page merges them by event ID. Filtering still runs over
   every row, and a push now costs what changed instead of the whole append-only
-  log — on a store of 11,000 events that is roughly 4.8 MB per push down to tens
+  log: on a store of 11,000 events that is roughly 4.8 MB per push down to tens
   of kilobytes.
 - Session views no longer repeat the events already present in the top-level
   history. `current_session`, `active_comms_sessions[]`, `comms_sessions[]`, and
@@ -142,7 +142,7 @@ exit code needs to know.
   failed"; `comms check` exited 1 on a conflict from the day it shipped, so the
   conflict report went to stderr and was discarded. It was also inverted: comms
   uses exit 2 for its own system errors, so a broken log blocked edits while a
-  real collision did not. Only the PreToolUse path changes — `check --staged`
+  real collision did not. Only the PreToolUse path changes: `check --staged`
   feeds git, where any non-zero aborts and 1 is the documented value.
 - Stealing a stale claim measured how long ago the claim was filed rather than
   whether the agent holding it had gone quiet, so a live agent that had held a
@@ -207,7 +207,7 @@ First public release.
   claims, `find` (bug/fix/ship/decision/gotcha) and `note` findings, `session`
   start/join/end/retire/lead, and a per-repo `doc` wiki plus global `lesson`s.
 - Append-only JSONL event log per repo with a per-repo `flock`; current state is
-  a pure replay (`state.Fold`) — no daemon, no polling, no database.
+  a pure replay (`state.Fold`): no daemon, no polling, no database.
 - `comms check` PreToolUse hook that warns before editing a path another actor
   has claimed.
 - Unified live web dashboard (`comms ui`): one view across every repo, pushed

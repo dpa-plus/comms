@@ -15,7 +15,7 @@ func NewBriefCmd() *cobra.Command {
 		Short: "Everything you need before starting a task",
 		Long: `What to read before you touch a task.
 
-An arrow in the graph is not just an ordering — it records what the later task
+An arrow in the graph is not just an ordering: it records what the later task
 CONSUMES from the earlier one, and the decisions the earlier agent made while
 building it. Those decisions are the expensive part: without them you will
 re-decide questions that were already settled and argued, and quite possibly
@@ -79,7 +79,7 @@ func runBrief(slug string) error {
 			fmt.Printf("  ORDER ONLY   %s\n", firstNonEmpty(e.Provides, "nothing is consumed across this edge"))
 			continue
 		}
-		fmt.Printf("  YOU CONSUME  %s\n", firstNonEmpty(e.Provides, "(nobody recorded what — ask before relying on it)"))
+		fmt.Printf("  YOU CONSUME  %s\n", firstNonEmpty(e.Provides, "(nobody recorded what: ask before relying on it)"))
 		if len(src.Notes) > 0 {
 			fmt.Printf("  DECISIONS YOU INHERIT\n")
 			for _, n := range src.Notes {
@@ -97,7 +97,7 @@ func runBrief(slug string) error {
 				fmt.Printf("    - %s\n", n)
 			}
 		}
-		fmt.Printf("  A finding has to be checkable — an input that breaks it, a line that\n")
+		fmt.Printf("  A finding has to be checkable: an input that breaks it, a line that\n")
 		fmt.Printf("  contradicts the spec, a case the tests miss. One verdict, no debate.\n")
 	}
 

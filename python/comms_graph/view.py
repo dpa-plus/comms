@@ -288,7 +288,7 @@ def _stale_note(root: Path, map_path: Path, rel_path: str) -> str | None:
         if not f.is_file():
             return None
         if f.stat().st_mtime > map_mtime:
-            return "this file changed after the map was built — the marks on it may be out of date"
+            return "this file changed after the map was built: the marks on it may be out of date"
     except OSError:
         return None
     return None
@@ -427,12 +427,12 @@ def collect(graph, state, root: Path, map_path: Path) -> ViewData:
         if missed:
             data.headline += (
                 f" {len(missed)} further claim(s) could not be placed and are not "
-                "drawn — listed below."
+                "drawn: listed below."
             )
 
     data.notes = [
         "A solid ring means somebody is standing here. A faint ring means one connection away.",
-        "Neither is a verdict and neither implies an order — the map cannot tell you what to do first.",
+        "Neither is a verdict and neither implies an order: the map cannot tell you what to do first.",
         "The map misses roughly a third of the file pairs that really do change together, so an unmarked node is not a guarantee that it is free.",
         "Of the pairs the map does flag, well under half really change together. A faint ring is a prompt to look.",
     ]
@@ -491,10 +491,10 @@ def _payload(data: ViewData) -> dict:
 
 
 _OVERLAY_STYLE = """<style>
-  /* Coordination overlay. Additive only — no rule here restyles a base element. */
+  /* Coordination overlay. Additive only: no rule here restyles a base element. */
   /* Capped and scrollable: a whole-file claim can list fifty places, and an
      uncapped panel would push the community legend off the bottom of the
-     sidebar — quietly removing part of the picture that was already there. */
+     sidebar: quietly removing part of the picture that was already there. */
   #comms-panel { padding: 12px 14px; border-bottom: 1px solid #2a2a4e; background: #16162b;
                  max-height: 42vh; overflow-y: auto; flex-shrink: 0; }
   #comms-panel h3 { font-size: 13px; color: #aaa; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em; }
@@ -527,7 +527,7 @@ def _overlay_script(data: ViewData) -> str:
 // ---------------------------------------------------------------------------
 // Coordination overlay. Runs AFTER the base script, touches nothing it built.
 // Marks are drawn in an afterDrawing pass so every node keeps the exact colour,
-// size, border and font the exporter gave it — the picture underneath is the
+// size, border and font the exporter gave it: the picture underneath is the
 // picture graphify draws today.
 // ---------------------------------------------------------------------------
 const COMMS = {payload};
@@ -549,8 +549,8 @@ function commsShort(s) {{
 
 // --- reaching the base script safely ---------------------------------------
 // `network` and `nodesDS` are top-level `const`s in the exporter's script. If
-// that script threw before initialising them — which is exactly what happens
-// when the CDN drawing library did not load — they exist but are in the
+// that script threw before initialising them: which is exactly what happens
+// when the CDN drawing library did not load: they exist but are in the
 // temporal dead zone, and even `typeof network` throws a ReferenceError. Every
 // read of them therefore goes through here, so a failed library takes the
 // PICTURE down without also taking down the roster, which needs no library at
@@ -621,7 +621,7 @@ if (COMMS_NETWORK) {{
       // Who, and why, written next to the mark. The label is the point: a mark
       // nobody can attribute is just noise on the map.
       if (z < COMMS_TAG_ZOOM || h.tag === false) return;
-      const tag = '@' + h.actor + (h.why ? ' — ' + h.why : '')
+      const tag = '@' + h.actor + (h.why ? ': ' + h.why : '')
                 + (h.also ? ' (+' + h.also + ' more here)' : '');
       ctx.font = 'bold ' + (11 / z) + 'px -apple-system, BlinkMacSystemFont, sans-serif';
       ctx.textAlign = 'center';
@@ -640,7 +640,7 @@ if (COMMS_NETWORK) {{
   network.on('zoom', () => network.redraw());
 
   // Slow the wheel down. vis-network's default zoomSpeed of 1 moves roughly a
-  // factor of 1.2 per wheel notch, and a trackpad sends notches in bursts — two
+  // factor of 1.2 per wheel notch, and a trackpad sends notches in bursts: two
   // flicks and a few-hundred-node map has gone from fitted to a single dot or
   // to one node filling the screen, with no sense of having travelled. At 0.35
   // a deliberate scroll still crosses the whole range in about a second, but a
@@ -661,13 +661,13 @@ if (COMMS_DS) {{
     const n = nodesDS.get(id);
     if (!n) return;
     updates.push({{ id: id, title: (n.title || '') + '\\nSomebody is here: @' + h.actor +
-      ' holds ' + h.scope + (h.why ? ' — ' + h.why : '') }});
+      ' holds ' + h.scope + (h.why ? ': ' + h.why : '') }});
   }});
   COMMS_NEAR.forEach((nb, id) => {{
     const n = nodesDS.get(id);
     if (!n) return;
     updates.push({{ id: id, title: (n.title || '') + '\\nOne connection from work @' + nb.actor +
-      ' is doing' + (nb.relation ? ' [' + nb.relation + ']' : '') + ' — worth a look, not a verdict' }});
+      ' is doing' + (nb.relation ? ' [' + nb.relation + ']' : '') + ': worth a look, not a verdict' }});
   }});
   if (updates.length) nodesDS.update(updates);
 }}
@@ -681,7 +681,7 @@ if (COMMS_DS) {{
 
   // A whole-file claim resolves to every symbol in the file. Listing all of
   // them buries the other claims under one person's wall of chips, so the list
-  // is cut and the cut is stated — never silently truncated into looking small.
+  // is cut and the cut is stated: never silently truncated into looking small.
   const CHIP_CAP = 8;
   let rows = '';
   COMMS.claims.forEach(c => {{
@@ -707,7 +707,7 @@ if (COMMS_DS) {{
     rows = COMMS.blind
       ? '<div class="comms-quiet">The log could not be read, so this cannot say who is '
         + 'where. An empty list here is the absence of an answer, not the answer '
-        + '"nobody" — every claim may still be held.</div>'
+        + '"nobody": every claim may still be held.</div>'
       : '<div class="comms-quiet">Nobody is holding anything right now. '
         + 'That is what the log says, not a statement about whether the code is free.</div>';
   }}
@@ -787,7 +787,7 @@ def _standalone_page(data: ViewData, map_path: Path) -> str:
         # itself and the reassuring half was the false one.
         "<div class='quiet'>The coordination log could not be read, so this page "
         "cannot say who is where. An empty list here is the absence of an answer, "
-        "not the answer &quot;nobody&quot; — every claim may still be held.</div>"
+        "not the answer &quot;nobody&quot;: every claim may still be held.</div>"
         if data.blind else
         "<div class='quiet'>Nobody is holding anything right now. That is what the log "
         "says, not a statement about whether the code is free.</div>"
@@ -818,13 +818,13 @@ def _standalone_page(data: ViewData, map_path: Path) -> str:
 <main>
   <h1>No map has been built for this project yet.</h1>
   <p class="lead">Nothing was found at <code>{_html.escape(str(map_path))}</code>.
-     Run <code>graphify extract</code> (or <code>graphify update &lt;path&gt;</code>) and read this again —
-     the picture needs a map to draw on.</p>
+     Run <code>graphify extract</code> (or <code>graphify update &lt;path&gt;</code>) and read this again.
+     The picture needs a map to draw on.</p>
   <h2>What the log does know</h2>
   {body}
   <h2>What this page is not telling you</h2>
   <ul>
-    <li>Without a map, only exact overlaps are visible — nothing here knows what is connected to what.</li>
+    <li>Without a map, only exact overlaps are visible: nothing here knows what is connected to what.</li>
     <li>A short list is not a statement that the rest of the code is free.</li>
     <li>Nothing here implies an order. There is no "first" and no "blocked".</li>
   </ul>
@@ -903,7 +903,7 @@ def render(
     if graph is None:
         if map_error:
             data.headline = (
-                "There is a map file, and it could not be read — so this is not a "
+                "There is a map file, and it could not be read, so this is not a "
                 "picture of your code, and it is not evidence that anything is free."
             )
             data.notes = [
@@ -926,7 +926,7 @@ def render(
         data.headline = (
             f"This map has {graph.number_of_nodes()} nodes, above the "
             f"{_viz_limit()} the picture can draw one-by-one, so it is drawn grouped. "
-            "Individual marks are not placed on a grouped picture — the claims below are "
+            "Individual marks are not placed on a grouped picture: the claims below are "
             "still exactly what the log holds."
         )
         for c in data.claims:

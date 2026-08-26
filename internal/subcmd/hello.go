@@ -133,7 +133,7 @@ func runHello(args []string, label, model, vendor string) error {
 	if actor.IsGeneric(rt.Actor) {
 		fmt.Println()
 		fmt.Println("  NOTE: This actor name is generic (would normally be rejected).")
-		fmt.Println("  COMMS_ALLOW_GENERIC_ACTOR is set — be aware that conflict-detection")
+		fmt.Println("  COMMS_ALLOW_GENERIC_ACTOR is set: be aware that conflict-detection")
 		fmt.Println("  is degraded when multiple runners share an actor name.")
 	}
 	fmt.Println()

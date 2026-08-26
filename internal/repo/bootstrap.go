@@ -57,7 +57,7 @@ func writeIfAbsent(path string, content []byte, mode os.FileMode) error {
 }
 
 func policyTemplate() []byte {
-	return []byte(`# .comms/policy.txt — files where a whole-file claim is too coarse.
+	return []byte(`# .comms/policy.txt: files where a whole-file claim is too coarse.
 #
 # One path per line. Listed files require an explicit anchor (line range like
 # L10-L50 or a symbol name like User) on claims; bare path claims will be

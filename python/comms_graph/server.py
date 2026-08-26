@@ -677,7 +677,7 @@ body {
   padding-right: var(--sp-1);
 }
 /* Three nodes and the edges between them: the thing the tool is actually
-   about. Drawn rather than filled so it stays legible at 16px — a solid glyph
+   about. Drawn rather than filled so it stays legible at 16px: a solid glyph
    this small reads as a dot, and the whole point is that they are CONNECTED.
    The edges sit at lower opacity so the nodes carry the shape at a glance. */
 .brand .mark { width: 16px; height: 16px; flex: none; display: block; }
@@ -884,7 +884,7 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 /* ---------- centre: the stream ---------- */
 .stream { display: flex; flex-direction: column; min-height: 0; gap: var(--sp-2); }
 
-/* NOW band — live claims. Never a giant box; it is one strip that
+/* NOW band: live claims. Never a giant box; it is one strip that
    collapses to a single line when nothing is claimed. */
 .now {
   flex: none;
@@ -1222,7 +1222,7 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 
 /* ---------------------------------------------------------------------
    Additions to the mockup's sheet, for the parts wired to real data.
-   Every value here is one of its tokens — no new colours, no new spacing
+   Every value here is one of its tokens: no new colours, no new spacing
    steps. If something wants a value that is not a token, the token set is
    what should change.
    --------------------------------------------------------------------- */
@@ -1264,7 +1264,7 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 #nowBand { flex: none; }
 /* The mockup pinned .held as an absolute overlay at the bottom of the stream.
    Here it is a band in normal flow directly under the card header, so it has
-   to be taken out of that positioning — otherwise it lifts out of the layout
+   to be taken out of that positioning: otherwise it lifts out of the layout
    and its container measures zero while the rows themselves are 165px tall. */
 .nowband { border-bottom: 1px solid var(--line); background: var(--surface-2); }
 .nowband-hd { display: flex; align-items: baseline; gap: var(--sp-1);
@@ -1314,7 +1314,7 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
   border-color: var(--line-2); }
 .arow .rel:hover { color: var(--red); border-color: var(--red-line); background: var(--red-wash); }
 /* Visible without hovering. Hover-to-reveal was the first version and it fails
-   the actual complaint — "I don't see where I can release their claims" — since
+   the actual complaint: "I don't see where I can release their claims": since
    an affordance you have to find by accident is one you do not know exists.
    Understated instead of hidden: quiet until you look at it, red when you mean
    it. */
@@ -1524,7 +1524,7 @@ function agoIso(iso) {
   return isNaN(t) ? "" : ago((Date.now() - t) / 1000);
 }
 function shortPath(p) {
-  // Keep the tail — the filename is what identifies a claim at a glance, and
+  // Keep the tail: the filename is what identifies a claim at a glance, and
   // a long path pushes it off the row entirely.
   var s = String(p || "");
   return s.length > 46 ? "…" + s.slice(-45) : s;
@@ -1591,8 +1591,8 @@ function renderNow() {
     }
   } else {
     // BY AGENT, not by file. One agent holding eight files produced eight
-    // near-identical rows — same name, same truncated intent, same task, eight
-    // opaque claim ids — and the question somebody actually arrives with is not
+    // near-identical rows: same name, same truncated intent, same task, eight
+    // opaque claim ids: and the question somebody actually arrives with is not
     // "which files" but "is that agent still alive, and if not, free its
     // ground". A list of files cannot be acted on. A list of agents can.
     var byActor = {};
@@ -1623,7 +1623,7 @@ function renderNow() {
            held.length + "</button>";
       h += "</div>";
       // The files, quiet underneath: available without being in the way. The
-      // claim id moves to the row's tooltip — it is a handle for the CLI, not
+      // claim id moves to the row's tooltip: it is a handle for the CLI, not
       // something a person reads.
       h += '<div class="afiles">';
       held.forEach(function (c) {
@@ -1682,7 +1682,7 @@ function renderNow() {
    It asks for a reason and does not proceed without one. That is not ceremony:
    the release is appended to the log under the operator's name and stays there,
    and "who freed this and why" is the only question anybody asks afterwards.
-   The prompt is also the last moment to reconsider — the holder may simply be
+   The prompt is also the last moment to reconsider: the holder may simply be
    thinking. */
 function releaseClaim(btn) {
   var id = btn.getAttribute("data-id");
@@ -1704,12 +1704,12 @@ function releaseClaim(btn) {
     all ? "session ended" : "");
   if (reason === null) { return; }
   reason = reason.trim();
-  if (!reason) { alert("A reason is required — it is what the log will show."); return; }
+  if (!reason) { alert("A reason is required: it is what the log will show."); return; }
     var label = btn.textContent;
     btn.disabled = true; btn.textContent = "…";
     // One request per claim, sequentially. Each is its own event in the log, and
     // a partial failure has to leave the rest freed rather than roll anything
-    // back — the log is append-only and there is nothing to undo.
+    // back: the log is append-only and there is nothing to undo.
     var failed = [];
     ids.reduce(function (prev, cid) {
       return prev.then(function () {
@@ -1736,7 +1736,7 @@ function releaseClaim(btn) {
         return;
       }
       // The watcher notices the append and pushes a new snapshot, so the row
-      // goes on its own. Nothing is patched by hand here — the board stays a
+      // goes on its own. Nothing is patched by hand here: the board stays a
       // view of the log rather than a thing that edits its own copy.
       btn.textContent = "freed";
     })
@@ -1791,7 +1791,7 @@ function stateChip(v) {
   var label = v === "review" ? "awaiting-review" : v;
   return '<span class="state ' + cls + '">' + esc(label) + "</span>";
 }
-// A finding's CATEGORY, not a severity — this build records what kind of thing
+// A finding's CATEGORY, not a severity: this build records what kind of thing
 // it is, and colouring `decision` red because it sorts near `bug` would be a
 // lie dressed as a signal.
 function catClass(c) { return c === "bug" ? "high" : c === "gotcha" ? "med" : "low"; }
@@ -1923,8 +1923,8 @@ function renderRoster() {
     return;
   }
   // WHO IS HERE, not everyone who has ever been. Agents take a fresh name each
-  // session — claude-karte, claude-kartenansicht, claude-karte-fachebenen are
-  // one person on three days — so the list only grows and the three who are
+  // session: claude-karte, claude-kartenansicht, claude-karte-fachebenen are
+  // one person on three days: so the list only grows and the three who are
   // actually working sit among twenty who are not. Measured on the real store:
   // 24 names, 3 seen in the last hour, 16 older than a week.
   //
@@ -2045,7 +2045,7 @@ function openTask(id) {
   } else if (t.phase === "cycle") {
     state = "In a dependency loop, so nothing here can start.";
   } else {
-    state = "Ready — nobody has claimed it.";
+    state = "Ready: nobody has claimed it.";
   }
   h += '<div class="tdet-state">' + state + "</div>";
   if (t.rejections) {
@@ -2078,22 +2078,22 @@ function openTask(id) {
   //
   // Said as "meets", never as an ordering. A declared edge is a judgement about
   // sequence; a code connection is a fact with no direction, and the map runs at
-  // roughly a third to a half recall — an inferred arrow would be confidently
+  // roughly a third to a half recall: an inferred arrow would be confidently
   // wrong often enough to poison the board.
   var rel = t.related || [];
   if (rel.length) {
     h += '<div class="tdet-sec">MEETS IN THE CODE (' + rel.length + ")</div>";
-    h += '<div class="tdet-note">Not declared by anyone — these tasks touch files that ' +
+    h += '<div class="tdet-note">Not declared by anyone: these tasks touch files that ' +
          "reach each other in the map.</div>";
     h += '<div class="tdet-files">';
-    // Demote, never drop — same reason as the CLI. Sorting own work last and
+    // Demote, never drop: same reason as the CLI. Sorting own work last and
     // then slicing deleted it, and that row is the one an agent reported as the
     // win.
     var strangers = rel.filter(function (r) { return !r.same_actor; });
     var ownRel = rel.filter(function (r) { return r.same_actor; });
     strangers.slice(0, 8).concat(ownRel.slice(0, 4)).forEach(function (r) {
       // NAME the places. Three agents said the same thing independently: a
-      // count is a number without a noun, and you cannot act on it — whether to
+      // count is a number without a noun, and you cannot act on it: whether to
       // go and knock on somebody's door depends on whether the shared files are
       // the component you both edit or four barrels every file imports. Naming
       // them also lets a reader discount a 3000-line god file on sight.
@@ -2224,7 +2224,7 @@ el("projQ").addEventListener("input", function (ev) { PQ = ev.target.value.trim(
 })();
 
 // The task DAG, on demand. It is a whole vis-network page in an iframe and
-// most of the day nobody wants it — so it costs nothing until asked for.
+// most of the day nobody wants it: so it costs nothing until asked for.
 (function () {
   var wrap = el("dagWrap"), frame = el("dagFrame"), shown = "";
   function show(src, btn) {
@@ -2545,7 +2545,7 @@ class Board:
                 return _placeholder(
                     "No code map yet.",
                     "Build one with <code>graphify extract . --code-only</code> "
-                    "— claims still record and still block without it.",
+                    ": claims still record and still block without it.",
                     str(exc))
         return self._cached("map", build)
 

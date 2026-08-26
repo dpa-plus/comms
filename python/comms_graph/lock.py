@@ -189,7 +189,7 @@ class LockHandle:
             return (
                 "the lock file was deleted while it was held, so another process "
                 "has since created a new one at the same path and is holding that "
-                "instead — two writers, no exclusion"
+                "instead: two writers, no exclusion"
             )
         try:
             now = os.stat(self._path)
@@ -552,7 +552,7 @@ def release(handle: LockHandle) -> None:
             "release() takes the LockHandle returned by acquire()/try_acquire(), "
             f"not {type(handle).__name__}. This module used to hand back a raw fd, "
             "and a second release() then closed whatever unrelated file had "
-            "inherited that fd number — silently losing its buffered writes. "
+            "inherited that fd number: silently losing its buffered writes. "
             "Pass the handle (or just call handle.release())."
         )
     handle.release()
@@ -580,7 +580,7 @@ def acquire(
     if not math.isfinite(timeout) or timeout < 0:
         raise ValueError(
             f"timeout must be a finite, non-negative number of seconds, got {timeout!r}; "
-            "an unbounded wait is not offered on purpose — inf and nan do not mean "
+            "an unbounded wait is not offered on purpose: inf and nan do not mean "
             "'wait forever', they mean 'hang with no error to point at'"
         )
     # Same shape of hole: nan slips past `<= 0` and reaches time.sleep(), and
