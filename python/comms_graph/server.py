@@ -1363,7 +1363,16 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 .seg-ready { background: var(--green); }
 .seg-closed { background: var(--line-2); }
 .tally { display: flex; padding: 0 var(--sp-2) var(--sp-1); gap: var(--sp-1); }
-.tcell { flex: 1 1 0; min-width: 0; }
+.tcell { flex: 1 1 0; min-width: 0; border-top: 2px solid var(--line); padding-top: 5px; }
+.tcell.c-doing   { border-top-color: var(--amber); }
+.tcell.c-review  { border-top-color: var(--accent); }
+.tcell.c-blocked { border-top-color: var(--red); }
+.tcell.c-ready   { border-top-color: var(--green); }
+.tcell.c-closed  { border-top-color: var(--line-2); }
+/* A count of zero is not news, and at full contrast it competed with the ones
+   that are. */
+.tcell.zero { border-top-color: var(--line-hair); }
+.tcell.zero .tn { color: var(--ink-4); }
 .tn { font-size: 15px; color: var(--ink); }
 .tl { font-size: 9.5px; letter-spacing: .06em; color: var(--ink-4); }
 .stuck { border-top: 1px solid var(--line-hair); padding: var(--sp-1) var(--sp-2); }
@@ -2007,7 +2016,10 @@ function renderTasks() {
   });
   h += "</div><div class='tally'>";
   order.forEach(function (k) {
-    h += '<div class="tcell"><div class="tn mono">' + (c[k[0]] || 0) + '</div><div class="tl">' + k[1] + "</div></div>";
+    var v = c[k[0]] || 0;
+    h += '<div class="tcell c-' + k[0] + (v ? "" : " zero") + '">' +
+         '<div class="tn mono">' + v + "</div>" +
+         '<div class="tl">' + k[1] + "</div></div>";
   });
   h += "</div>";
 
