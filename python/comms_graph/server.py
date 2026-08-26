@@ -37,6 +37,7 @@ from . import lock as _lock
 from . import log as _log
 from . import state as _state
 from . import task as _task
+from . import guard as _guard
 from . import tree as _tree
 from . import taskcode as _taskcode
 
@@ -414,12 +415,20 @@ def _snapshot(root: Path, log_file: Path, graph_path: Path | None = None) -> dic
         ],
     }
 
+    # Whether anything enforces the commit check in this repo. Reported because
+    # an unenforced guard is indistinguishable from an enforced one until the
+    # moment somebody commits over a live claim, which has now happened.
+    gst = _guard.status(root)
+    guard = {"state": gst.state, "installed": gst.installed,
+             "chained": gst.chained, "text": _guard.describe(gst)}
+
     return {
         "root": str(root),
         "generated": _now_text(),
         "alerts": alerts,
         "projects": projects,
         "dirty": dirty,
+        "guard": guard,
         # Never silently. A rail that quietly drops 213 entries is indistinguishable
         # from one that lost them, and the next person to wonder where a project
         # went has nothing to read.
@@ -1249,6 +1258,9 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 .afiles.loose .how { color: var(--ink-4); font-size: 11.5px; }
 .afiles.loose .how.amber { color: var(--amber); }
 .afiles.loose .who { color: var(--ink-4); font-size: 11px; }
+.guardwarn { padding: var(--sp-h) var(--sp-2); border-top: 1px solid var(--line);
+  color: var(--amber); font-size: 11.5px; }
+.guardwarn .mono { color: var(--ink-4); }
 .hrow { display: flex; align-items: baseline; gap: var(--sp-1);
   padding: 3px var(--sp-2); font-size: 12.5px; }
 .hrow:last-child { padding-bottom: var(--sp-1); }
@@ -1623,6 +1635,13 @@ function renderNow() {
       h += '<div class="pmore">and ' + (loose.length - 25) + " more</div>";
     }
     h += "</div>";
+  }
+  // An unenforced guard looks exactly like an enforced one right up until
+  // somebody commits over a live claim. Say which this repo is.
+  var g = D.guard || {};
+  if (g.installed === false) {
+    h += '<div class="guardwarn">' + esc(g.text || "") +
+         '<span class="mono"> comms-graph guard install</span></div>';
   }
   h += "</div>";
   el("nowBand").innerHTML = h;

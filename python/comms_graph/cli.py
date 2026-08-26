@@ -55,6 +55,7 @@ from . import taskcode as _taskcode
 from . import taskview as _taskview
 from . import resolve as _resolve
 from . import scope as _scope
+from . import guard as _guard
 from . import tree as _tree
 from . import state as _state
 
@@ -2652,6 +2653,52 @@ def _release_somebody_elses(st, log_file, actor: str, target: str, reason: str) 
     return EXIT_OK
 
 
+GUARD_USAGE = """Usage: comms-graph guard <command>
+
+  install [--chain]   put the commit check into this repo's git hooks, so it
+                      runs on every commit whether anybody remembers or not.
+                      --chain keeps a pre-commit hook that is already there and
+                      runs it first.
+  status              is it wired in, and where
+  uninstall           take it out, restoring any hook it displaced
+
+  Without it, `check --staged` only ever runs when somebody types it. Measured:
+  three separate incidents where the check would have refused the commit and
+  nobody ran it.
+"""
+
+
+def _cmd_guard(argv: list[str]) -> int:
+    positional, flags = _parse_flags(argv)
+    sub = positional[0] if positional else "status"
+    root = _repo_root(flags.get("root"))
+
+    if sub == "status":
+        st = _guard.status(root)
+        print(_guard.describe(st))
+        if st.path is not None:
+            print(f"  hook path: {st.path}")
+        # Exit 1 when it is NOT wired in, so a setup script can branch on it
+        # without parsing prose. Not 2: nothing failed, the answer is just no.
+        return EXIT_OK if st.installed else EXIT_CONFLICT
+
+    if sub == "install":
+        ok, lines = _guard.install(root, chain="chain" in flags)
+        for line in lines:
+            (print if ok else _err)(line)
+        return EXIT_OK if ok else EXIT_CONFLICT
+
+    if sub == "uninstall":
+        ok, lines = _guard.uninstall(root)
+        for line in lines:
+            (print if ok else _err)(line)
+        return EXIT_OK if ok else EXIT_CONFLICT
+
+    _err(f"error: unknown guard command {sub!r}")
+    _err(GUARD_USAGE)
+    return EXIT_BLOCK
+
+
 def _cmd_board(argv: list[str]) -> int:
     _, flags = _parse_flags(argv)
     me = (flags.get("as") or os.environ.get("COMMS_ACTOR") or "").strip()
@@ -2669,6 +2716,13 @@ def _cmd_board(argv: list[str]) -> int:
     survey = _tree.survey(root, st)
     head = _tree.headline(survey)
 
+    # And whether anything is actually ENFORCING the commit check here. The
+    # check has always been correct and has caught nothing three times, because
+    # it only runs when somebody types it. An unenforced guard should not be
+    # invisible on the board that is supposed to be telling you the truth.
+    guard = _guard.status(root)
+    guard_line = "" if guard.installed else "  " + _guard.describe(guard)
+
     if not claims:
         if head:
             print("no active claims in this repo, but the tree is not quiet:")
@@ -2680,6 +2734,8 @@ def _cmd_board(argv: list[str]) -> int:
                   + (" and no uncommitted changes" if survey.readable else ""))
             if not survey.readable:
                 print(f"  {head or survey.unavailable}")
+        if guard_line:
+            print(guard_line)
         return EXIT_OK
     print(f"active claims ({len(claims)}):")
     for claim in claims:
@@ -2701,6 +2757,9 @@ def _cmd_board(argv: list[str]) -> int:
         print(head + ":")
         for line in _tree.lines(survey):
             print(line)
+    if guard_line:
+        print()
+        print(guard_line.strip())
     return EXIT_OK
 
 
@@ -2756,7 +2815,8 @@ def main(argv: list[str]) -> int:
     # users are agents it is the whole discovery path. Exact-match only, so a
     # free-text --intent that mentions --help is unaffected.
     if any(a in ("-h", "--help", "-?") for a in rest):
-        print(TASK_USAGE if sub == "task" else USAGE)
+        print(TASK_USAGE if sub == "task"
+              else GUARD_USAGE if sub == "guard" else USAGE)
         return EXIT_OK
     try:
         if sub == "claim":
@@ -2775,6 +2835,8 @@ def main(argv: list[str]) -> int:
             return _cmd_tasks(rest)
         if sub == "check":
             return _cmd_check(rest)
+        if sub == "guard":
+            return _cmd_guard(rest)
         if sub == "ui":
             return _cmd_ui(rest)
         if sub == "plan":
