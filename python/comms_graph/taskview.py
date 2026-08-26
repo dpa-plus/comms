@@ -294,16 +294,19 @@ _PAGE = """<!doctype html>
      container on construction, so anything inside #graph is destroyed the
      moment the picture is drawn: the notice was in the HTML, absent from the
      DOM, and invisible for exactly that reason. */
-  #wrap > .warn {{ position: absolute; z-index: 5; left: 16px; top: 12px;
+  /* Floating over the picture while there IS one, in the flow when there is
+     not: over an empty canvas it covered the first row of cards. */
+  #gcol > .warn {{ position: absolute; z-index: 5; left: 16px; top: 12px;
     margin: 0; max-width: 720px; font-size: 12.5px; line-height: 1.45;
     box-shadow: 0 6px 24px rgba(0,0,0,.45); }}
+  #graph.gone ~ .warn {{ position: static; margin: 14px 16px 0; max-width: none;
+    box-shadow: none; }}
   #wrap {{ position: relative; }}
   code {{ background: #24243f; padding: 1px 5px; border-radius: 3px;
     font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; }}
 </style>
 <div id="wrap">
-  <div id="gcol"><div id="graph"></div>{loose_block}</div>
-  {warning}
+  <div id="gcol"><div id="graph"></div>{warning}{loose_block}</div>
   <div id="side">
     <h1>Task graph</h1>
     <div class="headline">{headline}</div>

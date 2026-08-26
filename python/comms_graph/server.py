@@ -1355,52 +1355,45 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 
 /* the task list, and one task in full */
 .tlist { border-top: 1px solid var(--line-hair); }
-.trow { display: flex; align-items: baseline; gap: var(--sp-1);
-  padding: 5px var(--sp-2); font-size: 12.5px; cursor: pointer;
-  border-bottom: 1px solid var(--line-hair); }
+/* The title gets the row. The phase is a 3px bar down the left edge, because a
+   chip spelling out "CLOSED" cost about a third of the width and pushed the one
+   thing anybody reads into an ellipsis at twenty characters. */
+.trow { padding: 7px var(--sp-2) 7px calc(var(--sp-2) + 5px); position: relative;
+  border-bottom: 1px solid var(--line-hair); cursor: pointer; }
+.trow::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0;
+  width: 3px; background: var(--line-2); }
 .trow:last-child { border-bottom: 0; }
 .trow:hover { background: var(--surface-2); }
-.ttitle { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; }
-.tfiles { color: var(--ink-4); font-size: 11px; flex: none; }
+.trow.p-doing::before   { background: var(--amber); }
+.trow.p-review::before  { background: var(--accent); }
+.trow.p-blocked::before,
+.trow.p-cycle::before   { background: var(--red); }
+.trow.p-ready::before   { background: var(--green); }
+.trow.p-closed::before  { background: var(--line); }
+.trow.p-closed .ttitle  { color: var(--ink-3); }
+/* Two lines, then clamp. Truncating mid-word at one line made every task on a
+   real board indistinguishable from every other. */
+.ttitle { color: var(--ink); line-height: 1.35; display: -webkit-box;
+  -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.tmeta { display: flex; gap: var(--sp-1); align-items: baseline; margin-top: 2px; }
+.tfiles { color: var(--ink-4); font-size: 11px; }
+/* Closed work folds away: it is history, and on a real project it was 23 rows
+   burying the 3 that could still be acted on. */
+.tfold { display: flex; justify-content: space-between; align-items: baseline;
+  padding: 7px var(--sp-2); cursor: pointer; color: var(--ink-4);
+  font-size: 11.5px; border-bottom: 1px solid var(--line-hair); }
+.tfold:hover { background: var(--surface-2); }
+.tfoldc { color: var(--accent); }
+.swhy { color: var(--amber); font-size: 11px; }
+/* Still used by the task DETAIL header, where there is one task and room to
+   spell the phase out. It was only ever wrong in a list. */
 .tphase { flex: none; font-size: 9.5px; letter-spacing: .05em; text-transform: uppercase;
-  border-radius: 3px; padding: 1px 5px; border: 1px solid var(--line-2); color: var(--ink-4); }
+  padding: 1px 6px; border-radius: 3px; border: 1px solid var(--line);
+  color: var(--ink-4); }
 .tphase.p-doing { color: var(--amber); border-color: var(--amber-line); background: var(--amber-wash); }
 .tphase.p-review { color: var(--accent); border-color: var(--accent-line); background: var(--accent-wash); }
 .tphase.p-blocked, .tphase.p-cycle { color: var(--red); border-color: var(--red-line); background: var(--red-wash); }
 .tphase.p-ready { color: var(--green); border-color: var(--green); background: transparent; }
-
-.tdetbox { max-width: 860px; margin: 0 auto; width: 100%; }
-.tdet-hd { display: flex; align-items: center; gap: var(--sp-1);
-  padding: var(--sp-2); border-bottom: 1px solid var(--line); }
-.tdet-title { font-size: 14px; color: var(--ink); }
-.tdet-id { color: var(--ink-4); font-size: 11.5px; }
-.tdet-bd { padding: var(--sp-2); overflow-y: auto; }
-.tdet-state { font-size: 13px; color: var(--ink); padding-bottom: var(--sp-2); }
-.tdet-sec { font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
-  color: var(--ink-4); padding: var(--sp-2) 0 var(--sp-h); }
-.tdet-note { font-size: 12.5px; color: var(--ink-3); }
-.tdet-note.amber { color: var(--amber); }
-.tdet-checks { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
-.chk { font-size: 11.5px; border-radius: 4px; padding: 1px 6px; border: 1px solid var(--line-2); color: var(--ink-3); }
-.chk.ok { color: var(--green); border-color: var(--green); }
-.chk.bad { color: var(--red); border-color: var(--red-line); background: var(--red-wash); }
-.tdet-files { border-top: 1px solid var(--line-hair); }
-.tfrow { display: flex; align-items: baseline; gap: var(--sp-1); padding: 4px 0;
-  border-bottom: 1px solid var(--line-hair); font-size: 12.5px; }
-.tfdot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--line-2); }
-.tfdot.held { background: var(--amber); }
-.tfdot.done { background: var(--green); }
-.tfdot.meet { background: var(--accent); }
-.tfrow.tmeet { cursor: pointer; }
-.tfrow.tmeet:hover .tfpath { color: var(--accent); }
-.tvia { color: var(--ink-4); font-size: 11px; padding: 0 0 4px 14px; }
-.tfpath { color: var(--ink); flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tfactor { color: var(--accent); flex: none; }
-.tfstate { color: var(--ink-4); font-size: 11px; flex: none; }
-.srow { display: flex; gap: var(--sp-1); align-items: baseline; padding: 3px 0; font-size: 12px; }
-.srow .mono { color: var(--ink); flex: none; }
-.stitle { color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.swhy { color: var(--amber); flex: none; margin-left: auto; }
 .allgood { padding: var(--sp-1) var(--sp-2) var(--sp-2); color: var(--green); font-size: 12.5px; }
 
 /* this repo */
@@ -1995,25 +1988,54 @@ function renderTasks() {
             (order2[b.phase] === undefined ? 9 : order2[b.phase]);
     return d !== 0 ? d : (a.id < b.id ? -1 : 1);
   });
-  h += '<div class="tlist">';
-  sorted.forEach(function (t) {
+
+  // CLOSED WORK IS HISTORY AND IT WAS DROWNING THE REST. On a real project the
+  // panel was 23 closed rows and 3 live ones, so the three that could still be
+  // acted on were below the fold, and the list read as a wall. Closed work
+  // folds behind one line and opens on click.
+  var live = sorted.filter(function (t) { return t.phase !== "closed"; });
+  var done = sorted.filter(function (t) { return t.phase === "closed"; });
+
+  function taskRow(t) {
     var n = (t.files || []).length;
     var why = t.phase === "review" ? "needs review"
             : t.phase === "cycle" ? "dependency loop"
             : t.phase === "blocked" ? "waiting on " + (t.blocked_by || []).join(", ")
             : "";
-    h += '<div class="trow" data-task="' + esc(t.id) + '">' +
-         '<span class="tphase p-' + esc(t.phase) + '">' + esc(t.phase) + "</span>" +
-         '<span class="ttitle">' + esc(t.title || t.id) + "</span>" +
-         (n ? '<span class="tfiles mono">' + n + (n === 1 ? " file" : " files") + "</span>" : "") +
-         (why ? '<span class="swhy">' + esc(why) + "</span>" : "") +
-         "</div>";
-  });
+    // The phase is the colour of the bar down the left edge, not a chip. The
+    // chip cost about a third of the row and the title, which is the only part
+    // anybody reads, was being truncated to twenty characters to make room.
+    return '<div class="trow p-' + esc(t.phase) + '" data-task="' + esc(t.id) + '" ' +
+           'title="' + esc(t.phase + " — " + (t.title || t.id)) + '">' +
+           '<div class="ttitle">' + esc(t.title || t.id) + "</div>" +
+           '<div class="tmeta">' +
+             (why ? '<span class="swhy">' + esc(why) + "</span>" : "") +
+             (n ? '<span class="tfiles mono">' + n + (n === 1 ? " file" : " files") + "</span>" : "") +
+           "</div></div>";
+  }
+
+  h += '<div class="tlist">';
+  live.forEach(function (t) { h += taskRow(t); });
+  if (done.length) {
+    h += '<div class="tfold" id="tfold">' + done.length + " closed" +
+         '<span class="tfoldc">show</span></div>';
+    h += '<div class="tdone" id="tdone" hidden>';
+    done.forEach(function (t) { h += taskRow(t); });
+    h += "</div>";
+  }
   h += "</div>";
   el("tasks").innerHTML = h;
   Array.prototype.forEach.call(el("tasks").querySelectorAll(".trow"), function (row) {
     row.onclick = function () { openTask(row.getAttribute("data-task")); };
   });
+  var fold = el("tfold");
+  if (fold) {
+    fold.onclick = function () {
+      var box = el("tdone");
+      box.hidden = !box.hidden;
+      fold.querySelector(".tfoldc").textContent = box.hidden ? "show" : "hide";
+    };
+  }
 }
 
 /* One task, in full. Opened from a row rather than always on screen: the list
