@@ -1589,6 +1589,15 @@ function renderNow() {
   h += '<div class="nowband-hd"><span>Working now</span><span class="count">' +
        (cs.length ? cs.length + (cs.length === 1 ? " file claimed" : " files claimed") : "") + "</span></div>";
   var dirt = D.dirty || {};
+  // NO REPOSITORY IS NOT A FAILED READ. Run across every project (the login
+  // service does, from /), there is no working tree to have an opinion about,
+  // and reporting "the working tree could not be read: not a git repository"
+  // plus "commit guard: not known" is two lines of alarm about the absence of a
+  // question. The principle is never to render "could not look" as "all clear";
+  // it is not to invent a problem where there is no subject.
+  var noRepoHere = dirt.readable === false &&
+                   /not a git repository/i.test(dirt.unavailable || "");
+  if (noRepoHere) { dirt = {}; }
   if (!cs.length) {
     // "Nobody is holding any ground" is only reassuring if the tree agrees, and
     // it was measured NOT agreeing: no claims on the board while fifteen files
@@ -1602,6 +1611,10 @@ function renderNow() {
            dirt.total + (dirt.total === 1 ? " file has" : " files have") +
            ' uncommitted changes. Nothing here is claimed, which is not the same as ' +
            'nothing happening.</div>';
+    } else if (noRepoHere) {
+      h += '<div class="nowband-empty">Nobody is holding any ground. This view spans ' +
+           'every project, so there is no single working tree to check; open one on ' +
+           'the left to see what is changed in it.</div>';
     } else {
       h += '<div class="nowband-empty">Nobody is holding any ground, and there are ' +
            'no uncommitted changes.</div>';
@@ -1699,7 +1712,7 @@ function renderNow() {
   }
   // An unenforced guard looks exactly like an enforced one right up until
   // somebody commits over a live claim. Say which this repo is.
-  var g = D.guard || {};
+  var g = noRepoHere ? {} : (D.guard || {});
   if (g.installed === false) {
     // describe() already carries the command, so appending it again printed it
     // twice on one line.
