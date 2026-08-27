@@ -317,3 +317,122 @@ def test_a_guard_that_cannot_run_refuses_the_commit_rather_than_waving_it_throug
     # The escape hatch, spelled out, or this is a repo nobody can commit to.
     assert str(hook) in msg, msg
     assert "unchecked" not in _log(repo)
+
+
+# ---------------------------------------------------------------------------
+# the amend race
+# ---------------------------------------------------------------------------
+
+
+def test_an_amend_cannot_quietly_rewrite_somebody_elses_commit(tmp_path, monkeypatch):
+    """IF THIS FAILS: the reported race ships again. An agent was blocked
+    correctly, unstaged the peer files it was told to, and retried
+    `git commit --amend`. In the seconds between, the peer committed. The retry
+    had an EMPTY INDEX, so the check said "nothing is staged, so there was
+    nothing to check" and the amend rewrote the peer's seconds-old commit.
+
+    The index says nothing about HEAD, and an amend rewrites HEAD.
+    """
+    repo = _repo(tmp_path, monkeypatch)
+    _cli(repo, "guard", "install")
+    _cli(repo, "claim", "de.json", "--as", "karte", "--intent", "17 keys in flight",
+         session="sK")
+    (repo / "de.json").write_text('{"a":9}\n')
+    subprocess.run([GIT, "add", "-A"], cwd=repo, check=True)
+    code, out = _commit(repo, "karte", "feat(karte): their work")
+    assert code == 0, out
+
+    # Nothing of ours is staged. An ordinary commit would be refused; an amend
+    # is not, and it is HEAD that it would rewrite.
+    assert subprocess.run([GIT, "diff", "--cached", "--quiet"], cwd=repo).returncode == 0
+
+    env = dict(os.environ, COMMS_ACTOR="auftraege")
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    done = subprocess.run([GIT, "commit", "--amend", "--no-edit"], cwd=repo,
+                          capture_output=True, env=env)
+    msg = (done.stdout + done.stderr).decode("utf-8", "replace")
+    assert done.returncode != 0, msg
+    assert "@karte" in msg, msg
+    # And it must say what is actually wrong. Telling somebody to unstage a file
+    # that is not in their index is the same failure one level down.
+    assert "amend" in msg.lower(), msg
+    assert "restore --staged" not in msg, msg
+    assert "feat(karte): their work" in _log(repo), "their commit was rewritten"
+
+
+def test_you_can_still_amend_your_own_commit(tmp_path, monkeypatch):
+    """IF THIS FAILS: the fix has made `git commit --amend` unusable for the
+    person who wrote the commit, which is almost everybody who runs it."""
+    repo = _repo(tmp_path, monkeypatch)
+    _cli(repo, "guard", "install")
+    _cli(repo, "claim", "de.json", "--as", "mine", "--intent", "mine", session="sM")
+    (repo / "de.json").write_text('{"a":4}\n')
+    subprocess.run([GIT, "add", "-A"], cwd=repo, check=True)
+    code, out = _commit(repo, "mine", "my work")
+    assert code == 0, out
+
+    env = dict(os.environ, COMMS_ACTOR="mine")
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    done = subprocess.run([GIT, "commit", "--amend", "--no-edit"], cwd=repo,
+                          capture_output=True, env=env)
+    assert done.returncode == 0, (done.stdout + done.stderr).decode()
+
+
+def test_an_amend_in_a_repo_nobody_holds_anything_in_is_untouched(tmp_path, monkeypatch):
+    """IF THIS FAILS: installing the guard has broken `--amend` for everyone not
+    coordinating in that repo, which is most repos."""
+    repo = _repo(tmp_path, monkeypatch)
+    _cli(repo, "guard", "install")
+    (repo / "de.json").write_text('{"a":5}\n')
+    subprocess.run([GIT, "add", "-A"], cwd=repo, check=True)
+    assert _commit(repo, "somebody", "ordinary")[0] == 0
+
+    env = dict(os.environ, COMMS_ACTOR="somebody")
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    done = subprocess.run([GIT, "commit", "--amend", "--no-edit"], cwd=repo,
+                          capture_output=True, env=env)
+    assert done.returncode == 0, (done.stdout + done.stderr).decode()
+
+
+def test_check_says_how_many_paths_it_got_rather_than_none(tmp_path, monkeypatch):
+    """IF THIS FAILS: `comms-graph check a b c` answers "check needs a path",
+    which reads as "you gave none" and sends a reader to --help looking for a
+    flag that was never missing."""
+    repo = _repo(tmp_path, monkeypatch)
+    code, out = _cli(repo, "check", "a.tsx", "b.tsx", "c.json")
+    assert code != 0, out
+    assert "you gave 3" in out, out
+    assert "one path at a time" in out, out
+
+
+def test_a_title_that_reads_like_code_is_warned_about_not_refused(tmp_path, monkeypatch):
+    """IF THIS FAILS: either nothing pushes back on a title only an engineer can
+    read (reported: the positional form accepted German half-technical text in
+    silence), or a heuristic has started REFUSING titles. The rule is "a
+    non-technical reader understands it", which no regex decides, so a correct
+    title that happens to mention a file must still go through."""
+    repo = _repo(tmp_path, monkeypatch)
+
+    code, out = _cli(repo, "task", "add", "t1", "--as", "a",
+                     "--title", "Refactor toCents() in money.ts", session="sA")
+    assert code == 0, "a heuristic must never block the write"
+    assert "reads like code" in out, out
+
+    code, out = _cli(repo, "task", "add", "t2", "--as", "a",
+                     "--title", "Round money the same way everywhere", session="sA")
+    assert code == 0, out
+    assert "reads like code" not in out, out
+
+
+def test_a_refused_length_hands_back_something_that_fits(tmp_path, monkeypatch):
+    """IF THIS FAILS: trimming is guesswork again. Reported: 538 characters
+    refused, trimmed to 401, refused a second time for one character. Two round
+    trips for one finding, when the answer was computable at the first."""
+    repo = _repo(tmp_path, monkeypatch)
+    long = "word " * 200
+    code, out = _cli(repo, "find", "decision", long, "--as", "a", session="sA")
+    assert code != 0, out
+    assert "This fits" in out, out
+    fitted = [l for l in out.splitlines() if l.strip().startswith("word")]
+    assert fitted, out
+    assert len(fitted[-1].strip()) <= 400, f"the suggestion is itself over the cap: {len(fitted[-1].strip())}"

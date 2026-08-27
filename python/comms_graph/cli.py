@@ -1470,6 +1470,46 @@ def _cmd_check(argv: list[str]) -> int:
         return EXIT_BLOCK
 
 
+def _amending(root: Path) -> bool:
+    """Is the commit we are guarding an --amend?
+
+    Git tells a pre-commit hook nothing about this: GIT_REFLOG_ACTION is empty
+    here, and there is no flag in the environment. The parent process is the
+    only witness, and the shipped hook ends in `exec`, which REPLACES the shell,
+    so our parent is git itself.
+    """
+    try:
+        out = subprocess.run(["ps", "-o", "args=", "-p", str(os.getppid())],
+                             capture_output=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return "--amend" in out.stdout.decode("utf-8", "replace")
+
+
+def _head_subject(git: str, root: Path) -> str:
+    """`abc1234 their subject line`, for naming the commit an amend would eat."""
+    try:
+        out = subprocess.run([git, "log", "-1", "--pretty=format:%h %s"],
+                             cwd=root, capture_output=True, timeout=10)
+        line = out.stdout.decode("utf-8", "replace").strip()
+        return line or "the commit at HEAD"
+    except (OSError, subprocess.SubprocessError):
+        return "the commit at HEAD"
+
+
+def _head_paths(git: str, root: Path) -> list[str]:
+    """The paths the commit at HEAD touches, which an amend would rewrite."""
+    try:
+        out = subprocess.run(
+            [git, "show", "--name-only", "--pretty=format:", "-z", "HEAD"],
+            cwd=root, capture_output=True, timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if out.returncode != 0:
+        return []
+    return [p for p in out.stdout.decode("utf-8", "replace").split("\0") if p]
+
+
 def _cmd_check_staged(flags: dict) -> int:
     """Refuse a commit whose git index touches somebody else's claimed files.
 
@@ -1501,7 +1541,25 @@ def _cmd_check_staged(flags: dict) -> int:
         return EXIT_BLOCK
 
     staged = [p for p in out.stdout.decode("utf-8", "replace").split("\0") if p]
-    if not staged:
+
+    # AN AMEND REWRITES HEAD, AND THE INDEX SAYS NOTHING ABOUT HEAD.
+    #
+    # Reported with the exact sequence. An agent was blocked correctly, unstaged
+    # the peer files it was told to, and retried `git commit --amend`. In the
+    # seconds between, the peer committed. The retry ran with an empty index, so
+    # this check answered "nothing is staged, so there was nothing to check" and
+    # the amend rewrote the peer's seconds-old commit. The content survived by
+    # luck, precisely because the index was empty. The hash did not.
+    #
+    # On an amend the commit at HEAD is at risk too, so its paths are checked
+    # exactly like staged ones. Also when nothing is staged at all: an ordinary
+    # commit is refused outright in that state, so anything still proceeding is
+    # an amend or --allow-empty, and looking costs nothing.
+    amend_paths: list[str] = []
+    if _amending(root) or not staged:
+        amend_paths = _head_paths(git, root)
+
+    if not staged and not amend_paths:
         # Say WHY it passed. Silence on exit 0 cannot distinguish "checked them,
         # all clear" from "there was nothing to check", and an agent testing the
         # guard against a peer-held path read the second as a false negative and
@@ -1543,8 +1601,13 @@ def _cmd_check_staged(flags: dict) -> int:
     actor = _hook_actor(st, session, explicit)
     unidentified = actor == "\x00not-a-real-actor"
 
+    # Carry WHERE each path came from. A path in HEAD is not a staged path, and
+    # telling somebody to `git restore --staged` a file that is not in their
+    # index is the same failure as every other one on this list: right that
+    # something is wrong, wrong about what.
+    from_amend = {p for p in amend_paths if p not in staged}
     blocked: list[tuple[str, object]] = []
-    for rel_text in staged:
+    for rel_text in list(staged) + sorted(from_amend):
         # Spelled the way the filesystem spells it, exactly as the hook path
         # does: a claim on src/a.py must still catch a staged src/A.py where
         # those are one file.
@@ -1617,15 +1680,33 @@ def _cmd_check_staged(flags: dict) -> int:
                           cwd=root, capture_output=True)
     unstage = "git restore --staged" if head.returncode == 0 else "git rm --cached -f"
 
-    _err(f"BLOCKED: {len(blocked)} staged file(s) are claimed by somebody else.")
-    for rel_text, holder in blocked:
-        intent = f'  "{holder.intent}"' if holder.intent else ""
-        _err(f"  {rel_text}: @{holder.actor}{intent}")
-    _err("  Unstage them, or agree with the holder before committing their work:")
-    for rel_text, _holder in blocked:
-        # :(literal) so a path containing *, ? or [ ] is treated as the name it
-        # is rather than as a glob that could unstage somebody else's files too.
-        _err(f"    {unstage} -- {shlex.quote(':(literal)' + rel_text)}")
+    in_head = [b for b in blocked if b[0] in from_amend]
+    in_index = [b for b in blocked if b[0] not in from_amend]
+
+    if in_index:
+        _err(f"BLOCKED: {len(in_index)} staged file(s) are claimed by somebody else.")
+        for rel_text, holder in in_index:
+            intent = f'  "{holder.intent}"' if holder.intent else ""
+            _err(f"  {rel_text}: @{holder.actor}{intent}")
+        _err("  Unstage them, or agree with the holder before committing their work:")
+        for rel_text, _holder in in_index:
+            # :(literal) so a path containing *, ? or [ ] is treated as the name
+            # it is rather than as a glob that could unstage other files too.
+            _err(f"    {unstage} -- {shlex.quote(':(literal)' + rel_text)}")
+
+    if in_head:
+        subject = _head_subject(git, root)
+        _err(f"BLOCKED: this amend would rewrite {subject}, which touches ground "
+             "somebody else is holding.")
+        for rel_text, holder in in_head:
+            intent = f'  "{holder.intent}"' if holder.intent else ""
+            _err(f"  {rel_text}: @{holder.actor}{intent}")
+        _err("  Nothing of yours is staged, so there is nothing to unstage: the")
+        _err("  commit itself is the problem. This happens when somebody commits in")
+        _err("  the seconds between your first attempt and your retry, moving HEAD")
+        _err("  onto their work.")
+        _err("  Check `git log -1` before amending again. To add to your own commit,")
+        _err("  make a new one instead.")
     return EXIT_CONFLICT
 
 
@@ -1646,8 +1727,20 @@ def _cmd_check_inner(argv: list[str]) -> int:
             # A tool call with no file in it. Nothing to check; allow.
             return EXIT_OK
     else:
-        if len(positional) != 1:
+        if not positional:
             _err("error: check needs a path, or --stdin-json to read a hook payload")
+            return EXIT_USAGE
+        if len(positional) > 1:
+            # Say what is actually wrong. It used to answer three paths with
+            # "check needs a path", which reads as "you gave none" and sent a
+            # reader back to --help to find a flag that was never missing.
+            _err(f"error: check takes one path at a time; you gave {len(positional)}.")
+            _err("  Loop over them, or claim them together and let the pre-edit hook")
+            _err("  check each one as you touch it:")
+            for one in positional[:4]:
+                _err(f"    comms-graph check {shlex.quote(one)}")
+            if len(positional) > 4:
+                _err(f"    ... and {len(positional) - 4} more")
             return EXIT_USAGE
         raw_path = positional[0]
 
@@ -1759,6 +1852,26 @@ def _cmd_tasks(argv: list[str]) -> int:
     return EXIT_OK
 
 
+def _title_smells_technical(title: str) -> str:
+    """A reason the title reads like code, or "" if it looks fine.
+
+    A WARNING, never a refusal. The rule is "a non-technical reader understands
+    it", which no regex decides; refusing on a heuristic would block a correct
+    title that happens to mention a filename. Reported by an agent that used the
+    positional form, wrote something German and half-technical, and had nothing
+    push back on it.
+    """
+    if re.search(r"\S+\.(ts|tsx|js|jsx|py|go|json|md|css|sql|yml|yaml)\b", title):
+        return "it names a file"
+    if re.search(r"\b[a-z]+[A-Z][A-Za-z]*\b", title):
+        return "it contains a camelCase identifier"
+    if re.search(r"\b\w+\(\)", title):
+        return "it names a function"
+    if re.search(r"\b(refactor|impl|util|helper|wrapper|endpoint|hook)\b", title, re.I):
+        return "it is written in implementation words"
+    return ""
+
+
 def _cmd_task(argv: list[str]) -> int:
     verb = argv[0] if argv else ""
     rest = argv[1:]
@@ -1818,6 +1931,17 @@ def _task_add(argv: list[str]) -> int:
             events.insert(0, greeting)
         _log.append_batch(log_file, events)
     print(f"TASK {slug}" + (f"  {data.get('title')}" if data.get("title") else ""))
+    # Said once, after the fact, and never blocking. The title is the only line
+    # about this work a non-engineer will read, and the positional form accepts
+    # anything, so nothing pushed back on an agent that wrote something German
+    # and half-technical.
+    _title = str(data.get("title") or "")
+    _smell = _title_smells_technical(_title) if _title else ""
+    if _smell:
+        _err(f"  note: the title reads like code ({_smell}).")
+        _err("  It is what somebody outside the code sees on the board. Plain English,")
+        _err("  in English, no file or function names. Restate it with:")
+        _err(f"    comms-graph task add {shlex.quote(slug)} --title \"...\"")
     if checks:
         print(f"  must pass before done: {', '.join(checks)}")
     if data.get("probe"):
@@ -2235,6 +2359,14 @@ def _too_long(kind: str, text: str, cap: int) -> int:
     _err("  It would end here:")
     _err(f"    …{text[max(0, cap - 60):cap]}")
     _err(f"    ⟨{over} more character{'s' if over != 1 else ''} after that⟩")
+    # A version that FITS, cut at a word. Reported: an agent trimmed to 538, was
+    # refused, trimmed again to 401, and was refused a second time for one
+    # character. Two round trips for one finding, when the answer was always
+    # computable here.
+    fits = text[:cap].rsplit(" ", 1)[0] if " " in text[:cap] else text[:cap]
+    if fits and len(fits) < len(text):
+        _err(f"  This fits ({len(fits)} characters), if it still says what you meant:")
+        _err(f"    {fits}")
     _err(f"  A {kind} is the one line somebody reads later, not the writeup. If it "
          "is longer than that, it is probably one of:")
     # Every route here is checked to actually accept a long body. `doc --edit`
