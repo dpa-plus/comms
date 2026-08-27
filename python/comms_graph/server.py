@@ -1300,7 +1300,14 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 .guardwarn { padding: var(--sp-h) var(--sp-2); border-top: 1px solid var(--line);
   color: var(--amber); font-size: 11.5px; }
 .guardwarn .mono { color: var(--ink-4); }
-.alsocount { color: var(--ink-4); font-size: 11px; margin-left: 6px; }
+/* A count that opens the detail behind it. Styled as text, because it is a
+   number first and an affordance second. */
+.acount.filestoggle, .count.loosetoggle {
+  background: none; border: 0; padding: 0; font: inherit; cursor: pointer;
+  color: var(--ink-4); border-bottom: 1px dotted var(--line-2); }
+.acount.filestoggle:hover, .count.loosetoggle:hover { color: var(--ink); }
+.why { color: var(--ink); }
+.alsopaths { display: none; }
 .alsopaths { color: var(--ink-4); font-size: 11px; margin: 1px 0 0;
   overflow-wrap: anywhere; }
 .hrow { display: flex; align-items: baseline; gap: var(--sp-1);
@@ -1584,6 +1591,12 @@ function renderProjects() {
 
 /* ---------- working now ------------------------------------------------ */
 
+/* The store key in the URL, which is the project every panel is drawn from. */
+function currentStore() {
+  var m = /[?&]store=([^&]+)/.exec(window.location.search || "");
+  return m ? decodeURIComponent(m[1]) : "";
+}
+
 function renderNow() {
   var cs = D.claims || [];
   var h = '<div class="nowband">';
@@ -1637,6 +1650,15 @@ function renderNow() {
       var held = byActor[actor];
       var quiet = held.some(function (c) { return c.quiet; });
       var idle = Math.max.apply(null, held.map(function (c) { return c.idle_seconds || 0; }));
+      // Since WHEN, which the row never said. "active" answers whether they are
+      // alive; the question in front of a board is how long this has been going
+      // on, and a claim taken four hours ago reads very differently from one
+      // taken four minutes ago even when both are active.
+      var oldest = Math.min.apply(null, held.map(function (c) {
+        var t = Date.parse(c.ts || "");
+        return isFinite(t) ? t : Date.now();
+      }));
+      var heldFor = Math.max(0, Math.round((Date.now() - oldest) / 1000));
       var intents = [], tasks = [];
       held.forEach(function (c) {
         if (c.intent && intents.indexOf(c.intent) === -1) { intents.push(c.intent); }
@@ -1644,19 +1666,22 @@ function renderNow() {
       });
       h += '<div class="arow' + (quiet ? " quiet" : "") + '">';
       h += '<span class="hactor mono">@' + esc(actor) + "</span>";
-      h += '<span class="acount mono">' + held.length + (held.length === 1 ? " file" : " files") + "</span>";
+      // The count is the magnitude, which is what a person needs; the paths are
+      // code detail and are one click away rather than always on screen.
+      h += '<button class="acount mono filestoggle" data-actor="' + esc(actor) + '">' +
+           held.length + (held.length === 1 ? " file" : " files") + "</button>";
       if (tasks.length) { h += '<span class="htask mono">' + esc(tasks.join(", ")) + "</span>"; }
       h += '<span class="hintent">' + esc(intents.join(" · ")) + "</span>";
       h += '<span class="grow"></span>';
       h += '<span class="rage mono' + (quiet ? " amber" : "") + '">' +
-           (quiet ? "quiet " + ago(idle) : "active") + "</span>";
+           (quiet ? "quiet " + ago(idle) : "for " + ago(heldFor)) + "</span>";
       h += '<button class="ghost rel" data-actor="' + esc(actor) + '" data-all="1">Free all ' +
            held.length + "</button>";
       h += "</div>";
       // The files, quiet underneath: available without being in the way. The
       // claim id moves to the row's tooltip: it is a handle for the CLI, not
       // something a person reads.
-      h += '<div class="afiles">';
+      h += '<div class="afiles" hidden>';
       held.forEach(function (c) {
         h += '<div class="afrow" title="claim ' + esc(c.id) + '">' +
              '<span class="mono afpath">' + esc(shortPath(c.scope)) + "</span>" +
@@ -1685,8 +1710,9 @@ function renderNow() {
     var fresh  = loose.filter(function (f) { return f.how.indexOf("new, not in git") === 0; });
 
     h += '<div class="nowband-hd loosehd"><span>Changed on disk, nobody holding it</span>' +
-         '<span class="count">' + loose.length + " of " + dirt.total + "</span></div>";
-    h += '<div class="afiles loose">';
+         '<button class="count loosetoggle">' + loose.length + " of " + dirt.total +
+         "</button></div>";
+    h += '<div class="afiles loose" hidden>';
     edited.slice(0, 25).forEach(function (f) {
       h += '<div class="afrow">' +
            '<span class="mono afpath">' + esc(shortPath(f.path)) + "</span>" +
@@ -1723,6 +1749,22 @@ function renderNow() {
   el("nowBand").innerHTML = h;
   Array.prototype.forEach.call(el("nowBand").querySelectorAll(".rel"), function (b) {
     b.onclick = function () { releaseClaim(b); };
+  });
+  var lt = el("nowBand").querySelector(".loosetoggle");
+  if (lt) {
+    lt.onclick = function () {
+      var box = el("nowBand").querySelector(".afiles.loose");
+      if (box) { box.hidden = !box.hidden; }
+    };
+  }
+  Array.prototype.forEach.call(el("nowBand").querySelectorAll(".filestoggle"), function (b) {
+    b.onclick = function (ev) {
+      ev.stopPropagation();
+      var box = b.parentNode.nextSibling;
+      if (box && box.classList && box.classList.contains("afiles")) {
+        box.hidden = !box.hidden;
+      }
+    };
   });
 }
 
@@ -1764,7 +1806,9 @@ function releaseClaim(btn) {
       return prev.then(function () {
         return fetch("/api/release", {
           method: "POST", headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({id: cid, reason: reason})
+          // The project on screen, so the server frees the claim the button was
+          // drawn from rather than looking for its id in a different log.
+          body: JSON.stringify({id: cid, reason: reason, store: currentStore()})
         }).then(function (r) {
           if (!r.ok) { return r.json().then(function (b) { failed.push(b.error || cid); }); }
         });
@@ -1857,22 +1901,31 @@ function eventRow(e, isLast) {
     s += '<div class="l1"><span class="verb ' + (e.type === "claim" ? "a" : "g") + '">' + verb + "</span>";
     // One atomic claim of several files is one row. The paths are all named
     // rather than counted, because a count is exactly what nobody can act on.
+    // THE REASON FIRST, THE PATHS AFTER. A row led with
+    // `frontend/src/features/map/AconMap.tsx` tells a reader who does not read
+    // code nothing at all, while "Nachlauf-Timer sauber" tells them what
+    // happened. The paths stay, quieter, because they are what an agent greps.
     var many = (e.scopes && e.scopes.length > 1) ? e.scopes : null;
-    s += '<span class="path mono">' + esc(shortPath(many ? many[0] : e.scope)) + "</span>";
-    if (many) {
-      s += '<span class="alsocount">+' + (many.length - 1) + " more</span>";
+    var why = e.intent || e.result || "";
+    if (why) {
+      s += '<span class="why">' + esc(why) + "</span>";
+    } else {
+      s += '<span class="path mono">' + esc(shortPath(many ? many[0] : e.scope)) + "</span>";
     }
     s += "</div>";
-    if (many) {
+    s += '<div class="l2"><span class="actor">@' + esc(e.actor) + "</span>";
+    if (e.task) { s += '<span class="dot"></span><span class="proj mono">' + esc(e.task) + "</span>"; }
+    if (why) {
+      s += '<span class="dot"></span><span class="path mono">' +
+           esc(shortPath(many ? many[0] : e.scope)) +
+           (many ? " +" + (many.length - 1) : "") + "</span>";
+    }
+    s += "</div>";
+    if (many && many.length > 1) {
       s += '<div class="alsopaths mono">' +
            many.slice(1).map(function (x) { return esc(shortPath(x)); }).join(", ") +
            "</div>";
     }
-    s += '<div class="l2"><span class="actor">@' + esc(e.actor) + "</span>";
-    if (e.task) { s += '<span class="dot"></span><span class="proj mono">' + esc(e.task) + "</span>"; }
-    var tail = e.intent || e.result || "";
-    if (tail) { s += '<span class="dot"></span><span>' + esc(tail) + "</span>"; }
-    s += "</div>";
 
   } else if (e.type === "task_state") {
     s += '<div class="l1"><span class="verb mono">' + esc(e.task) + "</span></div>";
@@ -2418,7 +2471,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(b'{"error":"bad request body"}', "application/json", 400)
             return
         code, body = board.release(str(payload.get("id") or ""),
-                                   str(payload.get("reason") or ""))
+                                   str(payload.get("reason") or ""),
+                                   str(payload.get("store") or ""))
         self._send(json.dumps(body).encode("utf-8"), "application/json", code)
 
     def do_GET(self) -> None:  # noqa: N802
@@ -2434,9 +2488,9 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(json.dumps(board.snapshot(store)).encode("utf-8"),
                        "application/json; charset=utf-8")
         elif path == "/map.html":
-            self._send(board.map_html().encode("utf-8"), "text/html; charset=utf-8")
+            self._send(board.map_html(store).encode("utf-8"), "text/html; charset=utf-8")
         elif path == "/tasks.html":
-            self._send(board.tasks_html().encode("utf-8"), "text/html; charset=utf-8")
+            self._send(board.tasks_html(store).encode("utf-8"), "text/html; charset=utf-8")
         elif path == "/events":
             self._stream(board, store)
         else:
@@ -2509,7 +2563,7 @@ class Board:
                 parts.append("absent")
         return "|".join(parts)
 
-    def release(self, claim_id: str, reason: str) -> tuple[int, dict]:
+    def release(self, claim_id: str, reason: str, store: str = "") -> tuple[int, dict]:
         """Free somebody else's claim, from the board, under the operator's name.
 
         THE BOARD IS OTHERWISE READ-ONLY AND THAT IS DELIBERATE: the log is
@@ -2547,9 +2601,16 @@ class Board:
                                   "your name permanently"}
 
         # Same store, same lock file the CLI takes: store dir + .lock.
-        lock_file = _log.store_dir(self.root) / ".lock"
+        # THE PROJECT ON SCREEN, not the one this process was started in. The
+        # button sends a claim id read out of the selected project's log; looking
+        # it up in a different log finds nothing, and the board answered "no
+        # active claim with id 01M1177A..." for a claim that plainly existed two
+        # panels away. Same plumbing gap as the snapshot had, on the one path
+        # that writes.
+        _key, root, log_file = self._for_store(store)
+        lock_file = _log.store_dir(root) / ".lock"
         with _lock.file_lock(lock_file):
-            st = _state.fold(_log.read(self.log_file))
+            st = _state.fold(_log.read(log_file))
             held = st.claim_by_id(claim_id)
             if held is None:
                 return 404, {"error": f"no active claim with id {claim_id}"}
@@ -2561,7 +2622,7 @@ class Board:
                 data={"refs": [held.id], "result": reason,
                       "freed_from": held.actor, "via": "board"},
             )
-            _log.append(self.log_file, ev)
+            _log.append(log_file, ev)
         return 200, {"ok": True, "released": held.id, "was": held.actor,
                      "scope": str(held.scope)}
 
@@ -2648,14 +2709,38 @@ class Board:
                 self._cache[key] = (stamp, body)
             return body
 
-    def map_html(self) -> str:
+    def _render_dir(self, key: str) -> Path:
+        """Where a generated page is written. NOT into the repository.
+
+        It used to write `<root>/graphify-out/…`, which fails outright when the
+        board is a login service: its root is `/`, and `/graphify-out` is a
+        read-only filesystem. Both graphs showed an Errno 30 instead of a
+        picture. Writing into somebody's repository was wrong anyway; these are
+        derived files, and the store directory already holds the derived data
+        for exactly this project and is already writable.
+        """
+        d = _log.user_data_home() / "comms" / (key or _log.repo_hash(self.root)) / "render"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def _for_store(self, store: str):
+        """(key, root, log file) for the project a page should draw."""
+        key = store or _log.repo_hash(self.root)
+        if store and store != _log.repo_hash(self.root):
+            picked = self._store_by_key(store)
+            if picked is not None:
+                return key, picked[0], picked[1]
+        return _log.repo_hash(self.root), self.root, self.log_file
+
+    def map_html(self, store: str = "") -> str:
         def build() -> str:
             from . import view as _view
 
-            out = self.root / "graphify-out" / "graph.comms.live.html"
+            key, root, log_file = self._for_store(store)
+            out = self._render_dir(key) / "graph.comms.live.html"
             try:
-                res = _view.render(self.root, out, graph_file=self.graph_file,
-                                   log_file=self.log_file)
+                res = _view.render(root, out, graph_file=self.graph_file,
+                                   log_file=log_file)
                 body = Path(res.output_path).read_text(encoding="utf-8")
                 # The map is a complete page with its own "who is here" panel.
                 # Standalone that is exactly right; embedded here it sits beside
@@ -2670,20 +2755,21 @@ class Board:
                     "Build one with <code>graphify extract . --code-only</code> "
                     ": claims still record and still block without it.",
                     str(exc))
-        return self._cached("map", build)
+        return self._cached("map:" + (store or ""), build)
 
-    def tasks_html(self) -> str:
+    def tasks_html(self, store: str = "") -> str:
         def build() -> str:
             from . import taskview as _taskview
 
-            out = self.root / "graphify-out" / "tasks.comms.html"
+            key, _root, log_file = self._for_store(store)
+            out = self._render_dir(key) / "tasks.comms.html"
             try:
-                st = _state.fold(_log.read(self.log_file))
+                st = _state.fold(_log.read(log_file))
                 res = _taskview.render(st, out, generated=_now_text())
                 return Path(res.output_path).read_text(encoding="utf-8") + _EMBED_CSS
             except Exception as exc:
                 return _placeholder("The task graph could not be drawn.", "", str(exc))
-        return self._cached("tasks", build)
+        return self._cached("tasks:" + (store or ""), build)
 
 
 def _placeholder(title: str, hint: str, detail: str = "") -> str:
