@@ -45,15 +45,26 @@ Every snapshot carries the server's **front-end build fingerprint**, and the pag
 
 It **opens your browser automatically** when run interactively (`--no-open` to suppress). On macOS you can also double-click a **Comms Dashboard** launcher instead of using the terminal. The header shows the active **session name** (the name agents use, e.g. `acme-build`) next to the repo.
 
-**Which dashboard the flags belong to.** The push/reload behaviour and the flags above are the **Go** build's
-`comms ui`, which is still here and still works:
+**One dashboard, two entry points.** `comms ui` and `comms-graph ui` are the
+same board: the Go build no longer serves a dashboard of its own and hands the
+job straight to the Python build, replacing its own process so Ctrl-C and any
+supervisor still work.
 
-- `comms ui --repo /path/to/repo` scopes to a single repo (no sidebar).
-- `comms ui --demo` explores sample data (read-only; writes nothing real).
+There were two once, reading the same log and drawing different pictures. The
+second fell behind and nobody noticed until it was opened, by which point it was
+listing 176 projects by hash while the other had had real names for a week.
+Building every improvement twice is a cost that gets paid in exactly that way.
 
-The Python board is `comms-graph ui [--port 7878] [--host 127.0.0.1] [--graph <graph.json>]`. It has no
-`--demo` and no `--repo`; scope it by running it from the repo, or name one with the global
-`comms-graph --repo <path> ui`. Both read the same log, so it does not matter much which is open.
+```bash
+comms ui                       # the board, on 127.0.0.1:7878
+comms ui --addr 0.0.0.0:9000   # split into --host and --port for you
+comms --repo /path/to/repo ui  # scope it to one repository
+comms-graph ui --graph out/graph.json   # every flag the board itself takes
+```
+
+`--demo`, `--all`, `--open` and `--stale-after` are accepted and ignored. They
+live in muscle memory and in a committed launchd template, and refusing them
+would turn a rename into an outage for whoever least expected one.
 
 ### Run the dashboard as a login service (macOS)
 

@@ -128,7 +128,7 @@ a real debugging pass, but short enough to flag abandoned sessions quickly. To
 use a different display threshold:
 
 ```bash
-comms ui --stale-after 45m
+comms ui                       # served by comms-graph; see docs/DASHBOARD.md
 ```
 
 The UI is intentionally not a replacement for the CLI. Agents still use
@@ -198,7 +198,7 @@ If the repo has no events yet, the log table will be empty. To preview the UI
 with sample sessions, claims, findings, notes, docs, and raw events:
 
 ```bash
-comms ui --demo
+comms-graph ui                 # the dashboard, run directly
 ```
 
 Demo mode is UI-only. It serves deterministic in-memory sample data and never
