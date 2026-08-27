@@ -7,7 +7,9 @@
   so the dashboard on http://127.0.0.1:7878 is always up and always execs the
   binary at the path below (pick up a new build with `launchctl kickstart -k`).
 
-  Adjust ProgramArguments[0] to your install if it is not Homebrew
+  Set ProgramArguments[0] to your comms-graph (`which comms-graph`).
+      `comms ui` also works and hands over to the same board, but pointing
+      straight at it means launchd supervises the process that serves
   (`which comms`). Install + load instructions are in the README
   ("Run the dashboard as a login service").
 
@@ -23,7 +25,7 @@
     <string>plus.dpa.comms-ui</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/opt/homebrew/bin/comms</string>
+        <string>/Users/YOU/.local/bin/comms-graph</string>
         <string>ui</string>
         <string>--no-open</string>
     </array>

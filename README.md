@@ -227,7 +227,7 @@ comms plan --from plan.json                   a whole decomposition, or nothing
 comms check <path>                            pre-edit hook; exits 2 to block
 comms check --staged                          commit guard
 comms-graph guard install [--chain]           make the commit guard run on every commit
-comms ui [--repo <path>] [--demo] [--no-open]
+comms ui [--addr host:port] [--no-open]        the dashboard (served by comms-graph)
 comms mcp                                     the same verbs as MCP tools over stdio
 
 comms session start|join|end "<name>"
@@ -270,7 +270,8 @@ other's claims.
 
 - **Go**, everything outside `python/`, installed as `comms`.
 - **Python**, [`python/`](python/README.md), installed as `comms-graph`. Adds the
-  task graph, the code map and the board.
+  task graph, the code map, and the board. `comms ui` hands the dashboard to
+  it rather than serving a second one.
 
 Because the log is the interface, moving a hook from one to the other is a
 one-line change. Both are covered by [CI](.github/workflows/ci.yml).
