@@ -24,6 +24,7 @@ guarantees.
 from __future__ import annotations
 
 import html
+from urllib.parse import unquote
 import json
 import os
 import threading
@@ -2421,23 +2422,27 @@ class _Handler(BaseHTTPRequestHandler):
         self._send(json.dumps(body).encode("utf-8"), "application/json", code)
 
     def do_GET(self) -> None:  # noqa: N802
-        path = self.path.split("?", 1)[0]
+        path, _, query = self.path.partition("?")
         board = self.server.board  # type: ignore[attr-defined]
+        store = ""
+        for part in query.split("&"):
+            if part.startswith("store="):
+                store = unquote(part[len("store="):])
         if path == "/":
             self._send(board.page().encode("utf-8"), "text/html; charset=utf-8")
         elif path == "/api/status":
-            self._send(json.dumps(board.snapshot()).encode("utf-8"),
+            self._send(json.dumps(board.snapshot(store)).encode("utf-8"),
                        "application/json; charset=utf-8")
         elif path == "/map.html":
             self._send(board.map_html().encode("utf-8"), "text/html; charset=utf-8")
         elif path == "/tasks.html":
             self._send(board.tasks_html().encode("utf-8"), "text/html; charset=utf-8")
         elif path == "/events":
-            self._stream(board)
+            self._stream(board, store)
         else:
             self._send(b"not found", "text/plain; charset=utf-8", 404)
 
-    def _stream(self, board) -> None:
+    def _stream(self, board, store: str = "") -> None:
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-store")
@@ -2447,7 +2452,7 @@ class _Handler(BaseHTTPRequestHandler):
         try:
             while True:
                 stamp = board.stamp()
-                snap = board.snapshot()
+                snap = board.snapshot(store)
                 snap["stamp"] = stamp
                 payload = "data: " + json.dumps(snap) + "\n\n"
                 self.wfile.write(payload.encode("utf-8"))
@@ -2560,13 +2565,51 @@ class Board:
         return 200, {"ok": True, "released": held.id, "was": held.actor,
                      "scope": str(held.scope)}
 
-    def _graph_path(self) -> Path:
+    def _graph_path(self, root: Path | None = None) -> Path:
+        # Follows the project being SHOWN. An explicit --graph still wins, but
+        # otherwise a code map is a property of the repo on screen, not of
+        # wherever this process happens to have been started.
         if self.graph_file:
             return Path(self.graph_file)
-        return self.root / "graphify-out" / "graph.json"
+        return (root or self.root) / "graphify-out" / "graph.json"
 
-    def snapshot(self) -> dict:
-        return _snapshot(self.root, self.log_file, graph_path=self._graph_path())
+    def snapshot(self, store: str = "") -> dict:
+        """The board for one project. Its own by default, any of them by key.
+
+        THE PROJECTS RAIL WAS A LIST OF LINKS THAT DID NOTHING. Every entry set
+        `?store=<key>` in the URL, the server ignored it, and the page came back
+        built from the process's own repo every time. Run as a login service
+        from `/`, that repo is empty, so the rail listed five real projects and
+        clicking any of them showed zero events, zero claims and an empty roster
+        beside a sidebar saying that project was active 29 seconds ago.
+
+        Two things said different things on one screen, and the wrong one was
+        the one with the numbers on it.
+        """
+        root, log_file = self.root, self.log_file
+        if store and store != _log.repo_hash(self.root):
+            picked = self._store_by_key(store)
+            if picked is not None:
+                root, log_file = picked
+        return _snapshot(root, log_file, graph_path=self._graph_path(root))
+
+    def _store_by_key(self, key: str):
+        """(root, log file) for a store key, or None if it is not one of ours.
+
+        Resolved from the SAME enumeration the rail is drawn from, so a key the
+        page can offer is a key this can open, and a key it cannot is refused
+        rather than guessed at.
+        """
+        for info in _log.known_stores():
+            if info.get("key") != key:
+                continue
+            root = Path(info.get("root") or "")
+            # The store directory is named by the key, so the log is derivable
+            # without trusting the root: a project whose directory has been
+            # moved still has readable history.
+            log_file = _log.user_data_home() / "comms" / key / _log.LOG_FILENAME
+            return (root, log_file) if log_file.exists() else None
+        return None
 
     def page(self) -> str:
         # Returned verbatim. _PAGE is NOT a format string: it is full of CSS and

@@ -551,3 +551,73 @@ def test_the_board_serves_no_other_write(board):
     with pytest.raises(urllib.error.HTTPError) as e:
         urllib.request.urlopen(req, timeout=20)
     assert e.value.code == 404
+
+
+def _write_events(root, *cmds):
+    """Drive the real CLI into `root`'s store, the way an agent would."""
+    import os
+    from comms_graph import cli as ccli
+    was = os.getcwd()
+    os.chdir(root)
+    try:
+        for cmd in cmds:
+            ccli.main(list(cmd))
+    finally:
+        os.chdir(was)
+
+
+def test_the_projects_rail_actually_switches_project(tmp_path, monkeypatch):
+    """IF THIS FAILS: the rail is a list of links that do nothing.
+
+    Every entry sets `?store=<key>`. The server ignored it, so the page came
+    back built from the process's own repo every time. Run as a login service
+    from `/`, that repo is empty, so the rail listed five real projects and
+    clicking any of them showed zero events, zero claims and an empty roster,
+    beside a sidebar saying that project had been active 29 seconds ago. Two
+    things said different things on one screen, and the one with the numbers on
+    it was the wrong one.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir()
+    git = shutil.which("git")
+    if git is None:
+        pytest.skip("git is not installed")
+
+    other = tmp_path / "other-project"
+    other.mkdir()
+    subprocess.run([git, "init", "-q", "."], cwd=other, check=True)
+    _write_events(other, ["hello", "--as", "faraway"],
+                  ["note", "a note only this project has", "--as", "faraway"])
+
+    # The process's own root, standing in for the login service running from /.
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    subprocess.run([git, "init", "-q", "."], cwd=empty, check=True)
+
+    b = cserver.Board(empty, clog.log_path(empty))
+    assert not (b.snapshot().get("feed") or []), "the empty root should be empty"
+
+    key = clog.repo_hash(str(other))
+    theirs = b.snapshot(key)
+    assert theirs.get("store_key") == key, theirs.get("store_key")
+    assert theirs.get("feed"), "selecting a project must load that project"
+    assert "a note only this project has" in json.dumps(theirs["feed"])
+
+
+def test_an_unknown_store_key_falls_back_rather_than_erroring(tmp_path, monkeypatch):
+    """IF THIS FAILS: a stale bookmark or a hand-typed key takes the board down,
+    or worse, is guessed at. A key the page cannot offer is not one this opens."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir()
+    git = shutil.which("git")
+    if git is None:
+        pytest.skip("git is not installed")
+    root = tmp_path / "repo"
+    root.mkdir()
+    subprocess.run([git, "init", "-q", "."], cwd=root, check=True)
+    _write_events(root, ["hello", "--as", "a"])
+
+    b = cserver.Board(root, clog.log_path(root))
+    snap = b.snapshot("not-a-real-store-key")
+    assert snap.get("store_key") == clog.repo_hash(str(root))
+    assert snap.get("error") is None
