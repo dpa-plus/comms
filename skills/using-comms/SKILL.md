@@ -706,6 +706,21 @@ the next session actually reads:
   ownership boundary, e.g.
   `comms-graph find decision "Codex owns src/**, Claude owns frontend/**"`.
 
+**A note that names somebody now reaches them.** Write `@their-actor` in the
+body and it is printed to that actor on their next command of any kind, once,
+and restated by the commit guard while it is less than two hours old. That is
+the last point at which taking somebody's fix along is free.
+
+This exists because it did not. An agent was blocked on a file, so rather than
+wait it handed the holder the change in a note, addressed by name. The holder
+committed that exact file six minutes later having never seen it, and found the
+note forty minutes later; the fix is still half-landed. Blocking was pushed and
+notes were polled, so the coercive half was instrumented and the collaborative
+half was not.
+
+**So when you are blocked, hand the holder the change rather than queueing
+behind them.** It will arrive now.
+
 Use `comms-graph note` ONLY for transient, addressed FYIs. If you catch yourself
 writing a note that explains how the system works or who owns what, it is a
 `decision` or a `gotcha`: log it as a finding so it does not age out of view:

@@ -1643,6 +1643,11 @@ def _cmd_check_staged(flags: dict) -> int:
         n = len(staged)
         print(f"check --staged: {n} staged path{'s' if n != 1 else ''} checked, "
               f"none held by anybody else.")
+        # Their own suggestion, and the right one: a commit is the last point at
+        # which taking somebody's fix along costs nothing. Recent messages are
+        # restated here even if an ordinary command already delivered them.
+        if not unidentified:
+            _deliver_addressed_notes(root, actor, restate=True)
         # Said out loud rather than passed over. These are the paths the log
         # knows nothing about, which after a compaction or a run of shell
         # heredoc edits is most of them, and a guard that stays silent about
@@ -2910,7 +2915,133 @@ def _cmd_board(argv: list[str]) -> int:
 # ---------------------------------------------------------------------------
 
 
-def main(argv: list[str]) -> int:
+# ---------------------------------------------------------------------------
+# messages addressed to you
+# ---------------------------------------------------------------------------
+
+_ADDRESSED = None  # set lazily; see _mentions
+
+
+def _mentions(body: str, actor: str) -> bool:
+    """Does this text address `actor` by name?
+
+    Matches the base name, so a note to @claude-dev reaches claude-dev/review.
+    Deliberately not a substring test: "@claude" must not match "@claude-karte",
+    or a busy project delivers everything to everybody and the feature becomes
+    noise on its first day.
+    """
+    import re as _re
+
+    base = _task.base_actor((actor or "").lstrip("@")).casefold()
+    if not base:
+        return False
+    for m in _re.finditer(r"@([A-Za-z0-9._-]+)", body or ""):
+        if _task.base_actor(m.group(1)).casefold() == base:
+            return True
+    return False
+
+
+def _seen_marker(root: Path, actor: str) -> Path:
+    """Where we remember what this actor has already been shown.
+
+    NOT an event. Delivery is a property of one machine's terminal, not a fact
+    about the work, and writing a "delivered" event per read would double the
+    log to record something no other agent can use. Losing this file re-shows a
+    message once, which is the harmless direction.
+    """
+    safe = "".join(c if c.isalnum() or c in "-._" else "_" for c in actor)[:64]
+    return _log.store_dir(root) / "seen" / (safe or "unknown")
+
+
+#: How far back the commit guard reaches when it restates messages. A commit is
+#: the last moment taking somebody's fix along is free, so it is worth saying
+#: again there even if an ordinary command already delivered it once.
+RESTATE_WITHIN_SECONDS = 2 * 3600
+
+
+def _deliver_addressed_notes(root: Path, actor: str, restate: bool = False) -> None:
+    """Print messages addressed to `actor` that they have not been shown.
+
+    BLOCKING IS PUSHED AND NOTES WERE POLLED, which for something called comms
+    is the wrong way round. Reported with a receipt: an agent was blocked on a
+    file, so rather than wait it wrote the holder a note by name, with a fix to
+    take along. The holder committed that exact file six minutes later having
+    never seen it, and found the note forty minutes after that. The fix is now
+    half-landed.
+
+    The holder ran several commands in those six minutes. Any one of them could
+    have printed a line, which is the whole idea: no new discipline, because the
+    discipline is what fails.
+    """
+    if not actor:
+        return
+    log_file, _lock_file = _store(root, create=False)
+    try:
+        log_file.stat()
+    except OSError:
+        return
+    try:
+        events = _log.read(log_file)
+    except Exception:
+        return
+
+    marker = _seen_marker(root, actor)
+    try:
+        last_seen = marker.read_text(encoding="utf-8").strip()
+    except OSError:
+        last_seen = ""
+
+    waiting = []
+    for ev in events:
+        if ev.type not in (_log.TYPE_NOTE, _log.TYPE_FINDING):
+            continue
+        if _task.base_actor((ev.actor or "").lstrip("@")).casefold() == \
+                _task.base_actor(actor.lstrip("@")).casefold():
+            continue  # your own message is not a message to you
+        recent = ((datetime.now(timezone.utc) - ev.ts).total_seconds()
+                  <= RESTATE_WITHIN_SECONDS)
+        if ev.id <= last_seen and not (restate and recent):
+            continue
+        data = ev.data or {}
+        body = str(data.get("body") or data.get("summary") or "")
+        if _mentions(body, actor):
+            waiting.append((ev, body))
+
+    sys.stdout.flush()
+
+    if not waiting:
+        # Still move the marker: everything up to here has been considered, so a
+        # message written before this actor existed is not delivered later as
+        # though it were new.
+        _remember_seen(marker, events)
+        return
+
+    # Newest last, because a terminal is read from the bottom.
+    shown = waiting[-3:]
+    _err("")
+    _err(f"  {len(waiting)} message(s) for you"
+         + (f", showing the last {len(shown)}" if len(waiting) > len(shown) else "") + ":")
+    for ev, body in shown:
+        when = ev.ts.astimezone().strftime("%H:%M")
+        _err(f"    {when}  @{ev.actor}: {body}")
+    if restate:
+        _err("  This is the last point where taking it along is free.")
+    else:
+        _err("  Said once, here, because you were not going to go looking.")
+    _remember_seen(marker, events)
+
+
+def _remember_seen(marker: Path, events) -> None:
+    if not events:
+        return
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(events[-1].id, encoding="utf-8")
+    except OSError:
+        pass  # a board that cannot remember re-shows once; never fatal
+
+
+def _run(argv: list[str]) -> int:
     """``argv`` is everything after ``comms-graph``."""
     # A GLOBAL --repo/--root, before the verb. The Go build takes it there and
     # the briefing documents `comms --repo /abs/path status` as the recovery
@@ -3023,3 +3154,29 @@ def main(argv: list[str]) -> int:
     _err(f"error: unknown comms command {sub!r}")
     _err(USAGE)
     return EXIT_USAGE
+
+
+def main(argv: list[str]) -> int:
+    """The verb, then anything addressed to whoever ran it.
+
+    Delivery is bolted on AFTER the command rather than inside each one, so a
+    verb cannot forget to do it, and it can never change an exit code: a
+    message waiting for you is not a reason for your command to fail.
+    """
+    code = _run(argv)
+    try:
+        _, flags = _parse_flags(list(argv[1:]))
+        verb = argv[0] if argv else ""
+        # Not on the hook path and not into machine-readable output. `check
+        # --stdin-json` has a strict contract with Claude Code, and anything
+        # --json is being parsed by something that did not ask for prose.
+        if verb in ("check",) and "stdin-json" in flags:
+            return code
+        if "json" in flags or verb in ("mcp", "ui"):
+            return code
+        actor = (flags.get("as") or os.environ.get("COMMS_ACTOR") or "").strip().lstrip("@")
+        if actor:
+            _deliver_addressed_notes(_repo_root(flags.get("root")), actor)
+    except Exception:
+        pass  # never let delivery break the command that carried it
+    return code
