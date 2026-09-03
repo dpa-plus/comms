@@ -235,6 +235,16 @@ def _snapshot(root: Path, log_file: Path, graph_path: Path | None = None) -> dic
     # stale, may be absent, and is somebody else's file format; a board that
     # disappears because a graph would not load is worse than one that says it
     # has no map.
+    #
+    # `alerts` is created HERE, above everything that can raise one. It was
+    # created a hundred lines further down, next to the dependency-loop check,
+    # and the two alerts raised before that point (a map that would not load,
+    # a map older than a day) each hit an unbound name. The second is the
+    # ordinary state of any repo whose map is a week old, so on such a repo
+    # every snapshot raised, /api/status answered nothing, and the board was
+    # blank: exactly the failure the "never raises" promise above exists to
+    # prevent. The tests never saw it because their map is fresh or absent.
+    alerts: list[dict] = []
     try:
         from .cli import _load_graph  # the one loader, undirected view and all
         graph = _load_graph(graph_path) if graph_path else None
@@ -341,7 +351,6 @@ def _snapshot(root: Path, log_file: Path, graph_path: Path | None = None) -> dic
     # which the board hides to give the drawing room, so a dependency loop, the
     # one state a plan cannot recover from on its own, was invisible on the
     # surface somebody actually watches.
-    alerts = []
     cycles = [t["id"] for t in tasks if t["phase"] == _task.PHASE_CYCLE]
     if cycles:
         alerts.append({

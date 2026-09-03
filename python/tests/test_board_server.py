@@ -100,6 +100,34 @@ def test_a_missing_code_map_says_how_to_build_one(board):
     assert "graphify extract" in body
 
 
+def test_a_week_old_code_map_is_an_alert_not_a_blank_board(board):
+    """IF THIS FAILS: every repo whose map is more than a day old has no board.
+
+    That is how it shipped. The stale-map alert was appended to a list created
+    a hundred lines further down, so on any such repo the snapshot raised on
+    an unbound name, /api/status answered nothing, and the page sat empty
+    with the traceback in a log nobody was watching. The tests never saw it:
+    their map is fresh or absent. This one is eight days old.
+    """
+    import os
+    import time
+
+    repo, log_file, base = board
+    out = repo / "graphify-out"
+    out.mkdir()
+    graph = out / "graph.json"
+    graph.write_text(json.dumps({"nodes": [], "edges": []}))
+    week_ago = time.time() - 8 * 86400
+    os.utime(graph, (week_ago, week_ago))
+
+    status, body = _get(base + "/api/status")
+    assert status == 200
+    snap = json.loads(body)
+    assert "error" not in snap, snap.get("error")
+    kinds = [a.get("kind") for a in snap["alerts"]]
+    assert "stale-map" in kinds, f"no stale-map alert, only {kinds}"
+
+
 def test_the_task_frame_renders_with_no_tasks(board):
     repo, log_file, base = board
     status, body = _get(base + "/tasks.html")
