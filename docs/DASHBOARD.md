@@ -21,9 +21,14 @@ does. It asks for a reason and refuses without one, because the release is
 recorded under your name permanently and "who freed this and why" is the only
 question anybody asks afterwards.
 
-> **Start it with `COMMS_ACTOR` set** (e.g. `human-you`). Without an actor the
-> board refuses to release at all: a release with no author is worse than no
-> release, because the ground is gone and the log cannot say who took it.
+> **Who signs the release.** The first time you free something, the board asks
+> for your name (e.g. `human-you`) and remembers it in that browser; `?actor=name`
+> in the address bar sets or changes it. The release is recorded under that name,
+> with the holder as `original_actor` and you as `arbitrator`, the same way
+> `release --force` records it. A board started with `COMMS_ACTOR` set signs as
+> that name instead and never asks. With neither, it refuses: a release with no
+> author is worse than no release, because the ground is gone and the log cannot
+> say who took it.
 
 It is **unified by default**: one window for every comms project on the machine. The **Projects** rail lists them and clicking one scopes the whole view. It lists real projects only. A store whose directory has been deleted, or which lives in a temp folder, is not a project, and before that filter existed two real projects sat among 213 that were not.
 
@@ -68,7 +73,7 @@ would turn a rename into an outage for whoever least expected one.
 
 ### Run the dashboard as a login service (macOS)
 
-So the dashboard is always up. It survives reboots, and is restarted automatically if it ever exits. Install it as a per-user `launchd` agent. The template sets `COMMS_ACTOR` (so the operator buttons work, see the note above); change it from `operator` to your own name first:
+So the dashboard is always up. It survives reboots, and is restarted automatically if it ever exits. Install it as a per-user `launchd` agent. The template sets `COMMS_ACTOR`, so releases from the board are signed without the page asking (see the note above); change it from `operator` to your own name first:
 
 ```bash
 # Set your operator name (and point at your binary if it is not Homebrew, `which comms`):

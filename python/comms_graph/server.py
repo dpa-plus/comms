@@ -1768,6 +1768,41 @@ function renderNow() {
   });
 }
 
+/* Who is at the keyboard.
+
+   A release is written under a name, permanently, and the board used to take
+   that name from the server process alone: started without COMMS_ACTOR, it
+   could free nothing, and "Free all" answered with the same refusal once per
+   claim. The person clicking is the one making the judgement, so the page asks
+   them once, remembers the answer in this browser, and sends it with every
+   release. `?actor=name` in the address bar sets or changes it. A process that
+   does have COMMS_ACTOR signs as itself and nobody is asked.
+
+   Returns the name, or null when the person declined to give one. */
+function boardActor() {
+  var m = /[?&]actor=([^&]+)/.exec(window.location.search || "");
+  var fromUrl = m ? decodeURIComponent(m[1]).replace(/^@+/, "").trim() : "";
+  if (fromUrl) {
+    try { localStorage.setItem("comms.actor", fromUrl); } catch (e) {}
+    return fromUrl;
+  }
+  var saved = "";
+  try { saved = (localStorage.getItem("comms.actor") || "").trim(); } catch (e) {}
+  if (saved) { return saved; }
+  if (D.board_actor) { return D.board_actor; }
+  var typed = window.prompt(
+    "Who is freeing this?" +
+    "\\n\\n" +
+    "Your name goes in the log next to every release you make from this board, " +
+    "permanently. It is asked once and remembered in this browser " +
+    "(change it with ?actor=name in the address bar).", "");
+  if (typed === null) { return null; }
+  typed = typed.replace(/^@+/, "").trim();
+  if (!typed) { return null; }
+  try { localStorage.setItem("comms.actor", typed); } catch (e) {}
+  return typed;
+}
+
 /* Freeing somebody else's ground, from the board.
 
    It asks for a reason and does not proceed without one. That is not ceremony:
@@ -1786,52 +1821,69 @@ function releaseClaim(btn) {
   var ids = all
     ? (D.claims || []).filter(function (c) { return c.actor === who; }).map(function (c) { return c.id; })
     : [id];
+  // Identity first, then the reason: both go in the log, and there is no point
+  // typing a reason for a release that will have no author.
+  var me = boardActor();
+  if (me === null) { return; }
   var what = all ? ids.length + (ids.length === 1 ? " file" : " files") + " held by @" + who
                  : scope + " from @" + who;
   var reason = window.prompt(
     "Free " + what + "?" +
     "\\n\\n" +
-    "This is recorded in the log under your name, permanently. Say why:",
+    "This is recorded in the log under @" + me + ", permanently. Say why:",
     all ? "session ended" : "");
   if (reason === null) { return; }
   reason = reason.trim();
   if (!reason) { alert("A reason is required: it is what the log will show."); return; }
-    var label = btn.textContent;
-    btn.disabled = true; btn.textContent = "…";
-    // One request per claim, sequentially. Each is its own event in the log, and
-    // a partial failure has to leave the rest freed rather than roll anything
-    // back: the log is append-only and there is nothing to undo.
-    var failed = [];
-    ids.reduce(function (prev, cid) {
-      return prev.then(function () {
-        return fetch("/api/release", {
-          method: "POST", headers: {"Content-Type": "application/json"},
-          // The project on screen, so the server frees the claim the button was
-          // drawn from rather than looking for its id in a different log.
-          body: JSON.stringify({id: cid, reason: reason, store: currentStore()})
-        }).then(function (r) {
-          if (!r.ok) { return r.json().then(function (b) { failed.push(b.error || cid); }); }
-        });
+  var label = btn.textContent;
+  btn.disabled = true; btn.textContent = "…";
+  // One request per claim, sequentially. Each is its own event in the log, and
+  // a partial failure has to leave the rest freed rather than roll anything
+  // back: the log is append-only and there is nothing to undo.
+  var failed = [];
+  var freed = 0;
+  var halt = false;
+  ids.reduce(function (prev, cid) {
+    return prev.then(function () {
+      if (halt) { return; }
+      return fetch("/api/release", {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        // The project on screen, so the server frees the claim the button was
+        // drawn from rather than looking for its id in a different log.
+        body: JSON.stringify({id: cid, reason: reason, store: currentStore(), actor: me})
+      }).then(function (r) {
+        if (r.ok) { freed += 1; return; }
+        // A refusal about the author applies to every claim alike. Asking the
+        // same question for each remaining one only produces more copies of
+        // the same answer.
+        if (r.status === 403) { halt = true; }
+        return r.json().then(
+          function (b) { failed.push(b.error || ("claim " + cid)); },
+          function () { failed.push("HTTP " + r.status); });
       });
-    }, Promise.resolve())
-      .then(function () {
-        // Built in steps rather than as a nested literal: two adjacent closing
-        // braces read as a Python format-string leftover, and a test guards the
-        // page against exactly that. Better to write plainer JS than to weaken
-        // a check that catches a real class of bug.
-        var err = { error: failed.join("; ") };
-        return { ok: !failed.length, body: err };
-      })
-      .then(function (res) {
-      if (!res.ok) {
-        alert("Not released: " + (res.body.error || "unknown error"));
-        btn.disabled = false; btn.textContent = label;
+    });
+  }, Promise.resolve())
+    .then(function () {
+      if (!failed.length) {
+        // The watcher notices the append and pushes a new snapshot, so the row
+        // goes on its own. Nothing is patched by hand here: the board stays a
+        // view of the log rather than a thing that edits its own copy.
+        btn.textContent = "freed";
         return;
       }
-      // The watcher notices the append and pushes a new snapshot, so the row
-      // goes on its own. Nothing is patched by hand here: the board stays a
-      // view of the log rather than a thing that edits its own copy.
-      btn.textContent = "freed";
+      // One line per distinct reason, not one per claim. Eight claims refused
+      // for the same reason used to produce the same sentence eight times,
+      // joined into one alert nobody could read.
+      var seen = {};
+      var lines = [];
+      failed.forEach(function (msg) {
+        if (!seen[msg]) { seen[msg] = true; lines.push(msg); }
+      });
+      var head = ids.length === 1
+        ? "Not released: "
+        : (freed ? freed + " freed, " : "") + (ids.length - freed) + " not released: ";
+      alert(head + lines.join("\\n"));
+      btn.disabled = false; btn.textContent = label;
     })
     .catch(function (e) {
       alert("Not released: " + e);
@@ -2472,7 +2524,8 @@ class _Handler(BaseHTTPRequestHandler):
             return
         code, body = board.release(str(payload.get("id") or ""),
                                    str(payload.get("reason") or ""),
-                                   str(payload.get("store") or ""))
+                                   str(payload.get("store") or ""),
+                                   str(payload.get("actor") or ""))
         self._send(json.dumps(body).encode("utf-8"), "application/json", code)
 
     def do_GET(self) -> None:  # noqa: N802
@@ -2532,6 +2585,18 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
 
+def _actor_name(raw: str) -> str:
+    """One rule for an actor typed at the board, the same one the CLI applies.
+
+    The @ is display, never identity: every surface prints "@name", so a name
+    copied off the board arrives with one, and a stored "@name" would be a
+    different agent from "name". Whitespace around it is noise. Anything else
+    is the person's business: `--as` accepts it, and the board should not be
+    stricter than the tool it fronts.
+    """
+    return (raw or "").strip().lstrip("@").strip()
+
+
 class Board:
     """Holds what the pages need and regenerates them only when the log moves."""
 
@@ -2563,7 +2628,8 @@ class Board:
                 parts.append("absent")
         return "|".join(parts)
 
-    def release(self, claim_id: str, reason: str, store: str = "") -> tuple[int, dict]:
+    def release(self, claim_id: str, reason: str, store: str = "",
+                actor: str = "") -> tuple[int, dict]:
         """Free somebody else's claim, from the board, under the operator's name.
 
         THE BOARD IS OTHERWISE READ-ONLY AND THAT IS DELIBERATE: the log is
@@ -2584,14 +2650,28 @@ class Board:
           permanently, and "who freed this and why" is the only question anybody
           asks afterwards.
 
-        It refuses entirely without an actor on the server process. A release
-        with no author is worse than no release: the claim is gone and the log
-        cannot say who did it.
+        WHO THE AUTHOR IS. The request says, and the process's COMMS_ACTOR is
+        only the fallback. The author used to come from the process alone, and
+        a board started without COMMS_ACTOR (a launcher, an app, a plain
+        `comms-graph ui`) could not free anything: every click on "Free all"
+        came back 403, and the ground stayed held by an agent that was gone.
+        The person at the keyboard is the one making the judgement, so the page
+        asks them for their name once and sends it with every release; that is
+        the same self-declared identity `--as` is on the CLI, and it is recorded
+        as the arbitrator, the way `release --force` records it. What this never
+        does is sign as the holder: a release under the holder's own name would
+        say they finished, which is the one thing the log must not say.
+
+        It still refuses when neither the request nor the process names anyone.
+        A release with no author is worse than no release: the claim is gone and
+        the log cannot say who did it.
         """
-        actor = os.environ.get("COMMS_ACTOR", "").strip().lstrip("@").strip()
+        actor = _actor_name(actor) or _actor_name(os.environ.get("COMMS_ACTOR", ""))
         if not actor:
             return 403, {"error": "this board has no actor, so a release would have "
-                                  "no author. Start it with COMMS_ACTOR set."}
+                                  "no author. The page asks for your name when you "
+                                  "free something; from elsewhere, send \"actor\" "
+                                  "or start the board with COMMS_ACTOR set."}
         claim_id = (claim_id or "").strip()
         if not claim_id:
             return 400, {"error": "release needs the exact claim id"}
@@ -2616,10 +2696,14 @@ class Board:
                 return 404, {"error": f"no active claim with id {claim_id}"}
             if held.actor == actor:
                 return 400, {"error": "that is your own claim; release it from the CLI"}
+            # The same two fields `release --force` writes, so the fold shows
+            # "somebody took it off them" rather than "they finished". The board
+            # wrote neither, and its releases folded as ordinary ones.
             ev = _log.Event(
                 ts=datetime.now(timezone.utc), id=_log.new_id(), actor=actor,
                 type=_log.TYPE_RELEASE, scope=None,
                 data={"refs": [held.id], "result": reason,
+                      "original_actor": held.actor, "arbitrator": actor,
                       "freed_from": held.actor, "via": "board"},
             )
             _log.append(log_file, ev)
@@ -2652,7 +2736,12 @@ class Board:
             picked = self._store_by_key(store)
             if picked is not None:
                 root, log_file = picked
-        return _snapshot(root, log_file, graph_path=self._graph_path(root))
+        snap = _snapshot(root, log_file, graph_path=self._graph_path(root))
+        # Whether this process can sign a release itself. When it cannot, the
+        # page asks the person for their name before freeing anything, so the
+        # request does not go out only to come back 403.
+        snap["board_actor"] = _actor_name(os.environ.get("COMMS_ACTOR", ""))
+        return snap
 
     def _store_by_key(self, key: str):
         """(root, log file) for a store key, or None if it is not one of ours.

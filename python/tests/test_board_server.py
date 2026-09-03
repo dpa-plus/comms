@@ -524,7 +524,8 @@ def test_the_board_refuses_a_release_with_no_reason(board, monkeypatch):
 
 def test_a_board_with_no_actor_cannot_release_at_all(board, monkeypatch):
     """A release with no author is worse than no release: the ground is gone and
-    the log cannot say who took it."""
+    the log cannot say who took it. Neither the process nor the request names
+    anyone here, so it must still refuse, and the claim must still be held."""
     import urllib.error
     import urllib.request
 
@@ -534,10 +535,88 @@ def test_a_board_with_no_actor_cannot_release_at_all(board, monkeypatch):
     req = urllib.request.Request(
         base + "/api/release", method="POST",
         headers={"Content-Type": "application/json"},
-        data=json.dumps({"id": cid, "reason": "why not"}).encode())
+        data=json.dumps({"id": cid, "reason": "why not", "actor": " @ "}).encode())
     with pytest.raises(urllib.error.HTTPError) as e:
         urllib.request.urlopen(req, timeout=20)
     assert e.value.code == 403
+    from comms_graph import state as cstate
+    st = cstate.fold(clog.read(log_file))
+    assert cid in {c.id for c in st.claims.values()}, "refused, yet the claim is gone"
+
+
+def test_the_board_takes_the_releasers_name_from_the_request(board, monkeypatch):
+    """IF THIS FAILS: a board started without COMMS_ACTOR cannot free anything.
+
+    That is how it shipped: the author came from the server process alone, so a
+    board launched by an app or a plain `comms-graph ui` answered every "Free
+    all" with 403, once per claim. The person clicking is the one making the
+    judgement, so the page asks for their name and sends it. It is recorded
+    the way `release --force` records it: under THEIR name, with the holder as
+    original_actor and them as arbitrator, never signed as the holder.
+    """
+    import urllib.request
+
+    repo, log_file, base = board
+    monkeypatch.delenv("COMMS_ACTOR", raising=False)
+    cid = _claim_as(repo, log_file, "alice", "src/a.py")
+
+    _, status = _get(base + "/api/status")
+    assert json.loads(status)["board_actor"] == "", (
+        "the page cannot tell it has to ask for a name")
+
+    req = urllib.request.Request(
+        base + "/api/release", method="POST",
+        headers={"Content-Type": "application/json"},
+        data=json.dumps({"id": cid, "reason": "session ended",
+                         "actor": "@human-eli"}).encode())
+    with urllib.request.urlopen(req, timeout=20) as r:
+        body = json.loads(r.read())
+    assert body["ok"] and body["was"] == "alice"
+
+    from comms_graph import state as cstate
+    st = cstate.fold(clog.read(log_file))
+    assert cid not in {c.id for c in st.claims.values()}, "the claim is still held"
+    rel = [e for e in clog.read(log_file) if e.type == clog.TYPE_RELEASE][-1]
+    assert rel.actor == "human-eli", "the @ is display, never identity"
+    assert rel.data.get("original_actor") == "alice"
+    assert rel.data.get("arbitrator") == "human-eli"
+    assert rel.data.get("via") == "board"
+    folded = st.releases[-1]
+    assert folded.arbitrator == "human-eli" and folded.original_actor == "alice", (
+        "the fold shows 'they finished' where it should show 'somebody took it off them'")
+
+
+def test_a_process_actor_is_the_fallback_and_is_announced(board, monkeypatch):
+    """A board started WITH COMMS_ACTOR keeps signing as itself when the request
+    names nobody, and says so in the snapshot so the page does not ask."""
+    import urllib.request
+
+    repo, log_file, base = board
+    monkeypatch.setenv("COMMS_ACTOR", "@human-eli")
+    cid = _claim_as(repo, log_file, "alice", "src/a.py")
+    _, status = _get(base + "/api/status")
+    assert json.loads(status)["board_actor"] == "human-eli"
+    req = urllib.request.Request(
+        base + "/api/release", method="POST",
+        headers={"Content-Type": "application/json"},
+        data=json.dumps({"id": cid, "reason": "session ended", "actor": ""}).encode())
+    with urllib.request.urlopen(req, timeout=20) as r:
+        assert json.loads(r.read())["ok"]
+    rel = [e for e in clog.read(log_file) if e.type == clog.TYPE_RELEASE][-1]
+    assert rel.actor == "human-eli"
+
+
+def test_the_page_asks_who_is_at_the_keyboard_and_sends_it(board):
+    """The server side is only half of it. The page has to ask, remember, and
+    put the name in the request; and it has to say a refusal once, not once per
+    claim, which is what the bug looked like on screen."""
+    repo, log_file, base = board
+    _, body = _get(base + "/")
+    js = body.split("<script>", 1)[1].split("</script>", 1)[0]
+    assert "D.board_actor" in js, "the page never checks whether the server can sign"
+    assert 'localStorage.getItem("comms.actor")' in js, "the name is not remembered"
+    assert "actor: me" in js, "the name never reaches the request"
+    assert "lines.join(" in js and "seen[msg]" in js, "refusals are not deduplicated"
 
 
 def test_the_board_serves_no_other_write(board):
