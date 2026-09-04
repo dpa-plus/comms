@@ -276,7 +276,9 @@ def test_unrelated_xpc_parent_does_not_disable_manual_refresh(monkeypatch):
     assert len(exec_calls) == 1
 
 
-def test_ui_closes_watcher_and_server_before_process_refresh(tmp_path, monkeypatch):
+def test_ui_closes_watcher_and_server_socket_before_process_refresh(
+    tmp_path, monkeypatch
+):
     """The listening socket and watcher must be gone before replacement starts."""
     from comms_graph import cli
     from comms_graph import runtime_refresh
@@ -325,43 +327,150 @@ def test_ui_closes_watcher_and_server_before_process_refresh(tmp_path, monkeypat
         "watcher-start",
         "serve",
         "watcher-close",
-        "server-shutdown",
         "server-close",
         "process-refresh",
     ]
 
 
-def test_ui_closes_listening_socket_when_initial_fingerprint_fails(tmp_path, monkeypatch):
-    """A startup scan failure must not leak the socket that launchd will retry."""
-    import pytest
-
+def test_ui_closes_unstarted_real_server_when_initial_fingerprint_fails(
+    tmp_path, monkeypatch
+):
+    """A startup scan failure must not deadlock before closing the real socket."""
     from comms_graph import cli
     from comms_graph import runtime_refresh
     from comms_graph import server
 
-    events = []
+    real_serve = server.serve
+    bound = threading.Event()
+    servers = []
 
-    class FakeServer:
-        def shutdown(self):
-            events.append("server-shutdown")
-
-        def server_close(self):
-            events.append("server-close")
+    def capture_server(*args, **kwargs):
+        httpd = real_serve(*args, **kwargs)
+        servers.append(httpd)
+        bound.set()
+        return httpd
 
     class BrokenWatcher:
         def __init__(self, package_dir, request_restart):
             raise OSError("installed package is moving")
 
-    fake_server = FakeServer()
     monkeypatch.setattr(
         cli,
         "_task_runtime",
         lambda _flags: (tmp_path, tmp_path / "log.jsonl", None),
     )
-    monkeypatch.setattr(server, "serve", lambda *args, **kwargs: fake_server)
+    monkeypatch.setattr(server, "serve", capture_server)
     monkeypatch.setattr(runtime_refresh, "SourceCodeWatcher", BrokenWatcher)
 
-    with pytest.raises(OSError, match="installed package is moving"):
-        cli._cmd_ui(["--no-open"])
+    outcome = {}
 
-    assert events == ["server-shutdown", "server-close"]
+    def run_ui():
+        try:
+            outcome["result"] = cli._cmd_ui(["--no-open", "--port", "0"])
+        except BaseException as exc:  # captured so the test can bound the call
+            outcome["error"] = exc
+
+    worker = threading.Thread(target=run_ui, daemon=True)
+    worker.start()
+    assert bound.wait(1.0), "the real HTTP server never bound"
+    worker.join(0.25)
+    try:
+        assert not worker.is_alive(), (
+            "_cmd_ui blocked in BaseServer.shutdown() before serve_forever() started"
+        )
+    finally:
+        if worker.is_alive():
+            # RED on d5d07b1 lands here. Starting the loop after shutdown was
+            # requested lets BaseServer set its completion event, so the
+            # deliberately blocked daemon thread cannot leak out of this test.
+            rescue = threading.Thread(
+                target=servers[0].serve_forever,
+                kwargs={"poll_interval": 0.01},
+                daemon=True,
+            )
+            rescue.start()
+            worker.join(2.0)
+            rescue.join(2.0)
+
+    assert isinstance(outcome.get("error"), OSError)
+    assert str(outcome["error"]) == "installed package is moving"
+    assert servers[0].socket.fileno() == -1
+
+
+def test_ui_refresh_shuts_down_and_closes_a_real_running_server(tmp_path, monkeypatch):
+    """The ordinary watcher path still stops a serving socket before refresh."""
+    from comms_graph import cli
+    from comms_graph import runtime_refresh
+    from comms_graph import server
+
+    real_serve = server.serve
+    serving = threading.Event()
+    servers = []
+    refreshes = []
+
+    def capture_server(*args, **kwargs):
+        httpd = real_serve(*args, **kwargs)
+        real_loop = httpd.serve_forever
+
+        def tracked_loop():
+            serving.set()
+            return real_loop(poll_interval=0.01)
+
+        httpd.serve_forever = tracked_loop
+        servers.append(httpd)
+        return httpd
+
+    class TriggeringWatcher:
+        restart_requested = True
+
+        def __init__(self, package_dir, request_restart):
+            self.request_restart = request_restart
+            self.thread = None
+
+        def start(self):
+            def request_after_serving_begins():
+                if serving.wait(1.0):
+                    self.request_restart()
+
+            self.thread = threading.Thread(
+                target=request_after_serving_begins,
+                daemon=True,
+            )
+            self.thread.start()
+
+        def close(self):
+            if self.thread is not None:
+                self.thread.join(2.0)
+
+    monkeypatch.setattr(
+        cli,
+        "_task_runtime",
+        lambda _flags: (tmp_path, tmp_path / "log.jsonl", None),
+    )
+    monkeypatch.setattr(server, "serve", capture_server)
+    monkeypatch.setattr(runtime_refresh, "SourceCodeWatcher", TriggeringWatcher)
+    monkeypatch.setattr(
+        runtime_refresh,
+        "restart_current_process",
+        lambda: refreshes.append("process-refresh"),
+    )
+
+    outcome = {}
+
+    def run_ui():
+        try:
+            outcome["result"] = cli._cmd_ui(["--no-open", "--port", "0"])
+        except BaseException as exc:  # captured for a bounded assertion below
+            outcome["error"] = exc
+
+    worker = threading.Thread(target=run_ui, daemon=True)
+    worker.start()
+    worker.join(2.0)
+    if worker.is_alive() and servers:
+        servers[0].shutdown()
+        worker.join(2.0)
+
+    assert not worker.is_alive(), "ordinary watcher refresh left _cmd_ui blocked"
+    assert outcome == {"result": cli.EXIT_OK}
+    assert refreshes == ["process-refresh"]
+    assert servers[0].socket.fileno() == -1

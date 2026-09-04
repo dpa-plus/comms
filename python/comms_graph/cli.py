@@ -1448,7 +1448,6 @@ def _cmd_ui(argv: list[str]) -> int:
     finally:
         if code_watcher is not None:
             code_watcher.close()
-        httpd.shutdown()
         httpd.server_close()
     if code_watcher is not None and code_watcher.restart_requested:
         print("installed comms code changed; refreshing the dashboard process", flush=True)
