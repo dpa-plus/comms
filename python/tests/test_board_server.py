@@ -79,6 +79,165 @@ def test_the_page_ships_usable_css_and_script(board):
     assert "EventSource" in body
 
 
+def test_page_and_snapshots_identify_the_exact_frontend_build(board, monkeypatch):
+    """A tab and every pushed snapshot must name their in-memory page build."""
+    repo, log_file, _base = board
+    first = cserver.Board(repo, log_file)
+    first_snapshot = first.snapshot()
+    first_token = first_snapshot["frontend_build"]
+
+    assert first_token
+    assert f'var PAGE_BUILD = "{first_token}";' in first.page()
+
+    changed_template = cserver._PAGE.replace(
+        "<title>comms</title>",
+        "<title>comms next build</title>",
+        1,
+    )
+    assert changed_template != cserver._PAGE
+    monkeypatch.setattr(cserver, "_PAGE", changed_template)
+    changed = cserver.Board(repo, log_file)
+    changed_snapshot = changed.snapshot()
+    changed_token = changed_snapshot["frontend_build"]
+
+    assert changed_token != first_token
+    assert f'var PAGE_BUILD = "{changed_token}";' in changed.page()
+
+
+def test_open_page_reloads_once_when_stream_reconnects_to_a_new_build(
+    board, monkeypatch
+):
+    """A live old document must replace itself once, not render new-build data."""
+    import tempfile
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed; cannot exercise the served page script")
+
+    repo, log_file, _base = board
+    loaded = cserver.Board(repo, log_file)
+    changed_template = cserver._PAGE.replace(
+        "<title>comms</title>",
+        "<title>comms next build</title>",
+        1,
+    )
+    monkeypatch.setattr(cserver, "_PAGE", changed_template)
+    reconnected = cserver.Board(repo, log_file)
+    assert loaded.frontend_build != reconnected.frontend_build
+
+    page = loaded.page()
+    script = page.split("<script>", 1)[1].split("</script>", 1)[0]
+    snapshots = [loaded.snapshot(), reconnected.snapshot(), reconnected.snapshot()]
+    harness = r'''
+const elements = {};
+function fakeElement() {
+  return {
+    innerHTML: "", textContent: "", value: "", hidden: false,
+    disabled: false, src: "", scrollTop: 0, scrollHeight: 0, clientHeight: 0,
+    classList: {add() {}, remove() {}, toggle() {}, contains() { return false; }},
+    addEventListener() {}, getAttribute() { return ""; }, setAttribute() {},
+    querySelector() { return null; }, querySelectorAll() { return []; },
+    closest() { return null; }
+  };
+}
+const document = {
+  documentElement: fakeElement(),
+  getElementById(id) { return elements[id] || (elements[id] = fakeElement()); },
+  addEventListener() {}
+};
+let reloads = 0;
+let closes = 0;
+let source = null;
+const location = {search: "", reload() { reloads += 1; }};
+const window = {
+  location: location, prompt() { return null; },
+  addEventListener() {}, dispatchEvent() {}, ResizeObserver: null
+};
+const localStorage = {getItem() { return null; }, setItem() {}};
+const history = {replaceState() {}};
+function EventSource() {
+  source = this;
+  this.close = function () { closes += 1; };
+}
+function alert() {}
+function setInterval() {}
+function setTimeout() {}
+'''
+    exercise = (
+        "\nconst snapshots = " + json.dumps(snapshots) + ";\n"
+        "snapshots.forEach(function (snapshot) {\n"
+        "  source.onmessage({data: JSON.stringify(snapshot)});\n"
+        "});\n"
+        "process.stdout.write(JSON.stringify({reloads: reloads, closes: closes, "
+        "renderedBuild: D && D.frontend_build}));\n"
+    )
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as fh:
+        fh.write(harness + script + exercise)
+        path = fh.name
+    out = subprocess.run([node, path], capture_output=True, text=True)
+
+    assert out.returncode == 0, out.stderr
+    result = json.loads(out.stdout)
+    assert result == {
+        "reloads": 1,
+        "closes": 1,
+        "renderedBuild": loaded.frontend_build,
+    }
+
+
+def test_server_shutdown_ends_open_event_streams_within_a_bound(tmp_path, monkeypatch):
+    """An all-day SSE tab must close promptly instead of blocking request drain."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    log_file = clog.log_path(repo)
+    httpd = cserver.serve(repo, log_file, port=0)
+    serving = threading.Thread(target=httpd.serve_forever, daemon=True)
+    serving.start()
+    response = urllib.request.urlopen(
+        f"http://127.0.0.1:{httpd.server_address[1]}/events",
+        timeout=2,
+    )
+    assert response.readline().startswith(b"data: ")
+
+    stream_ended = threading.Event()
+
+    def consume_to_eof():
+        try:
+            response.read()
+        except (OSError, ValueError):
+            # RED cleanup can close the response while this daemon reader is
+            # blocked. The assertion below distinguishes that rescue from the
+            # server ending the stream before cleanup begins.
+            pass
+        finally:
+            stream_ended.set()
+
+    consumer = threading.Thread(target=consume_to_eof, daemon=True)
+    consumer.start()
+    shutdown_done = threading.Event()
+
+    def stop_server():
+        httpd.shutdown()
+        httpd.server_close()
+        shutdown_done.set()
+
+    stopper = threading.Thread(target=stop_server, daemon=True)
+    stopper.start()
+    try:
+        assert shutdown_done.wait(1.5), "server shutdown exceeded its SSE drain bound"
+        assert stream_ended.wait(0.25), "the open SSE handler survived server shutdown"
+    finally:
+        response.close()
+        if not shutdown_done.is_set():
+            httpd.shutdown()
+            httpd.server_close()
+        stopper.join(2.0)
+        serving.join(2.0)
+        consumer.join(2.0)
+
+
 def test_an_unreadable_log_is_reported_rather_than_blanking_the_board(board):
     """A board that vanishes when something is wrong tells you nothing. One
     that says what is wrong tells you where to look."""

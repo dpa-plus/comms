@@ -7,6 +7,27 @@ import threading
 import time
 from pathlib import Path
 
+import pytest
+
+
+_REQUIRED_TEST_PACKAGE_FILES = (
+    "__init__.py",
+    "__main__.py",
+    "cli.py",
+    "runtime_refresh.py",
+    "server.py",
+)
+
+
+def _installed_package(tmp_path, server_source="VERSION = 1\n"):
+    package = tmp_path / "comms_graph"
+    package.mkdir()
+    for name in _REQUIRED_TEST_PACKAGE_FILES:
+        (package / name).write_text("# installed source\n", encoding="utf-8")
+    source = package / "server.py"
+    source.write_text(server_source, encoding="utf-8")
+    return package, source
+
 
 class ManualClock:
     def __init__(self) -> None:
@@ -23,9 +44,7 @@ def test_unchanged_python_sources_do_not_request_restart(tmp_path):
     """A quiet installation must leave a long-running dashboard alone."""
     from comms_graph import runtime_refresh
 
-    package = tmp_path / "comms_graph"
-    package.mkdir()
-    (package / "server.py").write_text("VERSION = 1\n", encoding="utf-8")
+    package, _source = _installed_package(tmp_path)
     restarts = []
 
     watcher = runtime_refresh.SourceCodeWatcher(package, lambda: restarts.append("restart"))
@@ -40,10 +59,7 @@ def test_changed_python_source_requests_restart_after_debounce(tmp_path):
     """A stable code replacement should reload once, after installs settle."""
     from comms_graph import runtime_refresh
 
-    package = tmp_path / "comms_graph"
-    package.mkdir()
-    source = package / "server.py"
-    source.write_text("VERSION = 1\n", encoding="utf-8")
+    package, source = _installed_package(tmp_path)
     restarts = []
     clock = ManualClock()
     watcher = runtime_refresh.SourceCodeWatcher(
@@ -69,10 +85,7 @@ def test_reinstalled_identical_python_source_requests_restart(tmp_path):
     """Replacing a wheel with identical bytes still reloads its imported modules."""
     from comms_graph import runtime_refresh
 
-    package = tmp_path / "comms_graph"
-    package.mkdir()
-    source = package / "server.py"
-    source.write_text("VERSION = 1\n", encoding="utf-8")
+    package, source = _installed_package(tmp_path)
     restarts = []
     clock = ManualClock()
     watcher = runtime_refresh.SourceCodeWatcher(
@@ -95,9 +108,7 @@ def test_non_python_files_do_not_request_restart(tmp_path):
     """Data and package-resource writes must not churn the dashboard process."""
     from comms_graph import runtime_refresh
 
-    package = tmp_path / "comms_graph"
-    package.mkdir()
-    (package / "server.py").write_text("VERSION = 1\n", encoding="utf-8")
+    package, _source = _installed_package(tmp_path)
     restarts = []
     clock = ManualClock()
     watcher = runtime_refresh.SourceCodeWatcher(
@@ -119,10 +130,7 @@ def test_repeated_polls_of_one_change_request_only_one_restart(tmp_path):
     """One installed build must not cause a restart storm while shutdown runs."""
     from comms_graph import runtime_refresh
 
-    package = tmp_path / "comms_graph"
-    package.mkdir()
-    source = package / "server.py"
-    source.write_text("VERSION = 1\n", encoding="utf-8")
+    package, source = _installed_package(tmp_path)
     restarts = []
     clock = ManualClock()
     watcher = runtime_refresh.SourceCodeWatcher(
@@ -145,9 +153,7 @@ def test_close_wakes_and_joins_a_sleeping_watcher(tmp_path):
     """Server cleanup must not wait for the next long polling interval."""
     from comms_graph import runtime_refresh
 
-    package = tmp_path / "comms_graph"
-    package.mkdir()
-    (package / "server.py").write_text("VERSION = 1\n", encoding="utf-8")
+    package, _source = _installed_package(tmp_path)
     watcher = runtime_refresh.SourceCodeWatcher(
         package,
         lambda: None,
@@ -166,10 +172,7 @@ def test_running_watcher_periodically_detects_python_changes(tmp_path):
     """Starting the watcher must turn the tested poll logic into live behavior."""
     from comms_graph import runtime_refresh
 
-    package = tmp_path / "comms_graph"
-    package.mkdir()
-    source = package / "server.py"
-    source.write_text("VERSION = 1\n", encoding="utf-8")
+    package, source = _installed_package(tmp_path)
     restarted = threading.Event()
     watcher = runtime_refresh.SourceCodeWatcher(
         package,
@@ -208,6 +211,58 @@ def test_transient_install_scan_error_does_not_disable_later_refresh(tmp_path):
     )
 
     watcher.poll_once()
+    watcher.poll_once()
+    clock.advance(1.0)
+    watcher.poll_once()
+
+    assert restarts == ["restart"]
+
+
+@pytest.mark.parametrize(
+    "present",
+    [
+        (),
+        ("__init__.py",),
+        ("__init__.py", "__main__.py", "runtime_refresh.py", "server.py"),
+    ],
+)
+def test_missing_or_incomplete_package_tree_is_not_a_stable_build(tmp_path, present):
+    """A partially replaced installation must never become a restart target."""
+    from comms_graph import runtime_refresh
+
+    package = tmp_path / "comms_graph"
+    if present:
+        package.mkdir()
+        for name in present:
+            (package / name).write_text("# partial install\n", encoding="utf-8")
+
+    with pytest.raises(OSError):
+        runtime_refresh._source_fingerprint(package)
+
+
+def test_removed_package_tree_is_ignored_until_complete_sources_return(tmp_path):
+    """Removal during pip replacement must reset debounce until a full build exists."""
+    from comms_graph import runtime_refresh
+
+    package, source = _installed_package(tmp_path)
+    restarts = []
+    clock = ManualClock()
+    watcher = runtime_refresh.SourceCodeWatcher(
+        package,
+        lambda: restarts.append("restart"),
+        debounce_seconds=1.0,
+        clock=clock,
+    )
+
+    removed = tmp_path / "comms_graph.installing"
+    package.rename(removed)
+    watcher.poll_once()
+    clock.advance(5.0)
+    watcher.poll_once()
+    assert restarts == []
+
+    removed.rename(package)
+    source.write_text("VERSION = 2\n", encoding="utf-8")
     watcher.poll_once()
     clock.advance(1.0)
     watcher.poll_once()
@@ -474,3 +529,169 @@ def test_ui_refresh_shuts_down_and_closes_a_real_running_server(tmp_path, monkey
     assert outcome == {"result": cli.EXIT_OK}
     assert refreshes == ["process-refresh"]
     assert servers[0].socket.fileno() == -1
+
+
+def test_ui_drains_an_accepted_release_before_process_replacement(
+    tmp_path, monkeypatch
+):
+    """A refresh must not exec/exit while an accepted release is being fsynced."""
+    import json
+    import urllib.request
+    from datetime import datetime, timezone
+
+    from comms_graph import cli
+    from comms_graph import log as clog
+    from comms_graph import runtime_refresh
+    from comms_graph import server
+    from comms_graph import state
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    log_file = clog.log_path(repo)
+    claim = clog.Event(
+        ts=datetime.now(timezone.utc),
+        id=clog.new_id(),
+        actor="working-agent",
+        type=clog.TYPE_CLAIM,
+        scope=["src/release.py"],
+        data={"intent": "finish safely"},
+    )
+    clog.append(log_file, claim)
+
+    real_append = clog.append
+    mutation_started = threading.Event()
+    allow_mutation_to_finish = threading.Event()
+    mutation_finished = threading.Event()
+    events = []
+
+    def blocking_append(path, event):
+        if event.type == clog.TYPE_RELEASE:
+            events.append("mutation-started")
+            mutation_started.set()
+            if not allow_mutation_to_finish.wait(3.0):
+                raise TimeoutError("test did not release the pending mutation")
+        result = real_append(path, event)
+        if event.type == clog.TYPE_RELEASE:
+            events.append("mutation-finished")
+            mutation_finished.set()
+        return result
+
+    monkeypatch.setattr(clog, "append", blocking_append)
+    serving = threading.Event()
+    servers = []
+    real_serve = server.serve
+
+    def capture_server(*args, **kwargs):
+        httpd = real_serve(*args, **kwargs)
+        real_loop = httpd.serve_forever
+
+        def tracked_loop():
+            serving.set()
+            return real_loop(poll_interval=0.01)
+
+        httpd.serve_forever = tracked_loop
+        servers.append(httpd)
+        return httpd
+
+    trigger_refresh = threading.Event()
+
+    class ControlledWatcher:
+        restart_requested = True
+
+        def __init__(self, package_dir, request_restart):
+            self.request_restart = request_restart
+            self.thread = None
+
+        def start(self):
+            def trigger_when_requested():
+                if trigger_refresh.wait(3.0):
+                    self.request_restart()
+
+            self.thread = threading.Thread(target=trigger_when_requested, daemon=True)
+            self.thread.start()
+
+        def close(self):
+            if self.thread is not None:
+                self.thread.join(3.0)
+
+    replacement = threading.Event()
+
+    def record_replacement():
+        events.append("process-replacement")
+        replacement.set()
+
+    monkeypatch.setattr(cli, "_task_runtime", lambda _flags: (repo, log_file, None))
+    monkeypatch.setattr(server, "serve", capture_server)
+    monkeypatch.setattr(runtime_refresh, "SourceCodeWatcher", ControlledWatcher)
+    monkeypatch.setattr(runtime_refresh, "restart_current_process", record_replacement)
+
+    ui_outcome = {}
+
+    def run_ui():
+        try:
+            ui_outcome["result"] = cli._cmd_ui(["--no-open", "--port", "0"])
+        except BaseException as exc:
+            ui_outcome["error"] = exc
+
+    ui_thread = threading.Thread(target=run_ui, daemon=True)
+    ui_thread.start()
+    assert serving.wait(1.0), "the UI server never entered serve_forever"
+
+    request_outcome = {}
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{servers[0].server_address[1]}/api/release",
+        method="POST",
+        headers={"Content-Type": "application/json"},
+        data=json.dumps(
+            {
+                "id": claim.id,
+                "reason": "runtime refresh",
+                "actor": "human-reviewer",
+            }
+        ).encode("utf-8"),
+    )
+
+    def post_release():
+        try:
+            with urllib.request.urlopen(request, timeout=3) as response:
+                request_outcome["status"] = response.status
+                request_outcome["body"] = json.loads(response.read())
+        except BaseException as exc:
+            request_outcome["error"] = exc
+
+    request_thread = threading.Thread(target=post_release, daemon=True)
+    request_thread.start()
+    assert mutation_started.wait(1.0), "the release never reached the append boundary"
+
+    trigger_refresh.set()
+    try:
+        assert not replacement.wait(0.4), (
+            "process replacement crossed while an accepted release was still appending"
+        )
+        assert ui_thread.is_alive(), "the UI returned before its accepted mutation drained"
+    finally:
+        allow_mutation_to_finish.set()
+        request_thread.join(3.0)
+        ui_thread.join(3.0)
+        if ui_thread.is_alive() and servers:
+            servers[0].shutdown()
+            servers[0].server_close()
+            ui_thread.join(2.0)
+
+    assert mutation_finished.is_set()
+    assert replacement.is_set()
+    assert events.index("mutation-finished") < events.index("process-replacement")
+    assert request_outcome == {
+        "status": 200,
+        "body": {
+            "ok": True,
+            "released": claim.id,
+            "was": "working-agent",
+            "scope": "src/release.py",
+        },
+    }
+    assert ui_outcome == {"result": cli.EXIT_OK}
+    assert claim.id not in {item.id for item in state.fold(clog.read(log_file)).claims.values()}

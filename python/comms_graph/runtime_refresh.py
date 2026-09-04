@@ -13,13 +13,28 @@ from typing import Callable
 
 LAUNCHD_SERVICE_NAME = "plus.dpa.comms-ui"
 
+# A pip replacement can expose a directory before the files needed to start the
+# dashboard have all arrived.  Those core modules are the minimum viable source
+# tree, not a manifest of every module a future release may add or remove.
+_REQUIRED_SOURCE_FILES = frozenset(
+    {"__init__.py", "__main__.py", "cli.py", "runtime_refresh.py", "server.py"}
+)
+
 
 def _source_fingerprint(package_dir: Path) -> str:
     """Return a stable fingerprint for the installed package files."""
+    package_dir = Path(package_dir)
+    if not package_dir.is_dir():
+        raise FileNotFoundError(f"installed package directory is absent: {package_dir}")
+    paths = sorted(item for item in package_dir.rglob("*.py") if item.is_file())
+    relative_paths = {str(path.relative_to(package_dir)) for path in paths}
+    missing = _REQUIRED_SOURCE_FILES - relative_paths
+    if missing:
+        names = ", ".join(sorted(missing))
+        raise OSError(f"installed package source tree is incomplete; missing: {names}")
+
     digest = hashlib.sha256()
-    for path in sorted(
-        item for item in Path(package_dir).rglob("*.py") if item.is_file()
-    ):
+    for path in paths:
         stat = path.stat()
         digest.update(str(path.relative_to(package_dir)).encode("utf-8"))
         digest.update(f"\0{stat.st_mtime_ns}:{stat.st_size}\0".encode("ascii"))
