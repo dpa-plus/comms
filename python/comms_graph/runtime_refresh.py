@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import csv
 import hashlib
 import os
 import sys
 import threading
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Callable
 
 
@@ -31,6 +32,41 @@ def _source_manifest(package_dir: Path) -> frozenset[str]:
     return frozenset(
         str(path.relative_to(package_dir)) for path in _source_paths(package_dir)
     )
+
+
+def _recorded_source_manifest(
+    package_dir: Path,
+) -> tuple[Path, bytes, frozenset[str]] | None:
+    """Read the wheel RECORD that authoritatively describes this package."""
+    package_dir = Path(package_dir)
+    records = tuple(
+        sorted(package_dir.parent.glob(f"{package_dir.name}-*.dist-info/RECORD"))
+    )
+    if not records:
+        return None
+    if len(records) != 1:
+        raise OSError("installed package has multiple active distribution records")
+
+    record_path = records[0]
+    record_bytes = record_path.read_bytes()
+    try:
+        rows = csv.reader(record_bytes.decode("utf-8").splitlines())
+        sources = set()
+        for row in rows:
+            if not row:
+                continue
+            installed_path = PurePosixPath(row[0])
+            parts = installed_path.parts
+            if len(parts) < 2 or parts[0] != package_dir.name:
+                continue
+            relative = PurePosixPath(*parts[1:])
+            if ".." not in relative.parts and relative.suffix == ".py":
+                sources.add(relative.as_posix())
+    except (csv.Error, UnicodeError) as exc:
+        raise OSError(f"cannot read installed distribution record: {record_path}") from exc
+    if not sources:
+        raise OSError(f"installed distribution records no Python sources: {record_path}")
+    return record_path, record_bytes, frozenset(sources)
 
 
 def _source_fingerprint(package_dir: Path) -> str:
@@ -64,7 +100,11 @@ class SourceCodeWatcher:
         self.debounce_seconds = debounce_seconds
         self._clock = clock
         self._fingerprint = fingerprint
-        self._baseline, self._baseline_manifest = self._read_sample(frozenset())
+        (
+            self._baseline,
+            self._baseline_manifest,
+            self._record_required,
+        ) = self._read_sample(frozenset(), require_record=False)
         self._pending: str | None = None
         self._pending_since = 0.0
         self.restart_requested = False
@@ -72,19 +112,45 @@ class SourceCodeWatcher:
         self._thread: threading.Thread | None = None
 
     def _read_sample(
-        self, required_manifest: frozenset[str]
-    ) -> tuple[str, frozenset[str]]:
-        """Fingerprint one stable tree containing every baseline source path."""
+        self, required_manifest: frozenset[str], *, require_record: bool
+    ) -> tuple[str, frozenset[str], bool]:
+        """Fingerprint one tree that agrees with stable package metadata."""
+        record_before = _recorded_source_manifest(self.package_dir)
+        if require_record and record_before is None:
+            raise OSError("installed package distribution record is absent")
         before = _source_manifest(self.package_dir)
-        missing = required_manifest - before
-        if missing:
-            names = ", ".join(sorted(missing))
-            raise OSError(f"installed package source tree is incomplete; missing: {names}")
+        if record_before is None:
+            missing = required_manifest - before
+            if missing:
+                names = ", ".join(sorted(missing))
+                raise OSError(
+                    f"installed package source tree is incomplete; missing: {names}"
+                )
+        else:
+            recorded = record_before[2]
+            if before != recorded:
+                missing = recorded - before
+                unrecorded = before - recorded
+                details = []
+                if missing:
+                    details.append(f"missing: {', '.join(sorted(missing))}")
+                if unrecorded:
+                    details.append(f"unrecorded: {', '.join(sorted(unrecorded))}")
+                raise OSError(
+                    "installed package does not match its distribution record; "
+                    + "; ".join(details)
+                )
         fingerprint = self._fingerprint(self.package_dir)
         after = _source_manifest(self.package_dir)
+        record_after = _recorded_source_manifest(self.package_dir)
         if before != after:
             raise OSError("installed package source manifest changed during its scan")
-        return fingerprint, after
+        if record_before is None:
+            if record_after is not None:
+                raise OSError("installed package distribution record changed during its scan")
+        elif record_after is None or record_before[:2] != record_after[:2]:
+            raise OSError("installed package distribution record changed during its scan")
+        return fingerprint, after, record_before is not None
 
     def start(self) -> None:
         """Start periodic checks in one daemon thread."""
@@ -116,13 +182,18 @@ class SourceCodeWatcher:
         if self.restart_requested:
             return
         try:
-            current, _manifest = self._read_sample(self._baseline_manifest)
+            current, _manifest, record_backed = self._read_sample(
+                self._baseline_manifest,
+                require_record=self._record_required,
+            )
         except OSError:
             # Installers can briefly move a source file between the directory
             # scan and read. That is neither a stable build nor a reason for
             # the one watcher thread to die; wait for a complete next scan.
             self._pending = None
             return
+        if record_backed:
+            self._record_required = True
         if current == self._baseline:
             self._pending = None
             return

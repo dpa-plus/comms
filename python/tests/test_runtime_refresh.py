@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 
-_REQUIRED_TEST_PACKAGE_FILES = (
+_TEST_PACKAGE_FILES = (
     "__init__.py",
     "__main__.py",
     "cli.py",
@@ -23,11 +23,28 @@ _REQUIRED_TEST_PACKAGE_FILES = (
 def _installed_package(tmp_path, server_source="VERSION = 1\n"):
     package = tmp_path / "comms_graph"
     package.mkdir()
-    for name in _REQUIRED_TEST_PACKAGE_FILES:
+    for name in _TEST_PACKAGE_FILES:
         (package / name).write_text("# installed source\n", encoding="utf-8")
     source = package / "server.py"
     source.write_text(server_source, encoding="utf-8")
+    _write_distribution_record(package)
     return package, source
+
+
+def _write_distribution_record(package, source_names=None):
+    """Publish the wheel's authoritative list of installed Python sources."""
+    if source_names is None:
+        source_names = sorted(
+            str(path.relative_to(package)) for path in package.rglob("*.py")
+        )
+    metadata = package.parent / "comms_graph-0.1.0.dist-info"
+    metadata.mkdir(exist_ok=True)
+    record = metadata / "RECORD"
+    record.write_text(
+        "".join(f"{package.name}/{name},,\n" for name in source_names),
+        encoding="utf-8",
+    )
+    return record
 
 
 class ManualClock:
@@ -268,8 +285,8 @@ def test_removed_package_tree_is_ignored_until_complete_sources_return(tmp_path)
     assert restarts == ["restart"]
 
 
-def test_missing_baseline_module_is_unstable_until_restored(tmp_path):
-    """Every source present at startup is required while a replacement settles."""
+def test_missing_recorded_module_is_unstable_until_restored(tmp_path):
+    """A module still listed by the candidate release cannot enter debounce."""
     from comms_graph import runtime_refresh
 
     package, source = _installed_package(tmp_path)
@@ -293,6 +310,65 @@ def test_missing_baseline_module_is_unstable_until_restored(tmp_path):
 
     displaced.write_text("# restored by the completed install\n", encoding="utf-8")
     displaced.rename(contact)
+    watcher.poll_once()
+    clock.advance(1.0)
+    watcher.poll_once()
+    watcher.poll_once()
+
+    assert restarts == ["restart"]
+
+
+def test_new_recorded_module_must_arrive_before_candidate_can_debounce(tmp_path):
+    """A newly introduced dependency cannot trigger refresh before it is installed."""
+    from comms_graph import runtime_refresh
+
+    package, source = _installed_package(tmp_path)
+    next_module = package / "contacts.py"
+    restarts = []
+    clock = ManualClock()
+    watcher = runtime_refresh.SourceCodeWatcher(
+        package,
+        lambda: restarts.append("restart"),
+        debounce_seconds=1.0,
+        clock=clock,
+    )
+
+    source.write_text("VERSION = 2\n", encoding="utf-8")
+    _write_distribution_record(
+        package,
+        source_names=sorted((*_TEST_PACKAGE_FILES, next_module.name)),
+    )
+    watcher.poll_once()
+    clock.advance(5.0)
+    watcher.poll_once()
+    assert restarts == [], "a RECORD-listed source was still absent"
+
+    next_module.write_text("# installed dependency\n", encoding="utf-8")
+    watcher.poll_once()
+    clock.advance(1.0)
+    watcher.poll_once()
+    watcher.poll_once()
+
+    assert restarts == ["restart"]
+
+
+def test_complete_record_can_intentionally_remove_a_baseline_module(tmp_path):
+    """A complete candidate release may delete a module from the old release."""
+    from comms_graph import runtime_refresh
+
+    package, source = _installed_package(tmp_path)
+    restarts = []
+    clock = ManualClock()
+    watcher = runtime_refresh.SourceCodeWatcher(
+        package,
+        lambda: restarts.append("restart"),
+        debounce_seconds=1.0,
+        clock=clock,
+    )
+
+    (package / "contact.py").unlink()
+    source.write_text("VERSION = 2\n", encoding="utf-8")
+    _write_distribution_record(package)
     watcher.poll_once()
     clock.advance(1.0)
     watcher.poll_once()
