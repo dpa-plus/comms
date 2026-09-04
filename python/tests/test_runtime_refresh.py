@@ -14,6 +14,7 @@ _REQUIRED_TEST_PACKAGE_FILES = (
     "__init__.py",
     "__main__.py",
     "cli.py",
+    "contact.py",
     "runtime_refresh.py",
     "server.py",
 )
@@ -192,6 +193,7 @@ def test_transient_install_scan_error_does_not_disable_later_refresh(tmp_path):
     """A package file replaced mid-scan must not kill the watcher thread."""
     from comms_graph import runtime_refresh
 
+    package, _source = _installed_package(tmp_path)
     fingerprints = iter(["original", OSError("file moved"), "updated", "updated"])
 
     def fingerprint(_package_dir):
@@ -203,7 +205,7 @@ def test_transient_install_scan_error_does_not_disable_later_refresh(tmp_path):
     restarts = []
     clock = ManualClock()
     watcher = runtime_refresh.SourceCodeWatcher(
-        tmp_path,
+        package,
         lambda: restarts.append("restart"),
         debounce_seconds=1.0,
         clock=clock,
@@ -219,22 +221,18 @@ def test_transient_install_scan_error_does_not_disable_later_refresh(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "present",
-    [
-        (),
-        ("__init__.py",),
-        ("__init__.py", "__main__.py", "runtime_refresh.py", "server.py"),
-    ],
+    "create_directory",
+    [False, True],
 )
-def test_missing_or_incomplete_package_tree_is_not_a_stable_build(tmp_path, present):
-    """A partially replaced installation must never become a restart target."""
+def test_missing_or_empty_package_tree_is_not_a_source_sample(
+    tmp_path, create_directory
+):
+    """There is no valid baseline manifest without a package and Python source."""
     from comms_graph import runtime_refresh
 
     package = tmp_path / "comms_graph"
-    if present:
+    if create_directory:
         package.mkdir()
-        for name in present:
-            (package / name).write_text("# partial install\n", encoding="utf-8")
 
     with pytest.raises(OSError):
         runtime_refresh._source_fingerprint(package)
@@ -265,6 +263,39 @@ def test_removed_package_tree_is_ignored_until_complete_sources_return(tmp_path)
     source.write_text("VERSION = 2\n", encoding="utf-8")
     watcher.poll_once()
     clock.advance(1.0)
+    watcher.poll_once()
+
+    assert restarts == ["restart"]
+
+
+def test_missing_baseline_module_is_unstable_until_restored(tmp_path):
+    """Every source present at startup is required while a replacement settles."""
+    from comms_graph import runtime_refresh
+
+    package, source = _installed_package(tmp_path)
+    contact = package / "contact.py"
+    displaced = tmp_path / "contact.py.installing"
+    restarts = []
+    clock = ManualClock()
+    watcher = runtime_refresh.SourceCodeWatcher(
+        package,
+        lambda: restarts.append("restart"),
+        debounce_seconds=1.0,
+        clock=clock,
+    )
+
+    contact.rename(displaced)
+    source.write_text("VERSION = 2\n", encoding="utf-8")
+    watcher.poll_once()
+    clock.advance(5.0)
+    watcher.poll_once()
+    assert restarts == [], "an incomplete package survived the debounce"
+
+    displaced.write_text("# restored by the completed install\n", encoding="utf-8")
+    displaced.rename(contact)
+    watcher.poll_once()
+    clock.advance(1.0)
+    watcher.poll_once()
     watcher.poll_once()
 
     assert restarts == ["restart"]

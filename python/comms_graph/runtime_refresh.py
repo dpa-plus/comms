@@ -13,28 +13,31 @@ from typing import Callable
 
 LAUNCHD_SERVICE_NAME = "plus.dpa.comms-ui"
 
-# A pip replacement can expose a directory before the files needed to start the
-# dashboard have all arrived.  Those core modules are the minimum viable source
-# tree, not a manifest of every module a future release may add or remove.
-_REQUIRED_SOURCE_FILES = frozenset(
-    {"__init__.py", "__main__.py", "cli.py", "runtime_refresh.py", "server.py"}
-)
+
+def _source_paths(package_dir: Path) -> tuple[Path, ...]:
+    """List one nonempty installed Python source tree or reject the sample."""
+    package_dir = Path(package_dir)
+    if not package_dir.is_dir():
+        raise FileNotFoundError(f"installed package directory is absent: {package_dir}")
+    paths = tuple(sorted(item for item in package_dir.rglob("*.py") if item.is_file()))
+    if not paths:
+        raise OSError(f"installed package source tree is empty: {package_dir}")
+    return paths
+
+
+def _source_manifest(package_dir: Path) -> frozenset[str]:
+    """Return every Python source path present in one package sample."""
+    package_dir = Path(package_dir)
+    return frozenset(
+        str(path.relative_to(package_dir)) for path in _source_paths(package_dir)
+    )
 
 
 def _source_fingerprint(package_dir: Path) -> str:
     """Return a stable fingerprint for the installed package files."""
     package_dir = Path(package_dir)
-    if not package_dir.is_dir():
-        raise FileNotFoundError(f"installed package directory is absent: {package_dir}")
-    paths = sorted(item for item in package_dir.rglob("*.py") if item.is_file())
-    relative_paths = {str(path.relative_to(package_dir)) for path in paths}
-    missing = _REQUIRED_SOURCE_FILES - relative_paths
-    if missing:
-        names = ", ".join(sorted(missing))
-        raise OSError(f"installed package source tree is incomplete; missing: {names}")
-
     digest = hashlib.sha256()
-    for path in paths:
+    for path in _source_paths(package_dir):
         stat = path.stat()
         digest.update(str(path.relative_to(package_dir)).encode("utf-8"))
         digest.update(f"\0{stat.st_mtime_ns}:{stat.st_size}\0".encode("ascii"))
@@ -61,12 +64,27 @@ class SourceCodeWatcher:
         self.debounce_seconds = debounce_seconds
         self._clock = clock
         self._fingerprint = fingerprint
-        self._baseline = self._fingerprint(self.package_dir)
+        self._baseline, self._baseline_manifest = self._read_sample(frozenset())
         self._pending: str | None = None
         self._pending_since = 0.0
         self.restart_requested = False
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+
+    def _read_sample(
+        self, required_manifest: frozenset[str]
+    ) -> tuple[str, frozenset[str]]:
+        """Fingerprint one stable tree containing every baseline source path."""
+        before = _source_manifest(self.package_dir)
+        missing = required_manifest - before
+        if missing:
+            names = ", ".join(sorted(missing))
+            raise OSError(f"installed package source tree is incomplete; missing: {names}")
+        fingerprint = self._fingerprint(self.package_dir)
+        after = _source_manifest(self.package_dir)
+        if before != after:
+            raise OSError("installed package source manifest changed during its scan")
+        return fingerprint, after
 
     def start(self) -> None:
         """Start periodic checks in one daemon thread."""
@@ -98,7 +116,7 @@ class SourceCodeWatcher:
         if self.restart_requested:
             return
         try:
-            current = self._fingerprint(self.package_dir)
+            current, _manifest = self._read_sample(self._baseline_manifest)
         except OSError:
             # Installers can briefly move a source file between the directory
             # scan and read. That is neither a stable build nor a reason for
