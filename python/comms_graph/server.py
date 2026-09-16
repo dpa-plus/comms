@@ -23,6 +23,7 @@ guarantees.
 
 from __future__ import annotations
 
+import hashlib
 import html
 from urllib.parse import unquote
 import json
@@ -52,6 +53,8 @@ POLL_SECONDS = 0.5
 #: prompt to look, never a licence for the board to act. Nothing expires on its
 #: own: a claim ends only when somebody names it in a release or a steal.
 QUIET_AFTER_SECONDS = 3600
+
+_FRONTEND_BUILD_MARKER = "__COMMS_FRONTEND_BUILD_TOKEN__"
 
 
 def _now_text() -> str:
@@ -1529,10 +1532,12 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
   </div>
 </div>
 <script>
+var PAGE_BUILD = "__COMMS_FRONTEND_BUILD_TOKEN__";
 var D = null;              // the last snapshot
 var FILTER = "all";        // which stream chip is active
 var PQ = "";               // projects filter box
 var PAUSED_AT_BOTTOM = true;
+var RELOAD_REQUESTED = false;
 
 function el(id) { return document.getElementById(id); }
 function esc(s) {
@@ -2399,6 +2404,18 @@ function renderAll(d) {
   renderStream(); renderRoster(); renderTasks(); renderSession();
 }
 
+function acceptSnapshot(d) {
+  if (d.frontend_build && d.frontend_build !== PAGE_BUILD) {
+    if (!RELOAD_REQUESTED) {
+      RELOAD_REQUESTED = true;
+      es.close();
+      location.reload();
+    }
+    return;
+  }
+  renderAll(d);
+}
+
 el("chips").addEventListener("click", function (ev) {
   var b = ev.target.closest(".chip"); if (!b) return;
   FILTER = b.getAttribute("data-k"); renderChips(); renderStream();
@@ -2423,6 +2440,8 @@ el("projQ").addEventListener("input", function (ev) { PQ = ev.target.value.trim(
 (function () {
   var wrap = el("dagWrap"), frame = el("dagFrame"), shown = "";
   function show(src, btn) {
+    var store = currentStore();
+    if (store) { src += "?store=" + encodeURIComponent(store); }
     // Loading only what is asked for, and only once. Both are full
     // vis-network pages; mounting them behind a closed overlay would pay for
     // two graph layouts on every page load for a view most days nobody opens.
@@ -2447,9 +2466,14 @@ var live = el("liveTxt"), dot = el("livedot");
 var es = new EventSource("/events" + location.search);
 es.onopen = function () { live.textContent = "connected"; dot.classList.remove("off"); };
 es.onerror = function () { live.textContent = "disconnected"; dot.classList.add("off"); };
-es.onmessage = function (ev) { renderAll(JSON.parse(ev.data)); };
+es.onmessage = function (ev) { acceptSnapshot(JSON.parse(ev.data)); };
 </script>
 """
+
+
+def _frontend_build_token(page: str) -> str:
+    """Identify the exact in-memory document served by this process."""
+    return hashlib.sha256(page.encode("utf-8")).hexdigest()
 
 
 #: Appended to each embedded page to give the graph the whole pane.
@@ -2495,6 +2519,32 @@ _EMBED_CSS = (
     "setTimeout(fire,0);setTimeout(fire,120);setTimeout(fire,400);"
     "})();</script>"
 )
+
+
+class _DashboardHTTPServer(ThreadingHTTPServer):
+    """Threaded HTTP server whose close boundary preserves accepted writes."""
+
+    daemon_threads = False
+    block_on_close = True
+
+    def __init__(self, *args, **kwargs) -> None:
+        self.shutdown_requested = threading.Event()
+        super().__init__(*args, **kwargs)
+
+    def verify_request(self, request, client_address) -> bool:
+        """Reject work accepted by the socket after graceful shutdown began."""
+        return not self.shutdown_requested.is_set()
+
+    def shutdown(self) -> None:
+        # Wake long-lived SSE handlers before waiting for serve_forever().
+        self.shutdown_requested.set()
+        super().shutdown()
+
+    def server_close(self) -> None:
+        # Also covers startup errors and KeyboardInterrupt, whose cleanup can
+        # reach server_close() without going through shutdown().
+        self.shutdown_requested.set()
+        super().server_close()
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -2565,8 +2615,9 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Connection", "keep-alive")
         self.end_headers()
         last = None
+        stopping = self.server.shutdown_requested  # type: ignore[attr-defined]
         try:
-            while True:
+            while not stopping.is_set():
                 stamp = board.stamp()
                 snap = board.snapshot(store)
                 snap["stamp"] = stamp
@@ -2581,17 +2632,20 @@ class _Handler(BaseHTTPRequestHandler):
                 # again. Without it a busy repository turned this into a tight
                 # loop that re-read and re-folded the whole log as fast as the
                 # CPU allowed, for every connected browser.
-                time.sleep(POLL_SECONDS)
+                if stopping.wait(POLL_SECONDS):
+                    break
                 waited = POLL_SECONDS
                 while board.stamp() == last and waited < 10.0:
-                    time.sleep(POLL_SECONDS)
+                    if stopping.wait(POLL_SECONDS):
+                        break
                     waited += POLL_SECONDS
         except (BrokenPipeError, ConnectionResetError, OSError):
             # The reader closed the tab. Entirely normal for a stream somebody
             # leaves open all day, and it used to print a traceback on the
             # terminal running the board, which reads as something being wrong.
+            pass
+        finally:
             self.close_connection = True
-            return
 
 
 def _actor_name(raw: str) -> str:
@@ -2613,6 +2667,8 @@ class Board:
         self.root = Path(root)
         self.log_file = Path(log_file)
         self.graph_file = graph_file
+        self._page = _PAGE
+        self.frontend_build = _frontend_build_token(self._page)
         self._lock = threading.Lock()
         self._cache: dict[str, tuple[str, str]] = {}
         #: One lock per page key, so a slow map build does not hold up the task
@@ -2750,6 +2806,7 @@ class Board:
         # page asks the person for their name before freeing anything, so the
         # request does not go out only to come back 403.
         snap["board_actor"] = _actor_name(os.environ.get("COMMS_ACTOR", ""))
+        snap["frontend_build"] = self.frontend_build
         return snap
 
     def _store_by_key(self, key: str):
@@ -2775,7 +2832,7 @@ class Board:
         # JavaScript braces, and an earlier version doubled them for a .format()
         # call that never happened, so the doubled braces shipped literally and
         # every rule and script block in the page was invalid.
-        return _PAGE
+        return self._page.replace(_FRONTEND_BUILD_MARKER, self.frontend_build)
 
     def _cached(self, key: str, build) -> str:
         """One builder at a time per page, because building is not side-effect free.
@@ -2887,7 +2944,6 @@ def _placeholder(title: str, hint: str, detail: str = "") -> str:
 def serve(root: Path, log_file: Path, host: str = "127.0.0.1", port: int = 7878,
           graph_file: str | None = None) -> ThreadingHTTPServer:
     """Start the board. Returns the server so a caller can shut it down."""
-    httpd = ThreadingHTTPServer((host, port), _Handler)
-    httpd.daemon_threads = True
+    httpd = _DashboardHTTPServer((host, port), _Handler)
     httpd.board = Board(root, log_file, graph_file)  # type: ignore[attr-defined]
     return httpd

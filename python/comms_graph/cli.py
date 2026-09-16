@@ -1422,6 +1422,7 @@ def _cmd_ui(argv: list[str]) -> int:
         _err(f"error: --port {flags['port']!r} is not a number")
         return EXIT_USAGE
 
+    from . import runtime_refresh as _runtime_refresh
     from . import server as _server
 
     try:
@@ -1434,13 +1435,23 @@ def _cmd_ui(argv: list[str]) -> int:
 
     print(f"comms board on http://{host}:{port}  (ctrl-c to stop)")
     print(f"  watching {log_file}")
+    code_watcher = None
     try:
+        code_watcher = _runtime_refresh.SourceCodeWatcher(
+            Path(_runtime_refresh.__file__).resolve().parent,
+            httpd.shutdown,
+        )
+        code_watcher.start()
         httpd.serve_forever()
     except KeyboardInterrupt:
         print()
     finally:
-        httpd.shutdown()
+        if code_watcher is not None:
+            code_watcher.close()
         httpd.server_close()
+    if code_watcher is not None and code_watcher.restart_requested:
+        print("installed comms code changed; refreshing the dashboard process", flush=True)
+        _runtime_refresh.restart_current_process()
     return EXIT_OK
 
 

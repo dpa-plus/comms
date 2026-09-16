@@ -5,7 +5,8 @@
 
   RunAtLoad + KeepAlive => it starts at login and is restarted if it ever exits,
   so the dashboard on http://127.0.0.1:7878 is always up and always execs the
-  binary at the path below (pick up a new build with `launchctl kickstart -k`).
+  binary at the path below. New Python source installs refresh automatically;
+  kickstart once when first upgrading an older process that has no watcher.
 
   Set ProgramArguments[0] to your comms-graph (`which comms-graph`).
       `comms ui` also works and hands over to the same board, but pointing

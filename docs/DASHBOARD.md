@@ -46,7 +46,7 @@ rightward, so there is no geometry to get wrong in the browser.
 
 It updates by **push, not polling.** A file watcher inside `comms ui` is notified by the operating system the instant any project's `log.jsonl` changes; it rebuilds the snapshot once and streams it to every open browser tab over [Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events). So when any agent anywhere appends an event, the right project lights up in the sidebar **immediately**, and your laptop isn't burning cycles re-reading logs on a timer.
 
-Every snapshot carries the server's **front-end build fingerprint**, and the page remembers the one it loaded with. So when you replace the binary and restart `comms ui`, every open tab notices the new build on the next push and **reloads itself** to the new dashboard, so no stale UI is lingering after an upgrade.
+Every snapshot carries the server's **front-end build fingerprint**, and the page remembers the one it loaded with. The server also fingerprints the installed `comms_graph` Python sources. Once a changed installation has stayed stable for a short debounce, the server closes cleanly and refreshes itself: launchd starts a fresh process, while a manually started `comms-graph ui` replaces itself directly. Every open tab reconnects, notices the new front-end build on the next push, and **reloads itself**, so no stale UI is lingering after an upgrade.
 
 It **opens your browser automatically** when run interactively (`--no-open` to suppress). On macOS you can also double-click a **Comms Dashboard** launcher instead of using the terminal. The header shows the active **session name** (the name agents use, e.g. `acme-build`) next to the repo.
 
@@ -82,11 +82,13 @@ install -m644 contrib/launchd/plus.dpa.comms-ui.plist ~/Library/LaunchAgents/
 launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/plus.dpa.comms-ui.plist
 ```
 
-After installing a new binary, restart the service to pick it up (open tabs then auto-reload, see above):
+The first time you install the version that introduced automatic refresh, restart the already-running service once:
 
 ```bash
 launchctl kickstart -k "gui/$(id -u)/plus.dpa.comms-ui"
 ```
+
+That one restart is unavoidable: a process started from an older installation has no source watcher in memory yet. Later Python-package reinstalls are detected automatically; Comms data remains in the append-only log, and open tabs reconnect and reload themselves.
 
 To remove it: `launchctl bootout "gui/$(id -u)/plus.dpa.comms-ui"` then delete the plist.
 
@@ -100,14 +102,14 @@ Because `comms` is just a binary that runs fresh on every command, upgrading is 
 
 - **The session lives in the log file, not in the binary.** Claims, findings, and notes are on disk. Replacing the binary doesn't touch them.
 - **CLI commands pick up the new version instantly**: the *next* `comms …` an agent runs uses the new binary. No restart, no re-join.
-- **Only the dashboard's *process* needs a nudge.** `comms ui` is the one long-running process; it holds the old binary until you restart it. But once you do, the browser doesn't: every open tab sees the new build fingerprint on the next push and **reloads itself** (see [The live dashboard](#the-live-dashboard)). Restarting loses nothing. It just re-reads the same log.
+- **The dashboard refreshes itself after its installed Python source changes.** `comms ui` is the one long-running process, so it fingerprints the installed `comms_graph` `.py` files and waits for a stable change before refreshing. launchd's `KeepAlive` supplies the fresh service process; a manually started board replaces itself directly. Every open tab reconnects, sees the new build fingerprint on the next push, and **reloads itself** (see [The live dashboard](#the-live-dashboard)). Refreshing loses nothing. It just re-reads the same log.
+- **One initial nudge is still required when adopting this version.** A dashboard already running older code cannot gain a watcher retroactively. Restart it once after that first install; subsequent Python-package installs refresh automatically.
 
 ```bash
 go install github.com/dpa-plus/comms/cmd/comms@latest   # agents use it on their next command
-# then restart the one long-running dashboard process; open tabs auto-reload:
-launchctl kickstart -k "gui/$(id -u)/plus.dpa.comms-ui"  # if installed as a login service
-# (otherwise: stop your `comms ui` and run it again)
+# Once, when first adopting automatic dashboard refresh:
+launchctl kickstart -k "gui/$(id -u)/plus.dpa.comms-ui"
+# Later comms-graph package installs refresh the running dashboard themselves.
 ```
 
 ---
-
