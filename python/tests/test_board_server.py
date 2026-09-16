@@ -12,9 +12,11 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import tempfile
 import threading
 import urllib.error
 import urllib.request
+from urllib.parse import quote
 
 import pytest
 
@@ -544,6 +546,141 @@ def test_the_graphs_cost_nothing_until_somebody_asks_for_them(board):
     assert "src=" not in frame, ("a graph loads on every page view: " + frame)
     assert "/tasks.html" in body and "/map.html" in body
     assert 'id="gTasks"' in body and 'id="gMap"' in body
+
+
+def _exercise_graph_clicks(board, initial_search, actions):
+    """Run the served page script and click its real graph controls."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed; cannot exercise the served page script")
+
+    _repo, _log_file, base = board
+    _, body = _get(base + "/")
+    script = body.split("<script>", 1)[1].split("</script>", 1)[0]
+    harness = r'''
+const elements = {};
+const frameLoads = [];
+function fakeElement(id) {
+  const handlers = {};
+  const element = {
+    innerHTML: "", textContent: "", value: "", hidden: false,
+    disabled: false, scrollTop: 0, scrollHeight: 0, clientHeight: 0,
+    classList: {add() {}, remove() {}, toggle() {}, contains() { return false; }},
+    addEventListener(type, handler) {
+      (handlers[type] || (handlers[type] = [])).push(handler);
+    },
+    click() {
+      (handlers.click || []).forEach(function (handler) {
+        handler({target: element});
+      });
+    },
+    getAttribute() { return ""; }, setAttribute() {},
+    querySelector() { return null; }, querySelectorAll() { return []; },
+    closest() { return null; }
+  };
+  let src = "";
+  Object.defineProperty(element, "src", {
+    get() { return src; },
+    set(value) {
+      src = String(value);
+      if (id === "dagFrame") frameLoads.push(src);
+    }
+  });
+  return element;
+}
+const document = {
+  documentElement: fakeElement("documentElement"),
+  getElementById(id) { return elements[id] || (elements[id] = fakeElement(id)); },
+  addEventListener() {}
+};
+const location = {search: "", reload() {}};
+const window = {
+  location: location, prompt() { return null; },
+  addEventListener() {}, dispatchEvent() {}, ResizeObserver: null
+};
+const localStorage = {getItem() { return null; }, setItem() {}};
+const history = {replaceState() {}};
+function EventSource() {}
+function alert() {}
+function setInterval() {}
+function setTimeout() {}
+'''
+    exercise = (
+        "\nlocation.search = " + json.dumps(initial_search) + ";\n"
+        "const loadsBeforeOpening = frameLoads.slice();\n"
+        "const graphActions = " + json.dumps(actions) + ";\n"
+        "graphActions.forEach(function (action) {\n"
+        "  if (Object.prototype.hasOwnProperty.call(action, 'search')) {\n"
+        "    location.search = action.search;\n"
+        "  } else {\n"
+        "    elements[action.click].click();\n"
+        "  }\n"
+        "});\n"
+        "process.stdout.write(JSON.stringify({\n"
+        "  before: loadsBeforeOpening, loads: frameLoads\n"
+        "}));\n"
+    )
+    with tempfile.NamedTemporaryFile("w", suffix=".js") as fh:
+        fh.write(harness + script + exercise)
+        fh.flush()
+        out = subprocess.run([node, fh.name], capture_output=True, text=True)
+
+    assert out.returncode == 0, out.stderr
+    return json.loads(out.stdout)
+
+
+def test_graph_tabs_forward_only_the_encoded_selected_store_and_cache_reopens(board):
+    store = "repo / one&actor=intruder?view=all"
+    encoded = quote(store, safe="")
+    result = _exercise_graph_clicks(
+        board,
+        "?actor=viewer&store=" + encoded + "&panel=activity",
+        [
+            {"click": "dagBtn"},
+            {"click": "dagClose"},
+            {"click": "gTasks"},
+            {"click": "gMap"},
+            {"click": "dagClose"},
+            {"click": "gMap"},
+        ],
+    )
+
+    assert result["before"] == [], "a graph navigated before it was opened"
+    assert result["loads"] == [
+        "/tasks.html?store=" + encoded,
+        "/map.html?store=" + encoded,
+    ]
+
+
+def test_graph_tabs_keep_default_project_urls_when_no_store_is_selected(board):
+    result = _exercise_graph_clicks(
+        board,
+        "?actor=viewer&panel=activity",
+        [{"click": "gTasks"}, {"click": "gMap"}],
+    )
+
+    assert result["before"] == []
+    assert result["loads"] == ["/tasks.html", "/map.html"]
+
+
+def test_reopening_a_graph_after_store_changes_loads_the_new_project(board):
+    result = _exercise_graph_clicks(
+        board,
+        "?store=first-project&actor=alice",
+        [
+            {"click": "gTasks"},
+            {"click": "dagClose"},
+            {"click": "gTasks"},
+            {"search": "?actor=bob&store=second-project"},
+            {"click": "dagClose"},
+            {"click": "gTasks"},
+        ],
+    )
+
+    assert result["loads"] == [
+        "/tasks.html?store=first-project",
+        "/tasks.html?store=second-project",
+    ]
 
 
 

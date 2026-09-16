@@ -2440,6 +2440,8 @@ el("projQ").addEventListener("input", function (ev) { PQ = ev.target.value.trim(
 (function () {
   var wrap = el("dagWrap"), frame = el("dagFrame"), shown = "";
   function show(src, btn) {
+    var store = currentStore();
+    if (store) { src += "?store=" + encodeURIComponent(store); }
     // Loading only what is asked for, and only once. Both are full
     // vis-network pages; mounting them behind a closed overlay would pay for
     // two graph layouts on every page load for a view most days nobody opens.
