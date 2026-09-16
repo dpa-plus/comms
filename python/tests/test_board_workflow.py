@@ -161,6 +161,25 @@ process.stdout.write(JSON.stringify({selected: GRAPH_STATE.selected, html: eleme
     assert result["html"].count('class="graph-edge related') == 1
 
 
+def test_default_focus_uses_stable_graph_order_not_raw_snapshot_order(tmp_path):
+    result = run_page(tmp_path, r'''
+snapshot.code_map_available = true;
+snapshot.tasks = [
+ {id: 'zebra', title: 'Zebra connected work', phase: 'ready', related: [{task: 'alpha', shared: 1}]},
+ {id: 'alpha', title: 'Alpha connected work', phase: 'ready', related: [{task: 'zebra', shared: 1}]}];
+source.onmessage({data: JSON.stringify(snapshot)});
+const initial = {selected: GRAPH_STATE.selected, order: GRAPH_STATE.order.slice()};
+selectGraphTask('zebra');
+snapshot.tasks.reverse();
+source.onmessage({data: JSON.stringify(snapshot)});
+process.stdout.write(JSON.stringify({initial, retained: GRAPH_STATE.selected,
+  orderAfterPush: GRAPH_STATE.order.slice()}));
+''')
+    assert result["initial"] == {"selected": "alpha", "order": ["alpha", "zebra"]}
+    assert result["retained"] == "zebra"
+    assert result["orderAfterPush"] == ["alpha", "zebra"]
+
+
 def test_show_completed_adds_results_without_hiding_open_work(tmp_path):
     result = run_page(tmp_path, r'''
 snapshot.tasks = [

@@ -2479,7 +2479,15 @@ function restoreGraphFocus(saved) {
 }
 
 function chooseGraphFocus(tasks) {
-  var open = tasks.filter(function (t) { return t.phase !== "closed"; });
+  // Snapshots are serialized by task id, not by the graph layout.  Choosing
+  // from that raw order can focus a useful task several rows below the initial
+  // viewport even though the same task set has a stable, readable display
+  // order.  Existing selection bypasses this function, so live pushes never
+  // pull a reader away from the node they chose.
+  var ordered = tasks.slice().sort(function (a, b) {
+    return GRAPH_STATE.rank[a.id] - GRAPH_STATE.rank[b.id];
+  });
+  var open = ordered.filter(function (t) { return t.phase !== "closed"; });
   var openIds = {};
   open.forEach(function (t) { openIds[t.id] = true; });
   var doing = open.filter(function (t) { return t.phase === "doing"; })[0];
