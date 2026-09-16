@@ -6,6 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Task-first dashboard with current owners, held scopes, recent results and a
+  responsive Team panel. Project, task and agent histories load older events
+  without dropping the current view.
+- Inline single-hold release confirmation naming the holder and scope, requiring
+  an operator and reason, and preserving failed attempts for correction.
+
+### Fixed
+
+- Dashboard connection status now distinguishes a loaded snapshot from an open
+  connection, retains prior data on invalid updates and labels delayed streams.
+- Indexed literal release scopes to avoid repeatedly scanning all release
+  history for every dirty file; wildcard matching and newest-release attribution
+  remain unchanged.
+- History retains legacy release references, all affected holders and both ends
+  of task dependencies. Resubmitted work no longer inherits an old checked label.
+
 ## [0.3.0] - 2026-08-20
 
 A minor bump rather than a patch: this adds four event types and five commands,

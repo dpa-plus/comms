@@ -932,15 +932,17 @@ def test_a_process_actor_is_the_fallback_and_is_announced(board, monkeypatch):
 
 def test_the_page_asks_who_is_at_the_keyboard_and_sends_it(board):
     """The server side is only half of it. The page has to ask, remember, and
-    put the name in the request; and it has to say a refusal once, not once per
-    claim, which is what the bug looked like on screen."""
+    put the name in the request. Each confirmation now targets exactly one
+    hold, so a refusal stays in that form rather than repeating per file."""
     repo, log_file, base = board
     _, body = _get(base + "/")
     js = body.split("<script>", 1)[1].split("</script>", 1)[0]
     assert "D.board_actor" in js, "the page never checks whether the server can sign"
     assert 'localStorage.getItem("comms.actor")' in js, "the name is not remembered"
     assert "actor: me" in js, "the name never reaches the request"
-    assert "lines.join(" in js and "seen[msg]" in js, "refusals are not deduplicated"
+    assert "id: pending.id" in js, "the confirmed hold does not reach the request"
+    assert 'id="releaseActor"' in body and 'id="releaseReason"' in body
+    assert 'id="releaseError" role="alert"' in body, "refusals have no inline home"
 
 
 def test_the_board_serves_no_other_write(board):

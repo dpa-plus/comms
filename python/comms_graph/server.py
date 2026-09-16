@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import html
-from urllib.parse import unquote
+from urllib.parse import unquote, parse_qs
 import json
 import os
 import threading
@@ -42,6 +42,7 @@ from . import task as _task
 from . import guard as _guard
 from . import tree as _tree
 from . import taskcode as _taskcode
+from .board_history import history_page
 
 #: How often the watcher stats the log. The log is appended under a lock and a
 #: human reading a board does not need sub-second latency, so this is chosen to
@@ -203,6 +204,11 @@ def _snapshot(root: Path, log_file: Path, graph_path: Path | None = None) -> dic
         row["intent"] = _string(ev.data, "intent") or row["intent"]
         row["held"] = (ev.actor, scope) in held_now
 
+    latest_task_activity = {}
+    for ev in events:
+        task_id = _string(ev.data, "task")
+        if task_id:
+            latest_task_activity[task_id] = ev.ts.isoformat().replace("+00:00", "Z")
     tasks = []
     for t in sorted(st.tasks.values(), key=lambda t: t.id):
         files = sorted(task_files.get(t.id, {}).values(), key=lambda r: r["scope"])
@@ -210,6 +216,7 @@ def _snapshot(root: Path, log_file: Path, graph_path: Path | None = None) -> dic
             "files": files,
             "files_held": sum(1 for f in files if f["held"]),
             "id": t.id, "title": t.title, "phase": t.phase,
+            "last_activity": latest_task_activity.get(t.id, ""),
             "doers": t.doers, "did": t.did, "verified_by": t.verified_by,
             "independence": t.independence,
             "blocked_by": t.blocked_by, "rejections": t.rejections,
@@ -292,62 +299,9 @@ def _snapshot(root: Path, log_file: Path, graph_path: Path | None = None) -> dic
             "hint": "Rebuild it with `graphify extract . --code-only`.",
         })
 
-    # The log itself, most recent first, as a readable feed. The board had no
-    # answer at all to "what just happened": the one question somebody who has
-    # been away asks first, and the log is nothing but the answer to it.
-    # One atomic claim is ONE thing that happened. `claim a b c` appends an
-    # event per scope, so claiming eleven files filled the feed with eleven
-    # consecutive rows carrying the same actor, the same second and the same
-    # intent, and pushed everything else out of the window. Collapsed on the way
-    # out only: the per-scope events are what make a claim checkable path by
-    # path and are untouched. The same grouping is in `log`.
-    def _same_action(a, b) -> bool:
-        return (a.type == b.type == _log.TYPE_CLAIM
-                and a.actor == b.actor
-                and _string(a.data, "intent") == _string(b.data, "intent")
-                and abs((a.ts - b.ts).total_seconds()) <= 1.0
-                and not _string(a.data, "steals") and not _string(b.data, "steals"))
-
-    grouped: list = []
-    for ev in events[-120:]:
-        if grouped and _same_action(grouped[-1][0], ev):
-            grouped[-1].append(ev)
-            continue
-        grouped.append([ev])
-
-    feed = []
-    for run in grouped[-60:][::-1]:
-        ev = run[0]
-        scopes = [(e.scope or [""])[0] if e.scope else "" for e in run]
-        feed.append({
-            "scopes": [x for x in scopes if x],
-            "type": ev.type,
-            "actor": ev.actor,
-            "scope": (ev.scope or [""])[0] if ev.scope else "",
-            "task": _string(ev.data, "task"),
-            "state": _string(ev.data, "state"),
-            "intent": _string(ev.data, "intent"),
-            "reason": _string(ev.data, "reason"),
-            "result": _string(ev.data, "result"),
-            # A note's text is `body`; a FINDING's is `summary`: that is what
-            # `find` has always written (cli.py, and the Go build before it) and
-            # what the findings panel below already reads. The feed looked only
-            # at `body`, so every finding in it rendered as an empty quote line:
-            # 1532 of them in the real store, the whole reason findings exist,
-            # silently blank. Both spellings are read here, and neither writer
-            # has to change.
-            "body": _string(ev.data, "body") or _string(ev.data, "summary"),
-            "category": _string(ev.data, "category"),
-            "steals": _string(ev.data, "steals"),
-            # What the doer SAID ran, on the event that said it. The task
-            # carries the latest set; the stream is where "they submitted, and
-            # here is what they claim they checked" actually belongs.
-            "checks": ({str(k): str(v) for k, v in ev.data["checks"].items()
-                        if isinstance(k, str)}
-                       if isinstance(ev.data, dict) and isinstance(ev.data.get("checks"), dict)
-                       else {}),
-            "ts": ev.ts.isoformat().replace("+00:00", "Z"),
-        })
+    # One serializer for the live preview and paged history; released holds
+    # remain attached to their original task and owner.
+    feed = history_page(events)["events"]
 
     # Things that are WRONG with the plan itself, as opposed to slow. Both are
     # computed by the task-graph page and both live inside its side panel,
@@ -1461,13 +1415,118 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
   font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-4); }
 .gtab.on { color: var(--accent); background: var(--accent-wash); }
 .dagbox iframe { flex: 1 1 auto; width: 100%; border: 0; display: block; min-height: 0; }
+
+/* Work is the primary surface; logs and code stay available on demand. */
+.topbar { height: 56px; }
+.brand { font-size: 17px; }
+.shell { height: calc(100vh - 56px); max-width: 1640px;
+  grid-template-columns: 200px minmax(0, 1fr) 310px; gap: 18px; padding: 22px; }
+.card { border-radius: 12px; box-shadow: none; }
+.card-hd { height: 46px; padding: 0 16px; font-size: 14px; font-weight: 600; }
+.work-heading { padding: 22px 22px 16px; border-bottom: 1px solid var(--line-hair); }
+.work-heading h1 { margin: 0 0 4px; font-size: 25px; line-height: 1.3; letter-spacing: -.035em; }
+.work-heading p { margin: 0; color: var(--ink-3); }
+.work-toolbar { display: flex; gap: 6px; margin-top: 16px; }
+.work-toolbar button { height: 32px; padding: 0 12px; }
+#tasks { padding: 4px 20px 24px; overflow-y: auto; }
+.work-group h2 { font-size: 13px; font-weight: 600; color: var(--ink-3); margin: 22px 0 9px; }
+.work-group h2 span { margin-left: 7px; color: var(--ink-4); }
+.trow { display: block; width: 100%; height: auto; text-align: left;
+  padding: 15px 16px; border: 1px solid var(--line); border-radius: 8px; margin: 8px 0; }
+.trow:last-child { border-bottom: 1px solid var(--line); }
+.trow::before { width: 3px; top: 14px; bottom: 14px; border-radius: 3px; }
+.ttitle { display: block; overflow: visible; font-size: 15px; line-height: 1.45; font-weight: 550; }
+.tmeta { flex-wrap: wrap; gap: 5px 12px; margin-top: 8px; font-size: 12px; font-weight: 400; color: var(--ink-3); }
+.tmeta .owner { color: var(--ink-2); }
+.tmeta .tfiles { font: inherit; }
+.work-note { margin: 8px 0 0; color: var(--ink-3); font-size: 12px; font-weight: 400; }
+.rail-right { display: flex; flex-direction: column; overflow-y: auto; gap: 18px; }
+.rail-right > .card { flex: none; }
+.rail-right > .card:first-child { max-height: none; }
+.nowband { border: 0; padding: 0 14px 14px; max-height: none; }
+.nowband-hd { padding-top: 14px; }
+.arow { display: flex; flex-wrap: wrap; gap: 6px 10px; padding: 15px 0; }
+.arow .hactor { width: calc(100% - 68px); font: inherit; font-weight: 550; overflow-wrap: anywhere; }
+.arow .hintent { width: 100%; flex: auto; white-space: normal; overflow: visible; line-height: 1.5; color: var(--ink-3); }
+.arow .htask { display: none; }
+.arow .grow { display: none; }
+.arow .rage { margin-right: auto; }
+.afrow { flex-wrap: wrap; }
+.afpath { overflow-wrap: anywhere; white-space: normal; }
+.rrow { flex-wrap: wrap; padding: 12px 15px; }
+.rname { overflow-wrap: anywhere; white-space: normal; }
+.agent-history { margin-left: auto; }
+.history-wrap { position: fixed; inset: 56px 0 0; z-index: 45; background: var(--bg); padding: 22px; }
+.history-card { height: 100%; max-width: 1100px; margin: auto; }
+.history-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px 16px; }
+.history-scope { color: var(--ink-3); }
+.history-controls .chips { overflow: auto; flex-wrap: wrap; }
+#connectionNotice { padding: 10px 22px; background: var(--amber-wash); color: var(--amber); border-bottom: 1px solid var(--amber-line); }
+body:has(#connectionNotice:not([hidden])) .shell { height: calc(100vh - 100px); }
+#alarms { display: block; margin: 0 22px; }
+#alarms:empty { display: none; }
+.attention { margin-top: 16px; padding: 12px; background: var(--amber-wash); border-radius: 8px; font-size: 13px; }
+.attention strong { display: block; margin-bottom: 4px; }
+.attention p { margin: 0; color: var(--ink-2); }
+.project-details { padding: 12px 14px; color: var(--ink-3); }
+.project-details summary { cursor: pointer; }
+.tdetwrap { inset: 0; padding-left: max(20px, calc(100vw - 680px)); background: #0005; }
+.tdet-title { font-size: 18px; }
+.tdet-id { display: none; }
+.tdetbox { width: 100%; max-width: none; }
+#tdet { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.tdet-hd { display: flex; align-items: flex-start; gap: 10px; padding: 20px; border-bottom: 1px solid var(--line); }
+.tdet-title { flex: 1; line-height: 1.4; }
+.tdet-bd { padding: 20px; overflow-y: auto; }
+.tdet-state { font-size: 15px; margin-bottom: 12px; }
+.tdet-sec { margin: 24px 0 10px; font-size: 12px; color: var(--ink-3); font-weight: 600; }
+.tdet-checks { display: flex; flex-wrap: wrap; gap: 8px; }
+.chk { padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; }
+.chk.ok { color: var(--green); } .chk.bad { color: var(--red); }
+.tdet-note { color: var(--ink-3); line-height: 1.6; overflow-wrap: anywhere; }
+.release-wrap { position: fixed; inset: 0; z-index: 80; padding: 20px; background: #0008; display: grid; place-items: center; }
+.release-wrap[hidden] { display: none; }
+.release-box { width: min(460px, 100%); max-height: 95vh; overflow-y: auto; padding: 24px; }
+.release-box h2 { margin: 0 0 18px; font-size: 20px; }
+.release-box label { display: block; margin: 18px 0 7px; }
+.release-box input, .release-box textarea { box-sizing: border-box; width: 100%; border: 1px solid var(--line); border-radius: 6px; padding: 10px; background: var(--bg); color: var(--ink); font: inherit; }
+.release-box textarea { min-height: 80px; resize: vertical; }
+.release-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+#releaseScope { overflow-wrap: anywhere; }
+#releaseError { color: var(--red); margin-top: 12px; }
+.technical-details { margin-top: 24px; border-top: 1px solid var(--line); padding-top: 16px; }
+.technical-details summary { cursor: pointer; color: var(--ink-2); }
+.tfrow { display: flex; flex-wrap: wrap; gap: 6px 12px; padding: 10px 0; border-bottom: 1px solid var(--line-hair); }
+.tfpath { width: 100%; overflow-wrap: anywhere; font-size: 12px; }
+.tfactor, .tfstate, .tvia { font-size: 12px; color: var(--ink-3); }
+.tmeet { cursor: pointer; } .tmeet:hover { background: var(--surface-2); }
+@media (max-width: 1100px) {
+  .shell { grid-template-columns: 170px minmax(0, 1fr); overflow-y: auto; align-content: start; }
+  .stream { min-height: 480px; }
+  .rail-right { display: grid; grid-column: 1 / -1; grid-template-columns: 1fr 1fr; overflow: visible; }
+  .rail-left { max-height: 580px; }
+}
+@media (max-width: 700px) {
+  .shell { display: flex; flex-direction: column; padding: 12px; gap: 12px; }
+  .rail-left { max-height: 180px; flex: none; }
+  .rail-right { display: flex; flex: none; overflow: visible; }
+  .stream { flex: none; min-height: 480px; }
+  .work-heading { padding: 18px 16px 12px; }
+  .work-heading h1 { font-size: 22px; }
+  #tasks { padding: 0 14px 20px; }
+  .topbar { padding: 0 15px; }
+  .topbar .sep { display: none; }
+  #clock { display: none; }
+  .history-wrap { padding: 10px; }
+  .tdetwrap { padding: 10px; }
+}
+@media (prefers-reduced-motion: reduce) { .livedot { animation: none; } }
 </style>
 <header class="topbar">
   <div class="brand"><svg class="mark" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.2 4.6 L11.8 6.2 M4.2 4.6 L7.4 11.6 M11.8 6.2 L7.4 11.6"/><circle cx="4.2" cy="4.6" r="2.3"/><circle cx="11.8" cy="6.2" r="2.3"/><circle cx="7.4" cy="11.6" r="2.3"/></svg>comms</div>
   <div class="sep"></div>
-  <div class="live"><span class="livedot" id="livedot"></span><span id="liveTxt">connecting</span><span class="mono" id="clock"></span></div>
+  <div class="live" role="status"><span class="livedot off" id="livedot"></span><span id="liveTxt">Loading work</span><span class="mono" id="clock"></span></div>
   <div class="sep"></div>
-  <div id="alarms" style="display:flex;gap:6px;align-items:center;"></div>
   <div class="grow"></div>
   <button id="themeBtn" class="icon ghost" title="Toggle light / dark" aria-label="Toggle theme">
     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -1475,12 +1534,13 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
     </svg>
   </button>
 </header>
+<div id="connectionNotice" role="status" hidden></div>
 
 <main class="shell">
   <aside class="rail-left">
     <div class="card">
       <div class="card-hd"><span>Projects</span><span class="count" id="projCount"></span></div>
-      <div class="search"><input id="projQ" type="search" placeholder="Filter name or hash" autocomplete="off" spellcheck="false"></div>
+      <div class="search"><input id="projQ" aria-label="Find a project" type="search" placeholder="Find a project" autocomplete="off" spellcheck="false"></div>
       <div class="card-bd scroll" id="projScroll"><div class="plist" id="projList"></div></div>
       <div class="card-ft foot" id="projFoot"></div>
     </div>
@@ -1488,37 +1548,59 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 
   <section class="stream">
     <div class="card">
-      <div class="card-hd">
-        <span>Activity</span>
-        <div class="chips" id="chips"></div>
-        <div class="grow"></div>
-        <span class="count" id="evCount"></span>
+      <div class="work-heading">
+        <h1 id="projectTitle">Your work</h1>
+        <p>What is moving forward, and who is on it.</p>
+        <div class="work-toolbar">
+          <button id="historyBtn">History</button>
+          <button id="dagBtn" class="ghost">Connections</button>
+        </div>
       </div>
-      <div id="nowBand"></div>
-      <div class="card-bd streamwrap">
-        <div class="scroll" id="streamScroll"><div id="streamList"></div></div>
-        <div class="newpill" id="newPill" hidden></div>
-      </div>
+      <div id="alarms"></div>
+      <div class="card-bd" id="tasks"><div class="empty">Loading work…</div></div>
     </div>
   </section>
 
   <aside class="rail-right">
     <div class="card">
-      <div class="card-hd"><span>Roster</span><span class="count" id="rosterCount"></span></div>
+      <div class="card-hd"><span>Team</span><span class="count" id="rosterCount"></span></div>
+      <div id="nowBand"></div>
       <div class="card-bd" id="roster"></div>
     </div>
     <div class="card">
-      <div class="card-hd"><span>Work</span><div class="grow"></div><button id="dagBtn" class="ghost">Show graph</button></div>
-      <div class="card-bd" id="tasks"></div>
-    </div>
-    <div class="card">
-      <div class="card-hd"><span>This repo</span></div>
-      <div class="card-bd scroll" id="sessionScroll"><div id="session"></div></div>
+      <details class="project-details"><summary>Project details</summary>
+        <div class="card-bd scroll" id="sessionScroll"><div id="session"></div></div>
+      </details>
     </div>
   </aside>
 </main>
 
-<div class="dagwrap tdetwrap" id="tdetWrap" hidden>
+<section class="history-wrap" id="historyWrap" hidden role="dialog" aria-modal="true" aria-label="Work history">
+  <div class="card history-card">
+    <div class="card-hd"><span>History</span><span id="historyScope" class="history-scope"></span>
+      <div class="grow"></div><button class="ghost" id="historyClose">Close</button></div>
+    <div class="history-controls"><div class="chips" id="chips"></div><button class="ghost" id="historyAll">All agents and tasks</button></div>
+    <div class="card-bd streamwrap"><div class="scroll" id="streamScroll"><div id="streamList"></div></div>
+      <div class="newpill" id="newPill" hidden></div></div>
+    <div class="card-ft"><span id="evCount"></span> events shown <span id="historyStatus" role="status"></span>
+      <button class="ghost" id="historyMore" hidden>Load earlier</button>
+      <button class="ghost" id="historyReload">Refresh history</button></div>
+  </div>
+</section>
+
+<section class="release-wrap" id="releaseWrap" hidden role="dialog" aria-modal="true" aria-labelledby="releaseTitle" aria-describedby="releaseHelp">
+  <form class="card release-box" id="releaseForm">
+    <h2 id="releaseTitle">Release this hold?</h2>
+    <div id="releaseScope"></div><p class="tdet-note" id="releaseOwner"></p>
+    <p class="tdet-note" id="releaseHelp">This does not stop the agent or delete its work. A quiet agent may still be running.</p>
+    <label for="releaseActor">Your name</label><input id="releaseActor" required autocomplete="off">
+    <label for="releaseReason">Reason</label><textarea id="releaseReason" required placeholder="Why is this hold no longer needed?"></textarea>
+    <div id="releaseError" role="alert"></div>
+    <div class="release-actions"><button type="button" class="ghost" id="releaseCancel">Cancel</button><button type="submit" id="releaseConfirm">Release hold</button></div>
+  </form>
+</section>
+
+<div class="dagwrap tdetwrap" id="tdetWrap" hidden role="dialog" aria-modal="true" aria-label="Task details">
     <div class="dagbox tdetbox"><div id="tdet"></div></div>
   </div>
   <div class="dagwrap" id="dagWrap" hidden>
@@ -1538,6 +1620,15 @@ var FILTER = "all";        // which stream chip is active
 var PQ = "";               // projects filter box
 var PAUSED_AT_BOTTOM = true;
 var RELOAD_REQUESTED = false;
+var LAST_SNAPSHOT_AT = 0;
+var LOAD_STARTED_AT = Date.now();
+var HISTORY_SCOPE = null;
+var OPEN_TASK = null;
+var OPEN_FILES = {};
+var OPEN_RESULTS = false;
+var HISTORY_EVENTS = null;
+var HISTORY_BEFORE = "";
+var HISTORY_REQUEST = 0;
 
 function el(id) { return document.getElementById(id); }
 function esc(s) {
@@ -1614,7 +1705,7 @@ function currentStore() {
 function renderNow() {
   var cs = D.claims || [];
   var h = '<div class="nowband">';
-  h += '<div class="nowband-hd"><span>Working now</span><span class="count">' +
+  h += '<div class="nowband-hd"><span>Holding work</span><span class="count">' +
        (cs.length ? cs.length + (cs.length === 1 ? " file claimed" : " files claimed") : "") + "</span></div>";
   var dirt = D.dirty || {};
   // NO REPOSITORY IS NOT A FAILED READ. Run across every project (the login
@@ -1679,28 +1770,31 @@ function renderNow() {
         if (c.task && tasks.indexOf(c.task) === -1) { tasks.push(c.task); }
       });
       h += '<div class="arow' + (quiet ? " quiet" : "") + '">';
-      h += '<span class="hactor mono">@' + esc(actor) + "</span>";
+      h += '<button class="hactor ghost agent-history" data-history-actor="' + esc(actor) + '">@' + esc(actor) + "</button>";
       // The count is the magnitude, which is what a person needs; the paths are
       // code detail and are one click away rather than always on screen.
       h += '<button class="acount mono filestoggle" data-actor="' + esc(actor) + '">' +
            held.length + (held.length === 1 ? " file" : " files") + "</button>";
       if (tasks.length) { h += '<span class="htask mono">' + esc(tasks.join(", ")) + "</span>"; }
-      h += '<span class="hintent">' + esc(intents.join(" · ")) + "</span>";
+      var taskTitles = tasks.map(function (id) {
+        var task = (D.tasks || []).filter(function (t) { return t.id === id; })[0];
+        return task ? task.title : id;
+      });
+      h += '<span class="hintent">' + esc((taskTitles.length ? taskTitles : intents).join(" · ")) + "</span>";
       h += '<span class="grow"></span>';
       h += '<span class="rage mono' + (quiet ? " amber" : "") + '">' +
-           (quiet ? "quiet " + ago(idle) : "for " + ago(heldFor)) + "</span>";
-      h += '<button class="ghost rel" data-actor="' + esc(actor) + '" data-all="1">Free all ' +
-           held.length + "</button>";
+           (quiet ? "No report for " + ago(idle) : "Reported " + ago(idle) + " ago") + "</span>";
+      h += '<button class="ghost filestoggle" data-actor="' + esc(actor) + '">Review holds</button>';
       h += "</div>";
       // The files, quiet underneath: available without being in the way. The
       // claim id moves to the row's tooltip: it is a handle for the CLI, not
       // something a person reads.
-      h += '<div class="afiles" hidden>';
+      h += '<div class="afiles"' + (OPEN_FILES[actor] ? "" : " hidden") + '>';
       held.forEach(function (c) {
         h += '<div class="afrow" title="claim ' + esc(c.id) + '">' +
              '<span class="mono afpath">' + esc(shortPath(c.scope)) + "</span>" +
              '<button class="ghost rel afrel" data-id="' + esc(c.id) + '" data-scope="' +
-             esc(c.scope) + '" data-actor="' + esc(actor) + '">free</button></div>';
+             esc(c.scope) + '" data-actor="' + esc(actor) + '">Release hold</button></div>';
       });
       h += "</div>";
     });
@@ -1761,6 +1855,7 @@ function renderNow() {
   }
   h += "</div>";
   el("nowBand").innerHTML = h;
+  bindHistoryButtons(el("nowBand"));
   Array.prototype.forEach.call(el("nowBand").querySelectorAll(".rel"), function (b) {
     b.onclick = function () { releaseClaim(b); };
   });
@@ -1777,6 +1872,7 @@ function renderNow() {
       var box = b.parentNode.nextSibling;
       if (box && box.classList && box.classList.contains("afiles")) {
         box.hidden = !box.hidden;
+        OPEN_FILES[b.getAttribute("data-actor")] = !box.hidden;
       }
     };
   });
@@ -1788,121 +1884,81 @@ function renderNow() {
    that name from the server process alone: started without COMMS_ACTOR, it
    could free nothing, and "Free all" answered with the same refusal once per
    claim. The person clicking is the one making the judgement, so the page asks
-   them once, remembers the answer in this browser, and sends it with every
-   release. `?actor=name` in the address bar sets or changes it. A process that
-   does have COMMS_ACTOR signs as itself and nobody is asked.
-
-   Returns the name, or null when the person declined to give one. */
+   in the confirmation form and remembers the answer after a successful
+   release. `?actor=name` supplies a default; the operator can change it. */
 function boardActor() {
   var m = /[?&]actor=([^&]+)/.exec(window.location.search || "");
-  var fromUrl = m ? decodeURIComponent(m[1]).replace(/^@+/, "").trim() : "";
-  if (fromUrl) {
-    try { localStorage.setItem("comms.actor", fromUrl); } catch (e) {}
-    return fromUrl;
-  }
+  var fromUrl = "";
+  try { fromUrl = m ? decodeURIComponent(m[1]).replace(/^@+/, "").trim() : ""; } catch (e) {}
+  if (fromUrl) return fromUrl;
   var saved = "";
   try { saved = (localStorage.getItem("comms.actor") || "").trim(); } catch (e) {}
-  if (saved) { return saved; }
-  if (D.board_actor) { return D.board_actor; }
-  var typed = window.prompt(
-    "Who is freeing this?" +
-    "\\n\\n" +
-    "Your name goes in the log next to every release you make from this board, " +
-    "permanently. It is asked once and remembered in this browser " +
-    "(change it with ?actor=name in the address bar).", "");
-  if (typed === null) { return null; }
-  typed = typed.replace(/^@+/, "").trim();
-  if (!typed) { return null; }
-  try { localStorage.setItem("comms.actor", typed); } catch (e) {}
-  return typed;
+  return saved || D.board_actor || "";
 }
 
-/* Freeing somebody else's ground, from the board.
-
-   It asks for a reason and does not proceed without one. That is not ceremony:
-   the release is appended to the log under the operator's name and stays there,
-   and "who freed this and why" is the only question anybody asks afterwards.
-   The prompt is also the last moment to reconsider: the holder may simply be
-   thinking. */
+var RELEASE_PENDING = null;
+var RELEASE_BUSY = false;
 function releaseClaim(btn) {
-  var id = btn.getAttribute("data-id");
-  var who = btn.getAttribute("data-actor");
-  var scope = btn.getAttribute("data-scope");
-  // "Free all" is the case this panel exists for: an agent died and its ground
-  // has to come back. Freeing eight files one at a time, each with its own
-  // prompt and its own typed reason, is not a workflow anybody completes.
-  var all = btn.getAttribute("data-all") === "1";
-  var ids = all
-    ? (D.claims || []).filter(function (c) { return c.actor === who; }).map(function (c) { return c.id; })
-    : [id];
-  // Identity first, then the reason: both go in the log, and there is no point
-  // typing a reason for a release that will have no author.
-  var me = boardActor();
-  if (me === null) { return; }
-  var what = all ? ids.length + (ids.length === 1 ? " file" : " files") + " held by @" + who
-                 : scope + " from @" + who;
-  var reason = window.prompt(
-    "Free " + what + "?" +
-    "\\n\\n" +
-    "This is recorded in the log under @" + me + ", permanently. Say why:",
-    all ? "session ended" : "");
-  if (reason === null) { return; }
-  reason = reason.trim();
-  if (!reason) { alert("A reason is required: it is what the log will show."); return; }
-  var label = btn.textContent;
-  btn.disabled = true; btn.textContent = "…";
-  // One request per claim, sequentially. Each is its own event in the log, and
-  // a partial failure has to leave the rest freed rather than roll anything
-  // back: the log is append-only and there is nothing to undo.
-  var failed = [];
-  var freed = 0;
-  var halt = false;
-  ids.reduce(function (prev, cid) {
-    return prev.then(function () {
-      if (halt) { return; }
-      return fetch("/api/release", {
-        method: "POST", headers: {"Content-Type": "application/json"},
-        // The project on screen, so the server frees the claim the button was
-        // drawn from rather than looking for its id in a different log.
-        body: JSON.stringify({id: cid, reason: reason, store: currentStore(), actor: me})
-      }).then(function (r) {
-        if (r.ok) { freed += 1; return; }
-        // A refusal about the author applies to every claim alike. Asking the
-        // same question for each remaining one only produces more copies of
-        // the same answer.
-        if (r.status === 403) { halt = true; }
-        return r.json().then(
-          function (b) { failed.push(b.error || ("claim " + cid)); },
-          function () { failed.push("HTTP " + r.status); });
-      });
+  RELEASE_PENDING = {id: btn.getAttribute("data-id"), actor: btn.getAttribute("data-actor"),
+    scope: btn.getAttribute("data-scope"), store: currentStore(), button: btn};
+  el("releaseScope").textContent = RELEASE_PENDING.scope;
+  el("releaseOwner").textContent = "Held by @" + RELEASE_PENDING.actor;
+  el("releaseActor").value = boardActor();
+  el("releaseReason").value = "";
+  el("releaseError").textContent = "";
+  el("releaseWrap").hidden = false;
+  el(el("releaseActor").value ? "releaseReason" : "releaseActor").focus();
+}
+function closeRelease() {
+  if (RELEASE_BUSY) return;
+  var previous = RELEASE_PENDING;
+  RELEASE_PENDING = null;
+  el("releaseWrap").hidden = true;
+  if (previous) {
+    var target = previous.button.isConnected ? previous.button : el("historyBtn");
+    if (target && target.focus) target.focus();
+  }
+}
+function submitRelease(e) {
+  e.preventDefault();
+  if (!RELEASE_PENDING || RELEASE_BUSY) return;
+  var me = el("releaseActor").value.trim().replace(/^@+/, "");
+  var reason = el("releaseReason").value.trim();
+  if (!me || !reason) {
+    el("releaseError").textContent = "Enter your name and a reason.";
+    return;
+  }
+  var pending = RELEASE_PENDING;
+  RELEASE_BUSY = true;
+  el("releaseConfirm").disabled = true;
+  el("releaseCancel").disabled = true;
+  el("releaseConfirm").textContent = "Releasing…";
+  el("releaseError").textContent = "";
+  fetch("/api/release", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({id: pending.id, reason: reason, store: pending.store, actor: me})
+  }).then(function (r) {
+    return r.json().then(function (body) {
+      if (!r.ok || !body.ok) throw new Error(body.error || "Release was not confirmed.");
     });
-  }, Promise.resolve())
-    .then(function () {
-      if (!failed.length) {
-        // The watcher notices the append and pushes a new snapshot, so the row
-        // goes on its own. Nothing is patched by hand here: the board stays a
-        // view of the log rather than a thing that edits its own copy.
-        btn.textContent = "freed";
-        return;
-      }
-      // One line per distinct reason, not one per claim. Eight claims refused
-      // for the same reason used to produce the same sentence eight times,
-      // joined into one alert nobody could read.
-      var seen = {};
-      var lines = [];
-      failed.forEach(function (msg) {
-        if (!seen[msg]) { seen[msg] = true; lines.push(msg); }
-      });
-      var head = ids.length === 1
-        ? "Not released: "
-        : (freed ? freed + " freed, " : "") + (ids.length - freed) + " not released: ";
-      alert(head + lines.join("\\n"));
-      btn.disabled = false; btn.textContent = label;
-    })
-    .catch(function (e) {
-      alert("Not released: " + e);
-      btn.disabled = false; btn.textContent = label;
+  }).then(function () {
+    try { localStorage.setItem("comms.actor", me); } catch (e) {}
+    RELEASE_BUSY = false;
+    closeRelease();
+    fetch("/api/status?store=" + encodeURIComponent(pending.store)).then(function (r) {
+      if (!r.ok) throw new Error("Status unavailable");
+      return r.json();
+    }).then(acceptSnapshot).catch(function () {
+      setConnectionState("Update pending", "The hold was released. Waiting for the board to update.");
     });
+  }).catch(function (error) {
+    el("releaseError").textContent = error.message || "Could not confirm release. Check history before retrying.";
+  }).finally(function () {
+    RELEASE_BUSY = false;
+    el("releaseConfirm").disabled = false;
+    el("releaseCancel").disabled = false;
+    el("releaseConfirm").textContent = "Release hold";
+  });
 }
 
 /* ---------- the stream ------------------------------------------------- */
@@ -1912,14 +1968,61 @@ var KINDS = [
   ["note", "Notes"], ["task", "Tasks"], ["session", "Session"]
 ];
 function matchKind(e) {
+  if (HISTORY_SCOPE && HISTORY_SCOPE.kind === "actor" && e.actor !== HISTORY_SCOPE.value && e.original_actor !== HISTORY_SCOPE.value && (e.original_actors || []).indexOf(HISTORY_SCOPE.value) < 0) return false;
+  if (HISTORY_SCOPE && HISTORY_SCOPE.kind === "task" && e.task !== HISTORY_SCOPE.value && (e.tasks || []).indexOf(HISTORY_SCOPE.value) < 0) return false;
   if (FILTER === "all") return true;
   if (FILTER === "claim") return e.type === "claim" || e.type === "release";
   if (FILTER === "task") return e.type === "task" || e.type === "task_edge" || e.type === "task_state";
   if (FILTER === "session") return e.type === "hello" || e.type === "blocked";
   return e.type === FILTER;
 }
+
+function openHistory(kind, value) {
+  HISTORY_SCOPE = kind && value ? {kind: kind, value: value} : null;
+  FILTER = "all";
+  el("historyScope").textContent = HISTORY_SCOPE ? (kind === "actor" ? "@" : "") + value : "";
+  el("historyWrap").hidden = false;
+  HISTORY_EVENTS = null;
+  HISTORY_BEFORE = "";
+  renderChips(); renderStream();
+  el("historyClose").focus();
+  loadHistory(false);
+}
+function loadHistory(append) {
+  var request = ++HISTORY_REQUEST;
+  var url = "/api/history?store=" + encodeURIComponent(currentStore());
+  if (HISTORY_SCOPE) url += "&" + HISTORY_SCOPE.kind + "=" + encodeURIComponent(HISTORY_SCOPE.value);
+  if (append && HISTORY_BEFORE) url += "&before=" + encodeURIComponent(HISTORY_BEFORE);
+  el("historyStatus").textContent = " · Loading…";
+  el("historyMore").disabled = true;
+  fetch(url).then(function (r) {
+    if (!r.ok) throw new Error("History could not be loaded.");
+    return r.json();
+  }).then(function (page) {
+    if (request !== HISTORY_REQUEST) return;
+    if (!Array.isArray(page.events)) throw new Error("Unreadable history.");
+    HISTORY_EVENTS = append ? (HISTORY_EVENTS || []).concat(page.events) : page.events;
+    HISTORY_BEFORE = page.next_before || "";
+    el("historyStatus").textContent = "";
+    el("historyMore").hidden = !HISTORY_BEFORE;
+    el("historyMore").disabled = false;
+    renderChips(); renderStream();
+  }).catch(function () {
+    if (request !== HISTORY_REQUEST) return;
+    el("historyStatus").textContent = " · Could not load history. Refresh to retry; existing entries are kept.";
+    el("historyMore").disabled = false;
+  });
+}
+function bindHistoryButtons(container) {
+  Array.prototype.forEach.call(container.querySelectorAll("[data-history-actor]"), function (b) {
+    b.onclick = function () { openHistory("actor", b.getAttribute("data-history-actor")); };
+  });
+}
 function renderChips() {
-  var f = D.feed || [];
+  var saveFilter = FILTER;
+  FILTER = "all";
+  var f = (HISTORY_EVENTS || D.feed || []).filter(matchKind);
+  FILTER = saveFilter;
   var h = "";
   KINDS.forEach(function (k) {
     var n = k[0] === "all" ? f.length : f.filter(function (e) {
@@ -1958,7 +2061,10 @@ function catClass(c) { return c === "bug" ? "high" : c === "gotcha" ? "med" : "l
 function eventRow(e, isLast) {
   // `last` stops the timeline spine running past the final row of a group.
   var s = '<div class="ev k-' + esc(e.type) + (isLast ? " last" : "") + '">';
-  s += '<div class="t mono">' + esc(hhmmss(e.ts)) + "</div>";
+  var date = new Date(e.ts);
+  var day = !isNaN(date) && date.toDateString() !== new Date().toDateString()
+    ? date.toLocaleDateString(undefined, {month: "short", day: "numeric", year: "numeric"}) : "";
+  s += '<div class="t mono">' + (day ? esc(day) + "<br>" : "") + esc(hhmmss(e.ts)) + "</div>";
   s += '<div class="spine"><span class="glyph ' + glyphClass(e) + '"><i></i></span></div>';
   s += '<div class="body">';
 
@@ -1993,6 +2099,10 @@ function eventRow(e, isLast) {
            "</div>";
     }
 
+  } else if (e.type === "task_edge") {
+    s += '<div class="l1"><span class="verb">linked tasks</span></div>';
+    s += '<div class="quote">' + esc(e.from) + " → " + esc(e.to) + "</div>";
+    s += '<div class="l2"><span class="actor">@' + esc(e.actor) + '</span><span>' + esc(e.kind) + "</span></div>";
   } else if (e.type === "task_state") {
     s += '<div class="l1"><span class="verb mono">' + esc(e.task) + "</span></div>";
     s += '<div class="l2">' + stateChip(e.state || "doing");
@@ -2037,7 +2147,7 @@ function eventRow(e, isLast) {
 }
 
 function renderStream() {
-  var f = (D.feed || []).filter(matchKind);
+  var f = (HISTORY_EVENTS || D.feed || []).filter(matchKind);
   el("evCount").textContent = f.length;
   if (!f.length) {
     el("streamList").innerHTML = '<div class="empty">Nothing here yet.</div>';
@@ -2052,7 +2162,7 @@ function renderStream() {
   var now = Date.now();
   var BUCKETS = [
     ["Last 15 minutes", 15 * 60], ["Earlier this hour", 60 * 60],
-    ["Today", 86400], ["Before today", Infinity]
+    ["Last 24 hours", 86400], ["Earlier", Infinity]
   ];
   var groups = BUCKETS.map(function () { return []; });
   f.forEach(function (e) {
@@ -2102,11 +2212,11 @@ function renderRoster() {
   function idleOf(a) { return a.last_seen ? (Date.now() - Date.parse(a.last_seen)) / 1000 : 1e9; }
   var here = r.filter(function (a) { return idleOf(a) < 3600 || a.holding; });
   var rest = r.filter(function (a) { return here.indexOf(a) === -1; });
-  var shown = rosterAll ? here.concat(rest) : here;
+  var shown = (rosterAll ? here.concat(rest) : here).filter(function (a) { return !a.holding; });
 
   el("rosterCount").textContent = here.length;
   var h = "";
-  if (!shown.length) {
+  if (!shown.length && !here.length) {
     h += '<div class="held-empty">Nobody has been active in the last hour.</div>';
   }
   shown.forEach(function (a) {
@@ -2117,7 +2227,8 @@ function renderRoster() {
     if (!a.identified) { h += '<span class="tag">unidentified</span>'; }
     if (a.holding) { h += '<span class="tag amber">holding ' + a.holding + "</span>"; }
     h += '<span class="grow"></span>';
-    h += '<span class="rage mono' + (silent ? " amber" : "") + '">' + esc(agoIso(a.last_seen)) + "</span>";
+    h += '<span class="rage mono' + (silent ? " amber" : "") + '">Reported ' + esc(agoIso(a.last_seen)) + " ago</span>";
+    h += '<button class="ghost agent-history" data-history-actor="' + esc(a.actor) + '">History</button>';
     h += "</div>";
   });
   if (rest.length) {
@@ -2126,6 +2237,7 @@ function renderRoster() {
           : rest.length + " more from earlier days") + "</div>";
   }
   el("roster").innerHTML = h;
+  bindHistoryButtons(el("roster"));
   var t = el("roster").querySelector(".rtoggle");
   if (t) { t.onclick = function () { rosterAll = !rosterAll; renderRoster(); }; }
 }
@@ -2134,27 +2246,13 @@ function renderRoster() {
 
 function renderTasks() {
   var c = D.counts || {}, ts = D.tasks || [];
+  var project = (D.projects || []).filter(function (p) { return p.current; })[0];
+  el("projectTitle").textContent = project && project.name ? project.name : "Your work";
   if (!ts.length) {
-    el("tasks").innerHTML = '<div class="empty">No tasks declared yet. An agent adds one with ' +
-      '<code class="mono">comms-graph task add &lt;id&gt;</code>.</div>';
+    el("tasks").innerHTML = '<div class="empty">No tasks recorded yet. Team activity and held work are still shown alongside.</div>';
     return;
   }
-  var order = [["doing", "DOING"], ["blocked", "BLOCKED"], ["review", "REVIEW"],
-               ["ready", "READY"], ["closed", "CLOSED"]];
-  var total = order.reduce(function (a, k) { return a + (c[k[0]] || 0); }, 0) || 1;
-  var h = '<div class="tbar">';
-  order.forEach(function (k) {
-    var n = c[k[0]] || 0;
-    if (n) { h += '<span class="seg-' + k[0] + '" style="flex:' + n + '"></span>'; }
-  });
-  h += "</div><div class='tally'>";
-  order.forEach(function (k) {
-    var v = c[k[0]] || 0;
-    h += '<div class="tcell c-' + k[0] + (v ? "" : " zero") + '">' +
-         '<div class="tn mono">' + v + "</div>" +
-         '<div class="tl">' + k[1] + "</div></div>";
-  });
-  h += "</div>";
+  var h = "";
 
   // EVERY task, not just the stuck ones, and every row opens. The panel used to
   // show five numbers and a list of what was stuck, which answers "is anything
@@ -2164,7 +2262,7 @@ function renderTasks() {
   var sorted = ts.slice().sort(function (a, b) {
     var d = (order2[a.phase] === undefined ? 9 : order2[a.phase]) -
             (order2[b.phase] === undefined ? 9 : order2[b.phase]);
-    return d !== 0 ? d : (a.id < b.id ? -1 : 1);
+    return d !== 0 ? d : (b.last_activity || "").localeCompare(a.last_activity || "") || (a.id < b.id ? -1 : 1);
   });
 
   // CLOSED WORK IS HISTORY AND IT WAS DROWNING THE REST. On a real project the
@@ -2176,30 +2274,47 @@ function renderTasks() {
 
   function taskRow(t) {
     var n = (t.files || []).length;
-    var why = t.phase === "review" ? "needs review"
-            : t.phase === "cycle" ? "dependency loop"
-            : t.phase === "blocked" ? "waiting on " + (t.blocked_by || []).join(", ")
+    var owners = (t.doers || []).length ? t.doers : t.did ? [t.did] : [];
+    var held = (D.claims || []).filter(function (cl) { return cl.task === t.id; });
+    var holds = t.files_held || held.length;
+    var why = t.phase === "review" ? "Implementation finished · waiting for a check"
+            : t.phase === "cycle" ? "Task dependencies form a loop"
+            : t.phase === "blocked" ? "Waiting for " + (t.blocked_by || []).map(function (id) {
+                var dep = ts.filter(function (x) { return x.id === id; })[0];
+                return dep ? dep.title : id;
+              }).join(", ")
+            : t.phase === "closed" ? (t.verified_by ? "Checked by @" + t.verified_by : "Finished · verification not recorded")
             : "";
-    // The phase is the colour of the bar down the left edge, not a chip. The
-    // chip cost about a third of the row and the title, which is the only part
-    // anybody reads, was being truncated to twenty characters to make room.
-    return '<div class="trow p-' + esc(t.phase) + '" data-task="' + esc(t.id) + '" ' +
-           'title="' + esc(t.phase + ": " + (t.title || t.id)) + '">' +
-           '<div class="ttitle">' + esc(t.title || t.id) + "</div>" +
-           '<div class="tmeta">' +
-             (why ? '<span class="swhy">' + esc(why) + "</span>" : "") +
-             (n ? '<span class="tfiles mono">' + n + (n === 1 ? " file" : " files") + "</span>" : "") +
-           "</div></div>";
+    var last = owners.map(function (owner) {
+      return (D.roster || []).filter(function (a) { return a.actor === owner; })[0];
+    }).filter(Boolean).map(function (a) { return a.last_seen; }).filter(Boolean).sort().pop();
+    return '<button class="trow p-' + esc(t.phase) + '" data-task="' + esc(t.id) + '">' +
+           '<span class="ttitle">' + esc(t.title || t.id) + "</span>" +
+           '<span class="tmeta"><span class="owner">' +
+             esc(owners.length ? owners.map(function (a) { return "@" + a; }).join(", ") : "Unassigned") + "</span>" +
+             (holds ? '<span class="tfiles">' + holds + (holds === 1 ? " hold" : " holds") + "</span>" : "") +
+             (last ? '<span>Agent reported ' + esc(agoIso(last)) + " ago</span>" : "") +
+           "</span>" + (why ? '<span class="work-note">' + esc(why) + "</span>" : "") + "</button>";
   }
 
   h += '<div class="tlist">';
-  live.forEach(function (t) { h += taskRow(t); });
+  [["doing", "In progress"], ["review", "Checking"], ["blocked", "Waiting"], ["cycle", "Needs attention"], ["ready", "Up next"]].forEach(function (group) {
+    var rows = live.filter(function (t) { return t.phase === group[0]; });
+    if (!rows.length) return;
+    h += '<section class="work-group"><h2>' + group[1] + '<span>' + rows.length + "</span></h2>";
+    rows.forEach(function (t) { h += taskRow(t); });
+    h += "</section>";
+  });
   if (done.length) {
-    h += '<div class="tfold" id="tfold">' + done.length + " closed" +
-         '<span class="tfoldc">show</span></div>';
-    h += '<div class="tdone" id="tdone" hidden>';
-    done.forEach(function (t) { h += taskRow(t); });
-    h += "</div>";
+    h += '<section class="work-group"><h2>Recent results <span>' + done.length + "</span></h2>";
+    done.slice(0, 3).forEach(function (t) { h += taskRow(t); });
+    if (done.length > 3) {
+      h += '<button class="tfold" id="tfold">' + (done.length - 3) + ' earlier results<span class="tfoldc">' + (OPEN_RESULTS ? "hide" : "show") + '</span></button>';
+      h += '<div class="tdone" id="tdone"' + (OPEN_RESULTS ? "" : " hidden") + '>';
+      done.slice(3).forEach(function (t) { h += taskRow(t); });
+      h += "</div>";
+    }
+    h += "</section>";
   }
   h += "</div>";
   el("tasks").innerHTML = h;
@@ -2211,6 +2326,7 @@ function renderTasks() {
     fold.onclick = function () {
       var box = el("tdone");
       box.hidden = !box.hidden;
+      OPEN_RESULTS = !box.hidden;
       fold.querySelector(".tfoldc").textContent = box.hidden ? "show" : "hide";
     };
   }
@@ -2222,20 +2338,29 @@ function renderTasks() {
 function openTask(id) {
   var t = (D.tasks || []).filter(function (x) { return x.id === id; })[0];
   if (!t) { return; }
+  var refreshing = OPEN_TASK === id;
+  var focusedId = document.activeElement && document.activeElement.id;
+  var oldDetails = el("taskTechnical");
+  var expanded = refreshing && oldDetails && oldDetails.open;
+  var previousScroll = el("tdet").querySelector(".tdet-bd");
+  var detailScroll = refreshing && previousScroll ? previousScroll.scrollTop : 0;
+  OPEN_TASK = id;
   var h = '<div class="tdet-hd">' +
           '<span class="tphase p-' + esc(t.phase) + '">' + esc(t.phase) + "</span>" +
           '<span class="tdet-title">' + esc(t.title || t.id) + "</span>" +
           '<span class="mono tdet-id">' + esc(t.id) + "</span>" +
-          '<div class="grow"></div><button class="ghost" id="tdetClose">Close</button></div>';
+          '<button class="ghost" id="tdetClose">Close</button></div>';
 
   h += '<div class="tdet-bd">';
 
   // Is it done? Said in words, because "closed" and "somebody checked it" are
   // different claims and the difference is the whole point of the review gate.
   var state;
-  if (t.phase === "closed" && t.ever_verified) {
+  if (t.phase === "closed" && t.verified_by) {
     state = "Done, and checked by @" + esc(t.verified_by || "?") +
             (t.independence ? " (" + esc(t.independence) + ")" : "");
+  } else if (t.phase === "closed") {
+    state = "Finished. Independent verification was not recorded.";
   } else if (t.phase === "review") {
     state = "Finished by @" + esc(t.did || "?") + ", waiting for somebody else to check it.";
   } else if (t.phase === "doing") {
@@ -2248,6 +2373,7 @@ function openTask(id) {
     state = "Ready: nobody has claimed it.";
   }
   h += '<div class="tdet-state">' + state + "</div>";
+  h += '<button class="ghost" id="taskHistory">Task history</button>';
   if (t.rejections) {
     h += '<div class="tdet-note amber">Sent back ' + t.rejections +
          (t.rejections === 1 ? " time" : " times") + " before.</div>";
@@ -2269,6 +2395,9 @@ function openTask(id) {
     h += '<div class="tdet-sec">WHAT THE REVIEWER RAN</div>' +
          '<div class="tdet-note">' + esc(t.verification) + "</div>";
   }
+
+  h += '<div class="tdet-sec">Visual evidence</div><div class="tdet-note">No screenshots linked here yet.</div>';
+  h += '<details class="technical-details" id="taskTechnical"' + (expanded ? " open" : "") + '><summary id="taskTechnicalToggle">Files and code connections</summary>';
 
   // WHAT ELSE THIS MEETS, from the code map rather than from anybody declaring
   // it. This is the join the whole thing was for: the log knows which files the
@@ -2340,11 +2469,16 @@ function openTask(id) {
     });
     h += "</div>";
   }
-  h += "</div>";
+  h += "</details></div>";
 
   el("tdet").innerHTML = h;
   el("tdetWrap").hidden = false;
   el("tdetClose").onclick = closeTask;
+  el("taskHistory").onclick = function () { closeTask(); openHistory("task", id); };
+  var body = el("tdet").querySelector(".tdet-bd");
+  if (body) body.scrollTop = detailScroll;
+  var focusTarget = el(refreshing && focusedId ? focusedId : "tdetClose");
+  if (focusTarget && focusTarget.focus) focusTarget.focus();
   // Follow the connection. Being told two tasks meet and then having to go and
   // find the other one by hand is most of the cost of knowing.
   Array.prototype.forEach.call(el("tdet").querySelectorAll(".tmeet"), function (row) {
@@ -2352,7 +2486,21 @@ function openTask(id) {
   });
 }
 
-function closeTask() { el("tdetWrap").hidden = true; }
+function closeTask() {
+  var id = OPEN_TASK;
+  OPEN_TASK = null;
+  el("tdetWrap").hidden = true;
+  if (id) {
+    var rows = Array.prototype.slice.call(el("tasks").querySelectorAll("[data-task]"));
+    var target = rows.filter(function (row) { return row.getAttribute("data-task") === id; })[0] || el("historyBtn");
+    if (target && target.focus) target.focus();
+  }
+}
+function closeHistory() {
+  if (el("historyWrap").hidden) return;
+  el("historyWrap").hidden = true;
+  el("historyBtn").focus();
+}
 
 /* ---------- this repo --------------------------------------------------- */
 
@@ -2373,6 +2521,9 @@ function renderSession() {
     h += '<div class="scell"><div class="sn mono">' + kv[1] + '</div><div class="sl">' + kv[0].toUpperCase() + "</div></div>";
   });
   h += "</div>";
+  (D.alerts || []).filter(function (a) { return a.kind === "stale-map"; }).forEach(function (a) {
+    h += '<p class="tdet-note">' + esc(a.text) + "</p>";
+  });
   h += '<div class="sgen">read ' + esc(D.generated || "") + "</div>";
   el("session").innerHTML = h;
 }
@@ -2380,13 +2531,12 @@ function renderSession() {
 /* ---------- alarms ------------------------------------------------------ */
 
 function renderAlarms() {
-  var a = D.alerts || [];
-  if (!a.length) { el("alarms").innerHTML = '<span class="calm">nothing needs you</span>'; return; }
-  var tone = { cycle: "r", dangling: "r", quiet: "w", review: "b" };
+  var a = (D.alerts || []).filter(function (x) { return ["quiet", "cycle", "dangling"].indexOf(x.kind) >= 0; });
+  if (!a.length) { el("alarms").innerHTML = ""; return; }
   var h = "";
   a.forEach(function (x) {
-    h += '<span class="alarm ' + (tone[x.kind] || "") + '" title="' + esc(x.hint || "") + '">' +
-         esc(x.text) + "</span>";
+    h += '<div class="attention"><strong>' + (x.kind === "quiet" ? "A hold may need your attention" : "Task plan needs attention") + "</strong><p>" +
+         (x.kind === "quiet" ? "An agent has not reported recently. Check its holds in Team before releasing anything." : esc(x.text)) + "</p></div>";
   });
   el("alarms").innerHTML = h;
 }
@@ -2402,9 +2552,17 @@ function renderAll(d) {
   }
   renderAlarms(); renderProjects(); renderNow(); renderChips();
   renderStream(); renderRoster(); renderTasks(); renderSession();
+  if (OPEN_TASK) {
+    if ((D.tasks || []).some(function (t) { return t.id === OPEN_TASK; })) openTask(OPEN_TASK);
+    else closeTask();
+  }
 }
 
 function acceptSnapshot(d) {
+  if (!d || typeof d !== "object" || d.error || !Array.isArray(d.tasks) ||
+      !Array.isArray(d.claims) || !Array.isArray(d.feed)) {
+    throw new Error(d && d.error ? d.error : "The board received an unreadable update.");
+  }
   if (d.frontend_build && d.frontend_build !== PAGE_BUILD) {
     if (!RELOAD_REQUESTED) {
       RELOAD_REQUESTED = true;
@@ -2413,7 +2571,23 @@ function acceptSnapshot(d) {
     }
     return;
   }
-  renderAll(d);
+  var previous = D;
+  try { renderAll(d); }
+  catch (error) {
+    D = previous;
+    if (previous) renderAll(previous);
+    throw error;
+  }
+  LAST_SNAPSHOT_AT = Date.now();
+  setConnectionState("Live", "");
+}
+
+function setConnectionState(label, detail) {
+  el("liveTxt").textContent = label;
+  el("livedot").classList.toggle("off", label !== "Live");
+  var notice = el("connectionNotice");
+  notice.hidden = !detail;
+  notice.textContent = detail;
 }
 
 el("chips").addEventListener("click", function (ev) {
@@ -2421,6 +2595,26 @@ el("chips").addEventListener("click", function (ev) {
   FILTER = b.getAttribute("data-k"); renderChips(); renderStream();
 });
 el("projQ").addEventListener("input", function (ev) { PQ = ev.target.value.trim(); renderProjects(); });
+el("historyBtn").addEventListener("click", function () { if (D) openHistory(); });
+el("historyAll").addEventListener("click", function () { if (D) openHistory(); });
+el("historyMore").addEventListener("click", function () { if (HISTORY_BEFORE) loadHistory(true); });
+el("historyReload").addEventListener("click", function () { loadHistory(false); });
+el("historyClose").addEventListener("click", closeHistory);
+el("releaseCancel").addEventListener("click", closeRelease);
+el("releaseForm").addEventListener("submit", submitRelease);
+document.addEventListener("keydown", function (e) {
+  if (e.key === "Escape") { closeRelease(); closeTask(); closeHistory(); }
+  if (e.key === "Tab") {
+    var modal = !el("releaseWrap").hidden ? el("releaseWrap") : !el("historyWrap").hidden ? el("historyWrap") : !el("tdetWrap").hidden ? el("tdetWrap") : null;
+    if (!modal) return;
+    var focusable = Array.prototype.slice.call(modal.querySelectorAll("button, a[href], input, select, textarea, summary, [tabindex='0']"))
+      .filter(function (node) { return !node.disabled && node.getClientRects().length; });
+    var first = focusable[0], last = focusable[focusable.length - 1];
+    if (first && (focusable.indexOf(document.activeElement) < 0 || (e.shiftKey ? document.activeElement === first : document.activeElement === last))) {
+      e.preventDefault(); (e.shiftKey ? last : first).focus();
+    }
+  }
+});
 
 // Theme. Remembered, because a board is left open all day and one that resets
 // to the wrong one on every reload is a small daily irritation.
@@ -2457,16 +2651,27 @@ el("projQ").addEventListener("input", function (ev) { PQ = ev.target.value.trim(
 })();
 
 function tick() {
-  var t = new Date();
-  el("clock").textContent = pad(t.getHours()) + ":" + pad(t.getMinutes()) + ":" + pad(t.getSeconds());
+  el("clock").textContent = LAST_SNAPSHOT_AT ? "updated " + ago((Date.now() - LAST_SNAPSHOT_AT) / 1000) + " ago" : "";
+  if (LAST_SNAPSHOT_AT && Date.now() - LAST_SNAPSHOT_AT > 30000) {
+    setConnectionState("Updates delayed", "Showing the last received work. Updates are delayed; reconnecting does not stop any agent.");
+  } else if (!LAST_SNAPSHOT_AT && Date.now() - LOAD_STARTED_AT > 15000) {
+    setConnectionState("Still loading", "Work has not loaded yet. This is not an empty project. You can reload this page to retry.");
+  }
 }
 setInterval(tick, 1000); tick();
 
 var live = el("liveTxt"), dot = el("livedot");
 var es = new EventSource("/events" + location.search);
-es.onopen = function () { live.textContent = "connected"; dot.classList.remove("off"); };
-es.onerror = function () { live.textContent = "disconnected"; dot.classList.add("off"); };
-es.onmessage = function (ev) { acceptSnapshot(JSON.parse(ev.data)); };
+es.onopen = function () { setConnectionState(LAST_SNAPSHOT_AT ? "Reconnecting" : "Loading work", ""); };
+es.onerror = function () {
+  setConnectionState("Reconnecting", LAST_SNAPSHOT_AT
+    ? "Connection lost. Your last received work is still shown; reconnecting automatically."
+    : "Waiting for the board connection. Work has not loaded yet.");
+};
+es.onmessage = function (ev) {
+  try { acceptSnapshot(JSON.parse(ev.data)); }
+  catch (e) { setConnectionState("Update failed", "Could not read the latest update. " + (LAST_SNAPSHOT_AT ? "Your previous work is still shown." : "Work has not loaded yet.")); }
+};
 </script>
 """
 
@@ -2596,6 +2801,14 @@ class _Handler(BaseHTTPRequestHandler):
                 store = unquote(part[len("store="):])
         if path == "/":
             self._send(board.page().encode("utf-8"), "text/html; charset=utf-8")
+        elif path == "/api/history":
+            params = parse_qs(query)
+            try:
+                payload = board.history(store, actor=params.get("actor", [""])[0],
+                                        task=params.get("task", [""])[0], before=params.get("before", [""])[0])
+                self._send(json.dumps(payload).encode("utf-8"), "application/json; charset=utf-8")
+            except (ValueError, OSError) as exc:
+                self._send(json.dumps({"error": str(exc)}).encode("utf-8"), "application/json", 400)
         elif path == "/api/status":
             self._send(json.dumps(board.snapshot(store)).encode("utf-8"),
                        "application/json; charset=utf-8")
@@ -2826,6 +3039,12 @@ class Board:
             log_file = _log.user_data_home() / "comms" / key / _log.LOG_FILENAME
             return (root, log_file) if log_file.exists() else None
         return None
+
+    def history(self, store: str = "", *, actor: str = "", task: str = "", before: str = "") -> dict:
+        if store and store != _log.repo_hash(self.root) and self._store_by_key(store) is None:
+            raise ValueError("The selected project is unavailable.")
+        _key, _root, log_file = self._for_store(store)
+        return history_page(_log.read(log_file), actor=actor, task=task, before=before)
 
     def page(self) -> str:
         # Returned verbatim. _PAGE is NOT a format string: it is full of CSS and

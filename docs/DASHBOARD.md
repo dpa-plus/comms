@@ -7,10 +7,15 @@ The README has the short version. This is the rest of it.
 COMMS_ACTOR=human-you comms-graph ui   # http://127.0.0.1:7878, every project in one tab
 ```
 
-It opens on **what just happened**, newest first, with the things that need
-somebody pulled to the top. Around it: who is holding which files right now, the
-roster of who is actually here, the tasks with the files each one touches, and
-every project on this machine down the left side.
+It opens on **the work**: tasks in progress, checking, waiting and up next,
+followed by recent results. The **Team** panel shows who has reported recently
+and who holds files; the **Projects** rail scopes the view to one project.
+Last-reported times are evidence of an update, not proof an agent is still running.
+
+Click a task for its owner, checks, held files and history. **History** also opens
+the project timeline; agent history buttons filter it to that person. Older
+events remain available through **Load earlier**, including after an agent leaves
+the current Team panel. Technical details stay collapsed until needed.
 
 **It reads. It does not write**, with exactly one exception. The log is appended
 under a lock, through a fold that enforces the rules, and a dashboard writing
@@ -21,34 +26,40 @@ does. It asks for a reason and refuses without one, because the release is
 recorded under your name permanently and "who freed this and why" is the only
 question anybody asks afterwards.
 
-> **Who signs the release.** The first time you free something, the board asks
-> for your name (e.g. `human-you`) and remembers it in that browser; `?actor=name`
-> in the address bar sets or changes it. The release is recorded under that name,
-> with the holder as `original_actor` and you as `arbitrator`, the same way
-> `release --force` records it. A board started with `COMMS_ACTOR` set signs as
-> that name instead and never asks. With neither, it refuses: a release with no
-> author is worse than no release, because the ground is gone and the log cannot
-> say who took it.
+> **Who signs the release.** The inline confirmation shows the exact held scope
+> and holder, and requires your operator name and a reason. The operator field
+> is prefilled from `?actor=name`, a previously successful release in this browser,
+> or the server's `COMMS_ACTOR`, and remains editable. A successful release records
+> that name as `arbitrator` and the holder as `original_actor`. Cancel changes
+> nothing. Releasing a hold does **not** stop the agent or discard its edits.
 
 It is **unified by default**: one window for every comms project on the machine. The **Projects** rail lists them and clicking one scopes the whole view. It lists real projects only. A store whose directory has been deleted, or which lives in a temp folder, is not a project, and before that filter existed two real projects sat among 213 that were not.
 
-The **Roster** shows who is here, meaning the last hour, plus anyone holding a claim whatever their age, because a stale claim is the one thing on the board that needs a person, and hiding its holder would hide the only name that can free it. Agents take a fresh name each session, so everyone who has ever said hello is a much longer and much less useful list; it is one click away.
+The **Team** panel includes agents that reported within the last hour, plus anyone
+holding a claim whatever its age. Quiet holds are advisory: nothing expires
+automatically. The panel also distinguishes unclaimed changes on disk from
+claimed work, so an empty hold list does not imply nobody is working.
 
 Run it **once** and watch every repo. Agents never open anything. They write to their logs, which this board already sees.
 
-The **work graph** shows the tasks in the selected project: an arrow means the
-task it points at comes afterwards, and tasks joined to nothing sit apart from
-the rest, because they are. Finished work compresses to a dashed outline so the
-board shrinks as the project progresses; work waiting for a verifier is the
-loudest thing on it, because it is finished *and* holding up everything
-downstream. Layout is computed on the server, so an arrow can only point
-rightward, so there is no geometry to get wrong in the browser.
+**Connections** opens the selected project's **Task graph** or **Code map**.
+The task graph draws declared dependencies; unconnected tasks are currently
+listed separately, with finished work collapsed. The code map describes code
+relationships, not an inferred order of work. A graph-first main view is separate
+follow-up work, not part of this release.
 
-It updates by **push, not polling.** A file watcher inside `comms ui` is notified by the operating system the instant any project's `log.jsonl` changes; it rebuilds the snapshot once and streams it to every open browser tab over [Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events). So when any agent anywhere appends an event, the right project lights up in the sidebar **immediately**, and your laptop isn't burning cycles re-reading logs on a timer.
+The browser receives snapshots through **Server-Sent Events**. The server checks
+for changes every half second and also sends a fresh snapshot after roughly ten
+seconds without a change. Snapshot work takes additional time; updates are not
+instantaneous. **Live** appears only after a valid snapshot has rendered, not
+merely when a connection opens. Failed updates preserve the previous view and
+show a warning; a delayed stream is labelled rather than presented as current.
 
 Every snapshot carries the server's **front-end build fingerprint**, and the page remembers the one it loaded with. The server also fingerprints the installed `comms_graph` Python sources. Once a changed installation has stayed stable for a short debounce, the server closes cleanly and refreshes itself: launchd starts a fresh process, while a manually started `comms-graph ui` replaces itself directly. Every open tab reconnects, notices the new front-end build on the next push, and **reloads itself**, so no stale UI is lingering after an upgrade.
 
-It **opens your browser automatically** when run interactively (`--no-open` to suppress). On macOS you can also double-click a **Comms Dashboard** launcher instead of using the terminal. The header shows the active **session name** (the name agents use, e.g. `acme-build`) next to the repo.
+It **opens your browser automatically** when run interactively (`--no-open` to
+suppress). On macOS you can also use a **Comms Dashboard** launcher. The main
+heading identifies the selected project.
 
 **One dashboard, two entry points.** `comms ui` and `comms-graph ui` are the
 same board: the Go build no longer serves a dashboard of its own and hands the
@@ -73,7 +84,9 @@ would turn a rename into an outage for whoever least expected one.
 
 ### Run the dashboard as a login service (macOS)
 
-So the dashboard is always up. It survives reboots, and is restarted automatically if it ever exits. Install it as a per-user `launchd` agent. The template sets `COMMS_ACTOR`, so releases from the board are signed without the page asking (see the note above); change it from `operator` to your own name first:
+So the dashboard is always up. It survives reboots, and is restarted automatically
+if it exits. Install it as a per-user `launchd` agent. The template's `COMMS_ACTOR`
+prefills the release dialog; change it from `operator` to your own name first:
 
 ```bash
 # Set your operator name (and point at your binary if it is not Homebrew, `which comms`):
