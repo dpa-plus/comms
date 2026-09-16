@@ -285,6 +285,7 @@ def test_a_week_old_code_map_is_an_alert_not_a_blank_board(board):
     assert status == 200
     snap = json.loads(body)
     assert "error" not in snap, snap.get("error")
+    assert snap["code_map_available"] is True
     kinds = [a.get("kind") for a in snap["alerts"]]
     assert "stale-map" in kinds, f"no stale-map alert, only {kinds}"
 
@@ -434,6 +435,35 @@ def test_the_board_names_a_dependency_loop(board):
     assert "dangling" in kinds, snap["alerts"]
     cyc = next(a for a in snap["alerts"] if a["kind"] == "cycle")
     assert "x" in cyc["text"] and "y" in cyc["text"], cyc
+
+
+def test_snapshot_preserves_every_declared_task_edge_for_the_dashboard(board):
+    """The main graph needs the recorded plan, not only today's blockers.
+
+    ``blocked_by`` is derived from incomplete predecessors and therefore drops
+    an edge as soon as its predecessor closes.  The dashboard must still show
+    the edge that was actually declared, with its direction and explanation.
+    """
+    repo, log_file, _base = board
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    events = [
+        _at(0, "task", "planner", 5, {"task": "api", "title": "Build the API"}),
+        _at(0, "task", "planner", 4, {"task": "ui", "title": "Connect the interface"}),
+        _at(0, "task_edge", "planner", 3, {
+            "from": "api", "to": "ui", "kind": "consumes", "provides": "stable schema",
+        }),
+    ]
+    events.sort(key=lambda event: event.ts)
+    with open(log_file, "wb") as fh:
+        for event in events:
+            fh.write(event.encode())
+
+    snap = cserver._snapshot(repo, log_file)
+
+    assert snap["task_edges"] == [{
+        "from": "api", "to": "ui", "kind": "consumes", "provides": "stable schema",
+    }]
+    assert snap["code_map_available"] is False
 
 
 def test_a_quiet_board_says_so_rather_than_showing_nothing(board):
