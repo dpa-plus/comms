@@ -1465,7 +1465,7 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 <header class="topbar">
   <div class="brand"><svg class="mark" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.2 4.6 L11.8 6.2 M4.2 4.6 L7.4 11.6 M11.8 6.2 L7.4 11.6"/><circle cx="4.2" cy="4.6" r="2.3"/><circle cx="11.8" cy="6.2" r="2.3"/><circle cx="7.4" cy="11.6" r="2.3"/></svg>comms</div>
   <div class="sep"></div>
-  <div class="live"><span class="livedot" id="livedot"></span><span id="liveTxt">connecting</span><span class="mono" id="clock"></span></div>
+  <div class="live" role="status"><span class="livedot off" id="livedot"></span><span id="liveTxt">Loading work</span><span class="mono" id="clock"></span></div>
   <div class="sep"></div>
   <div id="alarms" style="display:flex;gap:6px;align-items:center;"></div>
   <div class="grow"></div>
@@ -1475,6 +1475,7 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
     </svg>
   </button>
 </header>
+<div id="connectionNotice" role="status" hidden></div>
 
 <main class="shell">
   <aside class="rail-left">
@@ -1538,6 +1539,8 @@ var FILTER = "all";        // which stream chip is active
 var PQ = "";               // projects filter box
 var PAUSED_AT_BOTTOM = true;
 var RELOAD_REQUESTED = false;
+var LAST_SNAPSHOT_AT = 0;
+var LOAD_STARTED_AT = Date.now();
 
 function el(id) { return document.getElementById(id); }
 function esc(s) {
@@ -2405,6 +2408,10 @@ function renderAll(d) {
 }
 
 function acceptSnapshot(d) {
+  if (!d || typeof d !== "object" || d.error || !Array.isArray(d.tasks) ||
+      !Array.isArray(d.claims) || !Array.isArray(d.feed)) {
+    throw new Error(d && d.error ? d.error : "The board received an unreadable update.");
+  }
   if (d.frontend_build && d.frontend_build !== PAGE_BUILD) {
     if (!RELOAD_REQUESTED) {
       RELOAD_REQUESTED = true;
@@ -2414,6 +2421,16 @@ function acceptSnapshot(d) {
     return;
   }
   renderAll(d);
+  LAST_SNAPSHOT_AT = Date.now();
+  setConnectionState("Live", "");
+}
+
+function setConnectionState(label, detail) {
+  el("liveTxt").textContent = label;
+  el("livedot").classList.toggle("off", label !== "Live");
+  var notice = el("connectionNotice");
+  notice.hidden = !detail;
+  notice.textContent = detail;
 }
 
 el("chips").addEventListener("click", function (ev) {
@@ -2457,16 +2474,27 @@ el("projQ").addEventListener("input", function (ev) { PQ = ev.target.value.trim(
 })();
 
 function tick() {
-  var t = new Date();
-  el("clock").textContent = pad(t.getHours()) + ":" + pad(t.getMinutes()) + ":" + pad(t.getSeconds());
+  el("clock").textContent = LAST_SNAPSHOT_AT ? "updated " + ago((Date.now() - LAST_SNAPSHOT_AT) / 1000) + " ago" : "";
+  if (LAST_SNAPSHOT_AT && Date.now() - LAST_SNAPSHOT_AT > 30000) {
+    setConnectionState("Updates delayed", "Showing the last received work. Updates are delayed; reconnecting does not stop any agent.");
+  } else if (!LAST_SNAPSHOT_AT && Date.now() - LOAD_STARTED_AT > 15000) {
+    setConnectionState("Still loading", "Work has not loaded yet. This is not an empty project. You can reload this page to retry.");
+  }
 }
 setInterval(tick, 1000); tick();
 
 var live = el("liveTxt"), dot = el("livedot");
 var es = new EventSource("/events" + location.search);
-es.onopen = function () { live.textContent = "connected"; dot.classList.remove("off"); };
-es.onerror = function () { live.textContent = "disconnected"; dot.classList.add("off"); };
-es.onmessage = function (ev) { acceptSnapshot(JSON.parse(ev.data)); };
+es.onopen = function () { setConnectionState(LAST_SNAPSHOT_AT ? "Reconnecting" : "Loading work", ""); };
+es.onerror = function () {
+  setConnectionState("Reconnecting", LAST_SNAPSHOT_AT
+    ? "Connection lost. Your last received work is still shown; reconnecting automatically."
+    : "Waiting for the board connection. Work has not loaded yet.");
+};
+es.onmessage = function (ev) {
+  try { acceptSnapshot(JSON.parse(ev.data)); }
+  catch (e) { setConnectionState("Update failed", "Could not read the latest update. " + (LAST_SNAPSHOT_AT ? "Your previous work is still shown." : "Work has not loaded yet.")); }
+};
 </script>
 """
 
