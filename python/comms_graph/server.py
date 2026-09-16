@@ -255,9 +255,11 @@ def _snapshot(root: Path, log_file: Path, graph_path: Path | None = None) -> dic
     # blank: exactly the failure the "never raises" promise above exists to
     # prevent. The tests never saw it because their map is fresh or absent.
     alerts: list[dict] = []
+    code_map_available = False
     try:
         from .cli import _load_graph  # the one loader, undirected view and all
         graph = _load_graph(graph_path) if graph_path else None
+        code_map_available = graph is not None
         links = _taskcode.link(
             graph, {t["id"]: t for t in tasks},
             {t["id"]: [f["scope"] for f in t.get("files") or []] for t in tasks},
@@ -428,6 +430,17 @@ def _snapshot(root: Path, log_file: Path, graph_path: Path | None = None) -> dic
         "claims": claims,
         "roster": roster,
         "tasks": tasks,
+        # The main dashboard draws the recorded plan itself.  ``blocked_by``
+        # is only today's derived state and drops a predecessor after it is
+        # verified; it is not a substitute for the edge somebody declared.
+        "task_edges": [
+            {"from": edge.from_, "to": edge.to, "kind": edge.kind,
+             "provides": edge.provides}
+            for edge in (st.task_edges or [])
+        ],
+        # An empty relation set means something only when a map was loaded.
+        # Keep that distinct from the ordinary first-run state with no map.
+        "code_map_available": code_map_available,
         "feed": feed,
         "counts": {
             "claims": len(claims),
@@ -1440,6 +1453,73 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 .tmeta .owner { color: var(--ink-2); }
 .tmeta .tfiles { font: inherit; }
 .work-note { margin: 8px 0 0; color: var(--ink-3); font-size: 12px; font-weight: 400; }
+
+/* The work graph is deliberately static.  Positions come from a stable order
+   in the page state; there is no physics pass to make the picture jump on each
+   live update.  Only this viewport scrolls, so a wide scene cannot make the
+   mobile page itself overflow. */
+#tasks { min-width: 0; }
+.graph-shell { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+.graph-controls { display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+  position: sticky; top: 0; z-index: 8; padding: 12px 0 8px; background: var(--surface); }
+.graph-search { flex: 1 1 210px; min-width: 120px; height: 34px; border: 1px solid var(--line);
+  border-radius: 7px; padding: 0 10px; background: var(--bg); color: var(--ink); font: inherit; }
+.graph-controls button { height: 32px; padding: 0 10px; }
+.graph-zoom { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.graph-controls .pressed { color: var(--accent); border-color: var(--accent-line); background: var(--accent-wash); }
+.graph-count { color: var(--ink-4); font-size: 11.5px; white-space: nowrap; }
+.graph-key { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 15px;
+  color: var(--ink-3); font-size: 11.5px; }
+.graph-key span { display: inline-flex; align-items: center; gap: 6px; }
+.graph-key i { width: 24px; height: 0; border-top: 2px solid var(--ink-3); }
+.graph-key i.dep { position: relative; }
+.graph-key i.dep::after { content: ""; position: absolute; right: -1px; top: -4px;
+  border-left: 6px solid var(--ink-3); border-top: 3px solid transparent; border-bottom: 3px solid transparent; }
+.graph-key i.rel { border-top-style: dashed; border-top-color: var(--accent); }
+.graph-focus { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  min-height: 34px; padding: 8px 10px; border: 1px solid var(--line-hair);
+  border-radius: 8px; background: var(--surface-2); color: var(--ink-3); font-size: 12px; }
+.graph-focus strong { color: var(--ink); font-weight: 600; }
+.graph-focus button { height: 28px; padding: 0 9px; }
+.graph-viewport { width: 100%; min-width: 0; min-height: 360px; max-height: calc(100vh - 330px);
+  overflow: auto; overscroll-behavior: contain; border: 1px solid var(--line-hair);
+  border-radius: 9px; background: var(--bg); }
+.graph-camera { position: relative; }
+.graph-scene { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.graph-scene > svg { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
+.graph-edge { fill: none; vector-effect: non-scaling-stroke; }
+.graph-edge.dependency { stroke: var(--ink-3); stroke-width: 1.6; }
+.graph-arrow { fill: var(--ink-3); }
+.graph-edge.related { stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 5 5; opacity: .75; }
+.graph-edge.dim { opacity: .2; }
+.graph-node { position: absolute; width: 260px; min-height: 84px; display: grid;
+  grid-template-columns: 40px minmax(0, 1fr); align-items: center; column-gap: 10px;
+  padding: 7px 8px; text-align: left; border: 0; border-radius: 10px;
+  color: var(--ink); background: transparent; }
+.graph-node:hover .graph-label, .graph-node:focus-visible .graph-label { background: var(--surface-2); }
+.graph-node:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.graph-node.selected .graph-orb { box-shadow: 0 0 0 4px var(--accent-wash), 0 0 0 5px var(--accent-line); }
+.graph-node.connected:not(.selected) .graph-orb { box-shadow: 0 0 0 3px var(--surface-3); }
+.graph-orb { width: 34px; height: 34px; border-radius: 50%; border: 2px solid var(--line-2);
+  background: var(--surface); display: grid; place-items: center; color: var(--ink-3);
+  font-size: 10px; font-weight: 700; text-transform: uppercase; }
+.graph-node.p-doing .graph-orb { color: var(--amber); border-color: var(--amber); background: var(--amber-wash); }
+.graph-node.p-review .graph-orb { color: var(--accent); border-color: var(--accent); background: var(--accent-wash); }
+.graph-node.p-blocked .graph-orb, .graph-node.p-cycle .graph-orb { color: var(--red); border-color: var(--red); background: var(--red-wash); }
+.graph-node.p-ready .graph-orb { color: var(--green); border-color: var(--green); }
+.graph-node.p-closed .graph-orb { color: var(--green); border-color: var(--green); background: var(--green-wash); }
+.graph-label { min-width: 0; padding: 5px 6px; border-radius: 6px; background: var(--bg); }
+.graph-title { display: block; white-space: normal; overflow-wrap: anywhere;
+  font-size: 14px; line-height: 1.3; font-weight: 600; }
+.graph-meta { display: flex; flex-wrap: wrap; gap: 3px 8px; margin-top: 5px;
+  color: var(--ink-4); font-size: 10.5px; line-height: 1.25; }
+.graph-meta .status { color: var(--ink-3); font-weight: 600; }
+.graph-list { display: flex; flex-direction: column; gap: 6px; }
+.graph-list .graph-list-row { width: 100%; height: auto; display: flex; align-items: center;
+  gap: 10px; padding: 10px 12px; text-align: left; border: 1px solid var(--line);
+  border-radius: 8px; }
+.graph-list .graph-list-row .graph-title { flex: 1; }
+.graph-empty { padding: 36px 12px; color: var(--ink-4); line-height: 1.55; }
 .rail-right { display: flex; flex-direction: column; overflow-y: auto; gap: 18px; }
 .rail-right > .card { flex: none; }
 .rail-right > .card:first-child { max-height: none; }
@@ -1514,6 +1594,8 @@ body:has(#connectionNotice:not([hidden])) .shell { height: calc(100vh - 100px); 
   .work-heading { padding: 18px 16px 12px; }
   .work-heading h1 { font-size: 22px; }
   #tasks { padding: 0 14px 20px; }
+  .graph-controls { top: 0; }
+  .graph-viewport { min-height: 420px; max-height: 72vh; }
   .topbar { padding: 0 15px; }
   .topbar .sep { display: none; }
   #clock { display: none; }
@@ -1625,10 +1707,17 @@ var LOAD_STARTED_AT = Date.now();
 var HISTORY_SCOPE = null;
 var OPEN_TASK = null;
 var OPEN_FILES = {};
-var OPEN_RESULTS = false;
 var HISTORY_EVENTS = null;
 var HISTORY_BEFORE = "";
 var HISTORY_REQUEST = 0;
+var GRAPH_RELATED_LIMIT = 12;
+var GRAPH_STATE = freshGraphState("");
+
+function freshGraphState(projectKey) {
+  return {projectKey: projectKey || "", showCompleted: false, query: "", view: "graph",
+          zoom: 1, left: 0, top: 0, selected: null, relatedExpanded: false,
+          order: [], rank: {}, sceneWidth: 0, sceneHeight: 0};
+}
 
 function el(id) { return document.getElementById(id); }
 function esc(s) {
@@ -2244,92 +2333,406 @@ function renderRoster() {
 
 /* ---------- work -------------------------------------------------------- */
 
+function readableTaskTitle(t) {
+  var title = String(t && t.title || "").trim();
+  if (!title) return "Untitled task";
+  // Only remove the conventional tracker prefix when a plain-English title
+  // remains.  IDs and paths are never promoted into invented summaries.
+  return title.replace(/^[A-Z]{2,8}[0-9]{1,5}[ ]*[-:–—][ ]+/, "");
+}
+
+function taskStatus(task) {
+  var phase = task && typeof task === "object" ? task.phase : task;
+  if (phase === "closed" && task && typeof task === "object") {
+    return task.verified_by ? "Completed · checked" : "Finished · verification not recorded";
+  }
+  return ({doing: "In progress", review: "Checking", blocked: "Waiting",
+           cycle: "Needs attention", ready: "Up next", closed: "Completed"})[phase] || "Recorded";
+}
+
+function taskOwners(t) {
+  return (t.doers || []).length ? t.doers : t.did ? [t.did] : [];
+}
+
+function graphTask(id) {
+  return (D.tasks || []).filter(function (t) { return t.id === id; })[0] || null;
+}
+
+function graphDeclaredEdges() {
+  var known = {};
+  (D.tasks || []).forEach(function (t) { known[t.id] = true; });
+  var seen = {};
+  return (D.task_edges || []).filter(function (edge) {
+    if (!edge || !known[edge.from] || !known[edge.to] || edge.from === edge.to) return false;
+    var key = edge.from + "\u0000" + edge.to;
+    if (seen[key]) return false;
+    seen[key] = true;
+    return true;
+  });
+}
+
+function graphRelated(id) {
+  var found = {}, known = {};
+  (D.tasks || []).forEach(function (t) { known[t.id] = true; });
+  function add(other, relation) {
+    if (!other || other === id || !known[other]) return;
+    var prior = found[other];
+    if (!prior || Number(relation.shared || 0) > Number(prior.shared || 0)) {
+      found[other] = {task: other, shared: Number(relation.shared || 0), via: relation.via || []};
+    }
+  }
+  var own = graphTask(id);
+  (own && own.related || []).forEach(function (r) { add(r.task, r); });
+  // Older snapshots were not guaranteed to carry the symmetric half.  Reading
+  // the reverse record is still an undirected relation, never an inferred edge.
+  (D.tasks || []).forEach(function (t) {
+    (t.related || []).forEach(function (r) { if (r.task === id) add(t.id, r); });
+  });
+  return Object.keys(found).map(function (key) { return found[key]; }).sort(function (a, b) {
+    return b.shared - a.shared || readableTaskTitle(graphTask(a.task)).localeCompare(readableTaskTitle(graphTask(b.task)));
+  });
+}
+
+function graphOrderTasks(tasks) {
+  var priority = {doing: 0, review: 1, blocked: 2, cycle: 3, ready: 4, closed: 5};
+  return tasks.slice().sort(function (a, b) {
+    var phase = (priority[a.phase] === undefined ? 9 : priority[a.phase]) -
+                (priority[b.phase] === undefined ? 9 : priority[b.phase]);
+    return phase || readableTaskTitle(a).localeCompare(readableTaskTitle(b)) || a.id.localeCompare(b.id);
+  });
+}
+
+function ensureGraphOrder(tasks) {
+  var known = {}, adjacency = {};
+  tasks.forEach(function (t) { known[t.id] = t; adjacency[t.id] = {}; });
+  graphDeclaredEdges().forEach(function (e) { adjacency[e.from][e.to] = true; adjacency[e.to][e.from] = true; });
+  tasks.forEach(function (t) {
+    (t.related || []).forEach(function (r) {
+      if (known[r.task] && r.task !== t.id) { adjacency[t.id][r.task] = true; adjacency[r.task][t.id] = true; }
+    });
+  });
+  GRAPH_STATE.order = GRAPH_STATE.order.filter(function (id) { return known[id]; });
+  var already = {};
+  GRAPH_STATE.order.forEach(function (id) { already[id] = true; });
+  var additions = tasks.filter(function (t) { return !already[t.id]; });
+  if (!GRAPH_STATE.order.length) {
+    // Open work gets a compact area of its own; within it, breadth-first
+    // component order keeps declared and advisory neighbours near each other.
+    var ordered = [];
+    [false, true].forEach(function (closed) {
+      var pool = graphOrderTasks(additions.filter(function (t) { return (t.phase === "closed") === closed; }));
+      var allowed = {}, visited = {};
+      pool.forEach(function (t) { allowed[t.id] = true; });
+      pool.forEach(function (seed) {
+        if (visited[seed.id]) return;
+        var queue = [seed.id]; visited[seed.id] = true;
+        while (queue.length) {
+          var id = queue.shift(); ordered.push(id);
+          Object.keys(adjacency[id] || {}).filter(function (other) { return allowed[other] && !visited[other]; })
+            .sort(function (a, b) { return readableTaskTitle(known[a]).localeCompare(readableTaskTitle(known[b])); })
+            .forEach(function (other) { visited[other] = true; queue.push(other); });
+        }
+      });
+    });
+    GRAPH_STATE.order = ordered;
+  } else {
+    graphOrderTasks(additions).forEach(function (t) { GRAPH_STATE.order.push(t.id); });
+  }
+  GRAPH_STATE.rank = {};
+  GRAPH_STATE.order.forEach(function (id, index) { GRAPH_STATE.rank[id] = index; });
+}
+
+function rememberGraphCamera() {
+  var viewport = document.getElementById("graphViewport");
+  if (!viewport) return;
+  GRAPH_STATE.left = Number(viewport.scrollLeft || 0);
+  GRAPH_STATE.top = Number(viewport.scrollTop || 0);
+}
+
+function graphFocusSnapshot() {
+  var active = document.activeElement;
+  if (!active) return null;
+  var task = active.getAttribute ? active.getAttribute("data-graph-task") : "";
+  if (task) return {task: task};
+  var ids = ["graphSearch", "graphCompleted", "graphView", "listView",
+             "graphZoomOut", "graphFit", "graphZoomIn", "graphDetails",
+             "graphShowCompleted", "graphMoreRelated"];
+  if (ids.indexOf(active.id) < 0) return null;
+  return {id: active.id, start: active.selectionStart, end: active.selectionEnd};
+}
+
+function restoreGraphFocus(saved) {
+  if (!saved) return;
+  var target = null;
+  if (saved.task) {
+    target = Array.prototype.slice.call(el("tasks").querySelectorAll("[data-graph-task]")).filter(function (node) {
+      return node.getAttribute("data-graph-task") === saved.task;
+    })[0] || null;
+  } else if (saved.id) {
+    target = document.getElementById(saved.id);
+  }
+  if (!target || !target.focus) return;
+  target.focus();
+  if (target.setSelectionRange && typeof saved.start === "number") {
+    target.setSelectionRange(saved.start, typeof saved.end === "number" ? saved.end : saved.start);
+  }
+}
+
+function chooseGraphFocus(tasks) {
+  // Snapshots are serialized by task id, not by the graph layout.  Choosing
+  // from that raw order can focus a useful task several rows below the initial
+  // viewport even though the same task set has a stable, readable display
+  // order.  Existing selection bypasses this function, so live pushes never
+  // pull a reader away from the node they chose.
+  var ordered = tasks.slice().sort(function (a, b) {
+    return GRAPH_STATE.rank[a.id] - GRAPH_STATE.rank[b.id];
+  });
+  var open = ordered.filter(function (t) { return t.phase !== "closed"; });
+  var openIds = {};
+  open.forEach(function (t) { openIds[t.id] = true; });
+  var doing = open.filter(function (t) { return t.phase === "doing"; })[0];
+  if (doing) return doing.id;
+  var connected = open.filter(function (t) {
+    return graphRelated(t.id).some(function (r) { return openIds[r.task]; }) ||
+           graphDeclaredEdges().some(function (e) {
+             return (e.from === t.id && openIds[e.to]) || (e.to === t.id && openIds[e.from]);
+           });
+  })[0];
+  return connected ? connected.id : open.length ? open[0].id : null;
+}
+
+function setGraphCompleted(value) {
+  rememberGraphCamera(); GRAPH_STATE.showCompleted = !!value; renderTasks();
+}
+function setGraphQuery(value) {
+  rememberGraphCamera(); GRAPH_STATE.query = String(value || "");
+  var query = GRAPH_STATE.query.trim().toLowerCase();
+  if (query) {
+    var matches = (D.tasks || []).filter(function (t) {
+      return (GRAPH_STATE.showCompleted || t.phase !== "closed") &&
+             (String(t.title || "").toLowerCase().indexOf(query) >= 0 || String(t.id || "").toLowerCase().indexOf(query) >= 0);
+    }).sort(function (a, b) { return GRAPH_STATE.rank[a.id] - GRAPH_STATE.rank[b.id]; });
+    GRAPH_STATE.selected = matches.length ? matches[0].id : null;
+  }
+  renderTasks();
+}
+function selectGraphTask(id) {
+  if (!graphTask(id)) return;
+  rememberGraphCamera(); GRAPH_STATE.selected = id; GRAPH_STATE.relatedExpanded = false; renderTasks();
+}
+function setGraphRelatedExpanded(value) {
+  rememberGraphCamera(); GRAPH_STATE.relatedExpanded = !!value; renderTasks();
+}
+function setGraphView(view) {
+  rememberGraphCamera(); GRAPH_STATE.view = view === "list" ? "list" : "graph"; renderTasks();
+}
+function setGraphZoom(value) {
+  rememberGraphCamera(); GRAPH_STATE.zoom = Math.max(.55, Math.min(1.6, Number(value) || 1)); renderTasks();
+}
+function fitGraph() {
+  var viewport = document.getElementById("graphViewport");
+  var width = viewport && viewport.clientWidth ? viewport.clientWidth : 760;
+  setGraphZoom(Math.min(1, (width - 24) / Math.max(1, GRAPH_STATE.sceneWidth)));
+}
+
+function bindGraphControls() {
+  var search = document.getElementById("graphSearch");
+  if (search) {
+    search.value = GRAPH_STATE.query;
+    search.oninput = function (event) { setGraphQuery(event.target.value); };
+  }
+  var completed = document.getElementById("graphCompleted");
+  if (completed) completed.onclick = function () { setGraphCompleted(!GRAPH_STATE.showCompleted); };
+  var graphView = document.getElementById("graphView");
+  if (graphView) graphView.onclick = function () { setGraphView("graph"); };
+  var listView = document.getElementById("listView");
+  if (listView) listView.onclick = function () { setGraphView("list"); };
+  var zoomOut = document.getElementById("graphZoomOut");
+  if (zoomOut) zoomOut.onclick = function () { setGraphZoom(GRAPH_STATE.zoom - .1); };
+  var zoomIn = document.getElementById("graphZoomIn");
+  if (zoomIn) zoomIn.onclick = function () { setGraphZoom(GRAPH_STATE.zoom + .1); };
+  var fit = document.getElementById("graphFit");
+  if (fit) fit.onclick = fitGraph;
+  var details = document.getElementById("graphDetails");
+  if (details) details.onclick = function () { openTask(GRAPH_STATE.selected); };
+  var showDone = document.getElementById("graphShowCompleted");
+  if (showDone) showDone.onclick = function () { setGraphCompleted(true); };
+  var more = document.getElementById("graphMoreRelated");
+  if (more) more.onclick = function () { setGraphRelatedExpanded(true); };
+  Array.prototype.forEach.call(el("tasks").querySelectorAll("[data-graph-task]"), function (node) {
+    node.onclick = function () { selectGraphTask(node.getAttribute("data-graph-task")); };
+  });
+}
+
 function renderTasks() {
-  var c = D.counts || {}, ts = D.tasks || [];
+  var savedFocus = graphFocusSnapshot();
+  var tasks = D.tasks || [];
   var project = (D.projects || []).filter(function (p) { return p.current; })[0];
   el("projectTitle").textContent = project && project.name ? project.name : "Your work";
-  if (!ts.length) {
+  if (!tasks.length) {
     el("tasks").innerHTML = '<div class="empty">No tasks recorded yet. Team activity and held work are still shown alongside.</div>';
     return;
   }
-  var h = "";
 
-  // EVERY task, not just the stuck ones, and every row opens. The panel used to
-  // show five numbers and a list of what was stuck, which answers "is anything
-  // wrong" and nothing else. The question people actually arrive with is "what
-  // is this task and where does it live", and that needs the files.
-  var order2 = {doing: 0, review: 1, blocked: 2, cycle: 3, ready: 4, closed: 5};
-  var sorted = ts.slice().sort(function (a, b) {
-    var d = (order2[a.phase] === undefined ? 9 : order2[a.phase]) -
-            (order2[b.phase] === undefined ? 9 : order2[b.phase]);
-    return d !== 0 ? d : (b.last_activity || "").localeCompare(a.last_activity || "") || (a.id < b.id ? -1 : 1);
-  });
+  ensureGraphOrder(tasks);
+  if (GRAPH_STATE.selected && !graphTask(GRAPH_STATE.selected)) GRAPH_STATE.selected = null;
 
-  // CLOSED WORK IS HISTORY AND IT WAS DROWNING THE REST. On a real project the
-  // panel was 23 closed rows and 3 live ones, so the three that could still be
-  // acted on were below the fold, and the list read as a wall. Closed work
-  // folds behind one line and opens on click.
-  var live = sorted.filter(function (t) { return t.phase !== "closed"; });
-  var done = sorted.filter(function (t) { return t.phase === "closed"; });
-
-  function taskRow(t) {
-    var n = (t.files || []).length;
-    var owners = (t.doers || []).length ? t.doers : t.did ? [t.did] : [];
-    var held = (D.claims || []).filter(function (cl) { return cl.task === t.id; });
-    var holds = t.files_held || held.length;
-    var why = t.phase === "review" ? "Implementation finished · waiting for a check"
-            : t.phase === "cycle" ? "Task dependencies form a loop"
-            : t.phase === "blocked" ? "Waiting for " + (t.blocked_by || []).map(function (id) {
-                var dep = ts.filter(function (x) { return x.id === id; })[0];
-                return dep ? dep.title : id;
-              }).join(", ")
-            : t.phase === "closed" ? (t.verified_by ? "Checked by @" + t.verified_by : "Finished · verification not recorded")
-            : "";
-    var last = owners.map(function (owner) {
-      return (D.roster || []).filter(function (a) { return a.actor === owner; })[0];
-    }).filter(Boolean).map(function (a) { return a.last_seen; }).filter(Boolean).sort().pop();
-    return '<button class="trow p-' + esc(t.phase) + '" data-task="' + esc(t.id) + '">' +
-           '<span class="ttitle">' + esc(t.title || t.id) + "</span>" +
-           '<span class="tmeta"><span class="owner">' +
-             esc(owners.length ? owners.map(function (a) { return "@" + a; }).join(", ") : "Unassigned") + "</span>" +
-             (holds ? '<span class="tfiles">' + holds + (holds === 1 ? " hold" : " holds") + "</span>" : "") +
-             (last ? '<span>Agent reported ' + esc(agoIso(last)) + " ago</span>" : "") +
-           "</span>" + (why ? '<span class="work-note">' + esc(why) + "</span>" : "") + "</button>";
+  var query = GRAPH_STATE.query.trim().toLowerCase();
+  var visible = tasks.filter(function (t) {
+    if (t.phase === "closed" && !GRAPH_STATE.showCompleted) return false;
+    return !query || String(t.title || "").toLowerCase().indexOf(query) >= 0 || String(t.id || "").toLowerCase().indexOf(query) >= 0;
+  }).sort(function (a, b) { return GRAPH_STATE.rank[a.id] - GRAPH_STATE.rank[b.id]; });
+  var visibleIds = {};
+  visible.forEach(function (t) { visibleIds[t.id] = true; });
+  if (query && !visibleIds[GRAPH_STATE.selected]) {
+    GRAPH_STATE.selected = visible.length ? visible[0].id : null;
+  } else if (!query && !GRAPH_STATE.selected) {
+    GRAPH_STATE.selected = chooseGraphFocus(tasks);
   }
-
-  h += '<div class="tlist">';
-  [["doing", "In progress"], ["review", "Checking"], ["blocked", "Waiting"], ["cycle", "Needs attention"], ["ready", "Up next"]].forEach(function (group) {
-    var rows = live.filter(function (t) { return t.phase === group[0]; });
-    if (!rows.length) return;
-    h += '<section class="work-group"><h2>' + group[1] + '<span>' + rows.length + "</span></h2>";
-    rows.forEach(function (t) { h += taskRow(t); });
-    h += "</section>";
+  var positions = {}, nodeWidth = 260, stepX = 282;
+  var availableWidth = Number(el("tasks").clientWidth || 760);
+  var columns = Math.max(1, Math.min(4, Math.floor((availableWidth - 20) / stepX)));
+  var rows = Math.ceil(visible.length / columns), rowHeights = [];
+  visible.forEach(function (t, index) {
+    var titleLines = Math.max(1, Math.ceil(readableTaskTitle(t).length / 22));
+    var metaLength = taskStatus(t).length + taskOwners(t).join(", ").length + 12;
+    var metaLines = Math.max(1, Math.ceil(metaLength / 27));
+    var height = Math.max(92, 38 + titleLines * 18 + metaLines * 14);
+    var row = Math.floor(index / columns);
+    rowHeights[row] = Math.max(rowHeights[row] || 0, height);
+    positions[t.id] = {x: 24 + (index % columns) * stepX, row: row, h: height};
   });
-  if (done.length) {
-    h += '<section class="work-group"><h2>Recent results <span>' + done.length + "</span></h2>";
-    done.slice(0, 3).forEach(function (t) { h += taskRow(t); });
-    if (done.length > 3) {
-      h += '<button class="tfold" id="tfold">' + (done.length - 3) + ' earlier results<span class="tfoldc">' + (OPEN_RESULTS ? "hide" : "show") + '</span></button>';
-      h += '<div class="tdone" id="tdone"' + (OPEN_RESULTS ? "" : " hidden") + '>';
-      done.slice(3).forEach(function (t) { h += taskRow(t); });
-      h += "</div>";
+  var rowTops = [], y = 24;
+  rowHeights.forEach(function (height, row) { rowTops[row] = y; y += height + 26; });
+  visible.forEach(function (t) { positions[t.id].y = rowTops[positions[t.id].row]; });
+  var sceneWidth = Math.max(320, Math.min(columns, Math.max(1, visible.length)) * stepX + 12);
+  var sceneHeight = Math.max(330, y + 4);
+  GRAPH_STATE.sceneWidth = sceneWidth; GRAPH_STATE.sceneHeight = sceneHeight;
+
+  var selected = graphTask(GRAPH_STATE.selected);
+  var declared = graphDeclaredEdges();
+  var related = selected ? graphRelated(selected.id) : [];
+  var relatedVisible = related.filter(function (r) { return visibleIds[r.task]; });
+  var relatedShown = relatedVisible.slice();
+  if (!GRAPH_STATE.relatedExpanded) relatedShown = relatedShown.slice(0, GRAPH_RELATED_LIMIT);
+  var connected = {};
+  declared.forEach(function (edge) {
+    if (selected && (edge.from === selected.id || edge.to === selected.id)) connected[edge.from === selected.id ? edge.to : edge.from] = true;
+  });
+  relatedShown.forEach(function (r) { connected[r.task] = true; });
+
+  var closedConnections = {};
+  if (selected && !GRAPH_STATE.showCompleted) {
+    declared.forEach(function (edge) {
+      var other = edge.from === selected.id ? edge.to : edge.to === selected.id ? edge.from : "";
+      if (other && graphTask(other) && graphTask(other).phase === "closed") closedConnections[other] = true;
+    });
+    related.forEach(function (r) { if (graphTask(r.task) && graphTask(r.task).phase === "closed") closedConnections[r.task] = true; });
+  }
+  var hiddenCompleted = Object.keys(closedConnections).length;
+
+  var h = '<div class="graph-shell"><div class="graph-controls">' +
+          '<input class="graph-search" id="graphSearch" type="search" aria-label="Search tasks" placeholder="Search tasks" value="' + esc(GRAPH_STATE.query) + '">' +
+          '<button class="ghost' + (GRAPH_STATE.showCompleted ? " pressed" : "") + '" id="graphCompleted">' +
+            (GRAPH_STATE.showCompleted ? "Hide completed" : "Show completed") + '</button>' +
+          '<button class="ghost' + (GRAPH_STATE.view === "graph" ? " pressed" : "") + '" id="graphView">Graph</button>' +
+          '<button class="ghost' + (GRAPH_STATE.view === "list" ? " pressed" : "") + '" id="listView">List</button>' +
+          '<span class="graph-count">' + visible.length + ' shown · ' + tasks.length + ' total</span>' +
+          '<span class="grow"></span><span class="graph-zoom"><button class="ghost" id="graphZoomOut" aria-label="Zoom out">−</button>' +
+          '<button class="ghost" id="graphFit">Fit</button><button class="ghost" id="graphZoomIn" aria-label="Zoom in">+</button></span></div>';
+  h += '<div class="graph-key" aria-label="Connection legend"><span><i class="dep"></i>Unlocks (prerequisite → dependent)</span>' +
+       '<span><i class="rel"></i>Related work</span></div>';
+
+  if (selected) {
+    var declaredCount = declared.filter(function (edge) { return edge.from === selected.id || edge.to === selected.id; }).length;
+    h += '<div class="graph-focus"><strong>' + esc(readableTaskTitle(selected)) + '</strong>' +
+         '<span>' + declaredCount + (declaredCount === 1 ? " dependency" : " dependencies") + '</span>';
+    if (!D.code_map_available) {
+      h += '<span>Code-related links unavailable — no code map is loaded.</span>';
+    } else if (!related.length) {
+      h += '<span>No code-related links were found in the loaded map.</span>';
+    } else {
+      h += '<span>' + (relatedShown.length < relatedVisible.length
+           ? "Showing " + relatedShown.length + " of " + relatedVisible.length + " visible related links."
+           : relatedShown.length + (relatedShown.length === 1 ? " visible related link." : " visible related links.")) + '</span>';
+      if (relatedShown.length < relatedVisible.length && !GRAPH_STATE.relatedExpanded) h += '<button class="ghost" id="graphMoreRelated">Show all related</button>';
     }
-    h += "</section>";
+    if (hiddenCompleted) {
+      h += '<span>' + hiddenCompleted + (hiddenCompleted === 1 ? " connection" : " connections") +
+           ' to completed work.</span><button class="ghost" id="graphShowCompleted">Show completed</button>';
+    }
+    h += '<button id="graphDetails">Details</button></div>';
   }
-  h += "</div>";
-  el("tasks").innerHTML = h;
-  Array.prototype.forEach.call(el("tasks").querySelectorAll(".trow"), function (row) {
-    row.onclick = function () { openTask(row.getAttribute("data-task")); };
+
+  if (!visible.length) {
+    h += '<div class="graph-empty">No tasks match this view. Clear the search or show completed work.</div></div>';
+    el("tasks").innerHTML = h; bindGraphControls(); restoreGraphFocus(savedFocus); return;
+  }
+
+  if (GRAPH_STATE.view === "list") {
+    h += '<div class="graph-list" aria-label="Task list">';
+    visible.forEach(function (t) {
+      var owners = taskOwners(t), holds = Number(t.files_held || 0);
+      h += '<button class="graph-list-row" id="graphNode-' + GRAPH_STATE.rank[t.id] + '" data-graph-task="' + esc(t.id) + '" title="' + esc(t.title || "Untitled task") + '">' +
+           '<span class="graph-orb">' + esc(taskStatus(t).slice(0, 1)) + '</span><span class="graph-title">' + esc(readableTaskTitle(t)) + '</span>' +
+           '<span class="graph-meta"><span class="status">' + esc(taskStatus(t)) + '</span>' +
+           (owners.length ? '<span>' + esc(owners.map(function (o) { return "@" + o; }).join(", ")) + '</span>' : '<span>Unassigned</span>') +
+           (holds ? '<span>' + holds + (holds === 1 ? " hold" : " holds") + '</span>' : "") + '</span></button>';
+    });
+    h += '</div></div>';
+    el("tasks").innerHTML = h; bindGraphControls(); restoreGraphFocus(savedFocus); return;
+  }
+
+  function graphCurve(from, to) {
+    var fx = from.x + 25, fy = from.y + from.h / 2;
+    var tx = to.x + 25, ty = to.y + to.h / 2;
+    var dx = tx - fx, dy = ty - fy, length = Math.sqrt(dx * dx + dy * dy) || 1;
+    var sx = fx + dx / length * 20, sy = fy + dy / length * 20;
+    var ex = tx - dx / length * 20, ey = ty - dy / length * 20;
+    if (Math.abs(dx) > 30) {
+      var midX = (sx + ex) / 2;
+      return "M" + sx + "," + sy + " C" + midX + "," + sy + " " + midX + "," + ey + " " + ex + "," + ey;
+    }
+    var midY = (sy + ey) / 2;
+    return "M" + sx + "," + sy + " C" + sx + "," + midY + " " + ex + "," + midY + " " + ex + "," + ey;
+  }
+  var lines = '';
+  declared.forEach(function (edge) {
+    if (!visibleIds[edge.from] || !visibleIds[edge.to]) return;
+    var from = positions[edge.from], to = positions[edge.to];
+    var dim = selected && edge.from !== selected.id && edge.to !== selected.id;
+    lines += '<path class="graph-edge dependency' + (dim ? " dim" : "") + '" d="' + graphCurve(from, to) +
+             '" marker-end="url(#taskArrow)"><title>Unlocks dependent task</title></path>';
   });
-  var fold = el("tfold");
-  if (fold) {
-    fold.onclick = function () {
-      var box = el("tdone");
-      box.hidden = !box.hidden;
-      OPEN_RESULTS = !box.hidden;
-      fold.querySelector(".tfoldc").textContent = box.hidden ? "show" : "hide";
-    };
-  }
+  relatedShown.forEach(function (relation) {
+    if (!selected || !positions[selected.id] || !positions[relation.task]) return;
+    var from = positions[selected.id], to = positions[relation.task];
+    lines += '<path class="graph-edge related" d="' + graphCurve(from, to) + '"><title>Related work</title></path>';
+  });
+  var nodes = '';
+  visible.forEach(function (t) {
+    var p = positions[t.id], owners = taskOwners(t), holds = Number(t.files_held || 0);
+    var classes = 'graph-node p-' + esc(t.phase) + (t.id === GRAPH_STATE.selected ? " selected" : "") + (connected[t.id] ? " connected" : "");
+    nodes += '<button class="' + classes + '" id="graphNode-' + GRAPH_STATE.rank[t.id] + '" data-graph-task="' + esc(t.id) + '" style="left:' + p.x + 'px;top:' + p.y +
+             'px;min-height:' + p.h + 'px" title="' + esc(t.title || "Untitled task") + ' — ' + esc(taskStatus(t)) + '" aria-label="' +
+             esc((t.title || "Untitled task") + ". " + taskStatus(t)) + '">' +
+             '<span class="graph-orb" aria-hidden="true">' + esc(taskStatus(t).slice(0, 1)) + '</span><span class="graph-label">' +
+             '<span class="graph-title">' + esc(readableTaskTitle(t)) + '</span><span class="graph-meta"><span class="status">' +
+             esc(taskStatus(t)) + '</span>' +
+             (owners.length ? '<span>' + esc(owners.map(function (o) { return "@" + o; }).join(", ")) + '</span>' : '<span>Unassigned</span>') +
+             (holds ? '<span>' + holds + (holds === 1 ? " hold" : " holds") + '</span>' : "") + '</span></span></button>';
+  });
+  var scaledWidth = Math.ceil(sceneWidth * GRAPH_STATE.zoom), scaledHeight = Math.ceil(sceneHeight * GRAPH_STATE.zoom);
+  h += '<div class="graph-viewport" id="graphViewport" tabindex="0" aria-label="Task connection graph">' +
+       '<div class="graph-camera" style="width:' + scaledWidth + 'px;height:' + scaledHeight + 'px">' +
+       '<div class="graph-scene" style="width:' + sceneWidth + 'px;height:' + sceneHeight + 'px;transform:scale(' + GRAPH_STATE.zoom + ')">' +
+       '<svg width="' + sceneWidth + '" height="' + sceneHeight + '" aria-hidden="true"><defs><marker id="taskArrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path class="graph-arrow" d="M0,0 L7,3.5 L0,7 z"></path></marker></defs>' +
+       lines + '</svg>' + nodes + '</div></div></div></div>';
+  el("tasks").innerHTML = h;
+  var viewport = document.getElementById("graphViewport");
+  if (viewport) { viewport.scrollLeft = GRAPH_STATE.left; viewport.scrollTop = GRAPH_STATE.top; }
+  bindGraphControls();
+  restoreGraphFocus(savedFocus);
 }
 
 /* One task, in full. Opened from a row rather than always on screen: the list
@@ -2398,6 +2801,28 @@ function openTask(id) {
 
   h += '<div class="tdet-sec">Visual evidence</div><div class="tdet-note">No screenshots linked here yet.</div>';
   h += '<details class="technical-details" id="taskTechnical"' + (expanded ? " open" : "") + '><summary id="taskTechnicalToggle">Files and code connections</summary>';
+
+  // RECORDED DIRECTION, kept separate from the undirected map relation below.
+  // The kind and provides note are technical detail, but they are also the
+  // evidence for why one task really comes after another.
+  var declaredForTask = graphDeclaredEdges().filter(function (edge) {
+    return edge.from === id || edge.to === id;
+  });
+  if (declaredForTask.length) {
+    h += '<div class="tdet-sec">DECLARED DEPENDENCIES (' + declaredForTask.length + ')</div><div class="tdet-files">';
+    declaredForTask.forEach(function (edge) {
+      var incoming = edge.to === id;
+      var otherId = incoming ? edge.from : edge.to;
+      var other = graphTask(otherId);
+      h += '<div class="tfrow tmeet" data-task="' + esc(otherId) + '">' +
+           '<span class="tfdot ' + (incoming ? "wait" : "done") + '"></span>' +
+           '<span class="tfpath">' + (incoming ? "Depends on " : "Used by ") +
+             esc(other ? readableTaskTitle(other) : otherId) + '</span>' +
+           '<span class="tfstate">' + esc(edge.kind || "sequence") +
+             (edge.provides ? " · " + esc(edge.provides) : "") + '</span></div>';
+    });
+    h += '</div>';
+  }
 
   // WHAT ELSE THIS MEETS, from the code map rather than from anybody declaring
   // it. This is the join the whole thing was for: the log knows which files the
@@ -2544,6 +2969,12 @@ function renderAlarms() {
 /* ---------- driver ------------------------------------------------------ */
 
 function renderAll(d) {
+  // A pushed snapshot for the same project refreshes facts without moving the
+  // reader's camera or clearing their focus.  A project switch is a new scene
+  // and must not inherit a hidden completed filter or an unrelated selection.
+  var nextProject = d && (d.store_key || d.root || "");
+  if (D) rememberGraphCamera();
+  if (GRAPH_STATE.projectKey !== nextProject) GRAPH_STATE = freshGraphState(nextProject);
   D = d;
   if (d.error) {
     el("alarms").innerHTML = '<span class="alarm r">' + esc(d.error) + "</span>";

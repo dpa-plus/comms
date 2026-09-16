@@ -7,12 +7,14 @@ The README has the short version. This is the rest of it.
 COMMS_ACTOR=human-you comms-graph ui   # http://127.0.0.1:7878, every project in one tab
 ```
 
-It opens on **the work**: tasks in progress, checking, waiting and up next,
-followed by recent results. The **Team** panel shows who has reported recently
+It opens on **the work**: a graph of open tasks, labelled by their names rather
+than technical IDs. **Show completed** adds finished work without hiding open
+tasks; **List** provides a simpler alternative. The **Team** panel shows who has reported recently
 and who holds files; the **Projects** rail scopes the view to one project.
 Last-reported times are evidence of an update, not proof an agent is still running.
 
-Click a task for its owner, checks, held files and history. **History** also opens
+Click a node to focus its connections, then **Details** for its checks, files
+and history. Each node names its owner and hold count. **History** also opens
 the project timeline; agent history buttons filter it to that person. Older
 events remain available through **Load earlier**, including after an agent leaves
 the current Team panel. Technical details stay collapsed until needed.
@@ -42,11 +44,22 @@ claimed work, so an empty hold list does not imply nobody is working.
 
 Run it **once** and watch every repo. Agents never open anything. They write to their logs, which this board already sees.
 
-**Connections** opens the selected project's **Task graph** or **Code map**.
-The task graph draws declared dependencies; unconnected tasks are currently
-listed separately, with finished work collapsed. The code map describes code
-relationships, not an inferred order of work. A graph-first main view is separate
-follow-up work, not part of this release.
+The main graph distinguishes two kinds of connection: solid arrows run from a
+prerequisite to the task it unlocks; dashed lines indicate related code, not a
+dependency. Code-related lines appear around the selected task, with up to twelve
+visible links initially and an explicit option to show more. Connections to
+hidden completed tasks are counted separately. A missing code map is labelled
+as unavailable, not mistaken for evidence that tasks are unrelated.
+
+Search, selection, zoom and scroll remain in place through live updates within
+one project. Switching projects resets those controls. Titles wrap rather than
+being cut off, and keyboard focus stays on the search or selected node after an
+update. The layout is static, with no moving physics simulation.
+
+**Connections** still opens the selected project's secondary **Task graph** or
+**Code map** for a deeper look. The code map describes code relationships, not
+an inferred order of work. Recorded dependency kinds and notes remain available
+inside a task's collapsed technical details.
 
 The browser receives snapshots through **Server-Sent Events**. The server checks
 for changes every half second and also sends a fresh snapshot after roughly ten

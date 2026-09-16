@@ -8,6 +8,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Graph-first work view with readable task names, owners and holds. Open work is
+  shown first; completed work, search, zoom, keyboard selection and a list
+  alternative are available without leaving the board.
+- Distinct declared dependency arrows and focused, undirected code connections,
+  with explicit link expansion and missing-map/hidden-completed explanations.
 - Task-first dashboard with current owners, held scopes, recent results and a
   responsive Team panel. Project, task and agent histories load older events
   without dropping the current view.
@@ -16,6 +21,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Live graph updates preserve search text, keyboard focus, selection and scroll.
+- Multi-word task search retains spaces and leaves no unrelated task selected
+  when there are no matches.
 - Dashboard connection status now distinguishes a loaded snapshot from an open
   connection, retains prior data on invalid updates and labels delayed streams.
 - Indexed literal release scopes to avoid repeatedly scanning all release
