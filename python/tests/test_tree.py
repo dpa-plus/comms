@@ -12,10 +12,13 @@ import io
 import os
 import shutil
 import subprocess
+import time
 from contextlib import redirect_stderr, redirect_stdout
+from datetime import datetime, timezone
 
 import pytest
 
+from comms_graph import state as cstate
 from comms_graph import tree as ctree
 
 GIT = shutil.which("git")
@@ -167,6 +170,85 @@ def test_a_released_claim_still_says_who_had_it(tmp_path, monkeypatch):
     report = ctree.survey(repo, _state(repo))
     assert report.changes[0].actor == "alpha"
     assert report.changes[0].basis == "released"
+
+
+def test_release_attribution_does_not_rescan_the_whole_literal_history(monkeypatch):
+    """IF THIS FAILS: every dirty path scans every historic release scope.
+
+    A real store reached 2,456 releases and 270 changed paths, making the first
+    dashboard snapshot spend about nine seconds here. Literal scopes can be
+    indexed once; they must not pay one overlap calculation per path/release.
+    """
+    now = datetime.now(timezone.utc)
+    releases = [
+        cstate.Release(
+            id=f"release-{i}", ts=now, actor=f"actor-{i}",
+            scopes=[f"archive/file-{i}.py"],
+        )
+        for i in range(1200)
+    ]
+    report = ctree.TreeReport(changes=[
+        ctree.Attributed(ctree.Change(path=f"work/file-{i}.py"))
+        for i in range(250)
+    ])
+    state = cstate.State(releases=releases)
+
+    real_covers = ctree._covers
+    calls = 0
+
+    def counted_covers(scope, path):
+        nonlocal calls
+        calls += 1
+        return real_covers(scope, path)
+
+    monkeypatch.setattr(ctree, "_covers", counted_covers)
+    started = time.monotonic()
+    attributed = ctree.attribute(report, state)
+    elapsed = time.monotonic() - started
+
+    assert all(not row.actor for row in attributed.changes)
+    assert calls <= len(report.changes), (
+        f"literal release history caused {calls} overlap checks for "
+        f"{len(report.changes)} changed paths"
+    )
+    assert elapsed < 1.0, f"literal release attribution took {elapsed:.3f}s"
+
+
+def test_indexed_releases_keep_latest_wildcard_anchor_and_directory_semantics():
+    """IF THIS FAILS: making release lookup fast changed who the board names.
+
+    Anchors refine claims but not dirty-file authorship, wildcards still cover
+    descendants, the latest matching release wins across both kinds, and a
+    released child still attributes a collapsed directory row from git.
+    """
+    now = datetime.now(timezone.utc)
+    state = cstate.State(releases=[
+        cstate.Release("r1", now, "old-exact", scopes=["src/item.py#old_handler"]),
+        cstate.Release("r2", now, "new-wildcard", scopes=["src/**#new_handler"]),
+        cstate.Release("r3", now, "latest-exact", scopes=["src/item.py#latest_handler"]),
+        cstate.Release("r4", now, "directory-child", scopes=["pkg/deep/file.py#writer"]),
+        # `paths_overlap` historically treats a star in either argument as a
+        # wildcard. A real POSIX filename may contain one, so the fast path must
+        # preserve that existing answer even though pattern_matches_path would
+        # make a different design choice.
+        cstate.Release("r5", now, "star-old", scopes=["literal/a.py"]),
+        cstate.Release("r6", now, "star-latest", scopes=["literal/z.py#writer"]),
+    ])
+    report = ctree.TreeReport(changes=[
+        ctree.Attributed(ctree.Change(path="src/item.py")),
+        ctree.Attributed(ctree.Change(path="src/nested/other.py")),
+        ctree.Attributed(ctree.Change(path="pkg")),
+        ctree.Attributed(ctree.Change(path="literal/*.py")),
+    ])
+
+    attributed = ctree.attribute(report, state)
+
+    assert [(row.change.path, row.actor, row.basis) for row in attributed.changes] == [
+        ("src/item.py", "latest-exact", "released"),
+        ("src/nested/other.py", "new-wildcard", "released"),
+        ("pkg", "directory-child", "released"),
+        ("literal/*.py", "star-latest", "released"),
+    ]
 
 
 def test_a_file_nobody_declared_is_reported_as_unknown_not_guessed(tmp_path, monkeypatch):
