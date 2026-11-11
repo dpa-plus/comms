@@ -32,6 +32,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from . import identity as _identity
 from . import log as _log
 from . import scope as _scope
 from . import state as _state
@@ -465,6 +466,12 @@ def _emit_status_human(
     since_raw: str,
     stale_after: timedelta,
 ) -> None:
+    store = _log.log_path(root).parent
+
+    def alive(actor: str, fallback: datetime) -> datetime:
+        marked = _identity.last_alive(st, store, actor)
+        return max(marked, fallback) if marked is not None else fallback
+
     all_sessions = _roster(st, now - ACTIVE_WINDOW)
     all_claims = _sorted_claims(st)
     all_docs = _list_docs(root)
@@ -485,7 +492,7 @@ def _emit_status_human(
         role = "  leader" if session.leader else ""
         label = f" ({session.label})" if session.label else ""
         named = f'  session="{session.session_name}"' if session.session_name else ""
-        silent = now - _last_seen(session)
+        silent = now - alive(session.actor, _last_seen(session))
         seen = "active now" if silent < timedelta(minutes=1) else f"seen {_short_age(silent)} ago"
         # Holding locks WHILE silent is the crash signal. Silence on its own is
         # an idle agent and perfectly benign; locks on their own are somebody
@@ -510,7 +517,8 @@ def _emit_status_human(
         # same as one opened 2m ago: that difference is the whole basis for
         # deciding whether to go around somebody.
         age = now - claim.ts
-        stale = "  STALE" if age >= stale_after else ""
+        stale = ("  STALE" if age >= stale_after
+                 and now - alive(claim.actor, claim.ts) >= stale_after else "")
         when = claim.ts.astimezone().strftime("%H:%M")
         print(
             f"  @{claim.actor:<14} {claim.scope}   \"{claim.intent}\"   "
