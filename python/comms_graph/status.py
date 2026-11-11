@@ -390,16 +390,6 @@ def _list_docs(root: Path) -> list[str]:
     return _markdown_slugs(root / ".comms" / "docs")
 
 
-def _list_global_lessons() -> list[str]:
-    try:
-        home = _log.user_data_home()
-    except (RuntimeError, OSError):
-        # An unsupported platform has no lessons directory to list. That costs a
-        # decorative line; it must not cost the roster and the claims.
-        return []
-    return _markdown_slugs(home / "comms" / "global" / "lessons")
-
-
 def _limit_head(items: list, cap: int) -> tuple[list, int]:
     if len(items) <= cap:
         return items, 0
@@ -475,14 +465,12 @@ def _emit_status_human(
     all_sessions = _roster(st, now - ACTIVE_WINDOW)
     all_claims = _sorted_claims(st)
     all_docs = _list_docs(root)
-    all_lessons = _list_global_lessons()
     sessions, omitted_sessions = _limit_head(all_sessions, 10)
     claims, omitted_claims = _limit_tail(all_claims, 50)
     findings = _recent(st.findings, cutoff, 5)
     notes = _recent(st.notes, cutoff, 3)
     docs, omitted_docs = _limit_head(all_docs, 10)
-    lessons, omitted_lessons = _limit_head(all_lessons, 8)
-    omitted = omitted_sessions + omitted_claims + omitted_docs + omitted_lessons
+    omitted = omitted_sessions + omitted_claims + omitted_docs
 
     print(f"ACTIVE SESSIONS (active in last {_short_age(ACTIVE_WINDOW)})")
     if not sessions:
@@ -545,9 +533,6 @@ def _emit_status_human(
     if docs:
         print()
         print(f"DOCS ({len(docs)}): {', '.join(docs)}")
-    if lessons:
-        print()
-        print(f"GLOBAL LESSONS ({len(lessons)}): {', '.join(lessons)}")
     if omitted:
         print()
         print(f"... {omitted} more; run `comms-graph log --since {since_raw}` for details")
@@ -638,7 +623,6 @@ def _emit_status_json(
         "findings": [],
         "notes": [],
         "docs": _list_docs(root),
-        "lessons": _list_global_lessons(),
         "tasks": [],
     }
     for s in _roster(st, now - ACTIVE_WINDOW):

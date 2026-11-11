@@ -412,16 +412,12 @@ def test_the_whole_lifecycle_through_the_cli(tmp_path, monkeypatch):
     run are not. plan -> next -> done -> review -> unblocked is the path every
     piece of work takes, and it has to hold end to end."""
     repo = _repo(tmp_path, monkeypatch)
-    plan = repo / "plan.json"
-    plan.write_text(
-        '{"tasks":[{"id":"auth-api","title":"Auth API","checks":["test"]},'
-        '{"id":"login-ui","title":"Login"}],'
-        '"edges":[{"from":"auth-api","to":"login-ui","kind":"interface",'
-        '"provides":"POST /session returns a JWT"}]}'
-    )
-    code, out = _cli(repo, "plan", "--from", str(plan), "--as", "planner")
+    assert _cli(repo, "task", "add", "auth-api", "--title", "Auth API", "--check", "test",
+                "--as", "planner")[0] == 0
+    assert _cli(repo, "task", "add", "login-ui", "--title", "Login", "--as", "planner")[0] == 0
+    code, out = _cli(repo, "task", "edge", "auth-api", "login-ui", "--kind", "consumes",
+                     "--provides", "POST /session returns a JWT", "--as", "planner")
     assert code == 0, out
-    assert "2 task(s), 1 edge(s)" in out
 
     code, out = _cli(repo, "next", "--as", "claude-dev")
     assert "auth-api" in out and "login-ui" not in out, "a blocked task is not startable"
@@ -454,13 +450,10 @@ def test_brief_carries_the_upstream_decision_to_whoever_picks_up_next(tmp_path, 
     reason this verb exists is that what somebody worked out while building A is
     exactly what whoever builds B needs, and nothing else moves it across."""
     repo = _repo(tmp_path, monkeypatch)
-    plan = repo / "plan.json"
-    plan.write_text(
-        '{"tasks":[{"id":"auth-api","checks":[],"review":true},{"id":"login-ui"}],'
-        '"edges":[{"from":"auth-api","to":"login-ui","kind":"interface",'
-        '"provides":"POST /session returns a JWT"}]}'
-    )
-    _cli(repo, "plan", "--from", str(plan), "--as", "planner")
+    _cli(repo, "task", "add", "auth-api", "--review", "--as", "planner")
+    _cli(repo, "task", "add", "login-ui", "--as", "planner")
+    _cli(repo, "task", "edge", "auth-api", "login-ui", "--kind", "consumes",
+         "--provides", "POST /session returns a JWT", "--as", "planner")
     _cli(repo, "task", "done", "auth-api", "--as", "claude-dev",
          "--note", "15 minute expiry, refresh via cookie")
 
@@ -472,21 +465,21 @@ def test_brief_carries_the_upstream_decision_to_whoever_picks_up_next(tmp_path, 
 
 
 def test_a_cycle_is_refused_before_anything_is_written(tmp_path, monkeypatch):
-    """IF THIS FAILS: a plan can put itself into a state the board can only
+    """IF THIS FAILS: an edge can put the graph into a state the board can only
     describe as unreachable. The fold survives a cycle, but surviving it is not
     the same as it being usable."""
     repo = _repo(tmp_path, monkeypatch)
-    bad = repo / "bad.json"
-    bad.write_text('{"tasks":[{"id":"x"},{"id":"y"}],'
-                   '"edges":[{"from":"x","to":"y"},{"from":"y","to":"x"}]}')
-    code, out = _cli(repo, "plan", "--from", str(bad), "--as", "planner")
+    for tid in ("x", "y"):
+        _cli(repo, "task", "add", tid, "--as", "planner")
+    assert _cli(repo, "task", "edge", "x", "y", "--as", "planner")[0] == 0
+    code, out = _cli(repo, "task", "edge", "y", "x", "--as", "planner")
     assert code == 2
     assert "loop" in out
 
     from comms_graph import log as _l
     from comms_graph import state as _s
     st = _s.fold(_l.read(_l.log_path(repo)))
-    assert "x" not in st.tasks and "y" not in st.tasks, "a refused plan must write nothing"
+    assert [(e.from_, e.to) for e in st.task_edges] == [("x", "y")], "a refused edge must write nothing"
 
 
 def test_an_id_that_is_not_speakable_is_refused(tmp_path, monkeypatch):
@@ -1388,7 +1381,6 @@ def test_help_on_a_leaf_verb_explains_it_instead_of_running_it(tmp_path, monkeyp
         ("task", "review", "--help"),
         ("brief", "--help"),
         ("next", "--help"),
-        ("plan", "--help"),
         ("claim", "--help"),
         ("board", "--help"),
         ("tasks", "--out", str(out_file), "--help"),

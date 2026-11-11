@@ -75,20 +75,17 @@ USAGE = """Usage: comms-graph <command>
   hook session-start|pre-edit|session-end       Claude Code hooks (JSON on stdin)
 
   task add|edge|done|review ...                 declare and move work
-  plan --from <file.json>                       a whole plan, atomically
   next [--as <actor>]                           what you could start now
   brief <task-id>                               what it is, and what came before
   find <category> "..." [--ref kind:value]      something worth keeping
   note "..."                                    a short FYI
   doc [--list | <slug> [--edit]]                the repo's own wiki
-  lesson [--list | <slug> [--edit]]             knowledge across every repo
 
   session start|join|end|retire|lead ...        named coordination windows
   status [--since 24h]                          who is here, what is held
   log [--type ...] [--since ...]                the history, filtered
   hello [--label "..."]                         announce yourself
   mcp                                           serve these as MCP tools
-  completion bash|zsh                           shell tab-completion
   version
   help
   tasks [--out <file.html>]                     draw the task graph
@@ -2483,134 +2480,6 @@ def _cmd_brief(argv: list[str]) -> int:
     return EXIT_OK
 
 
-def _cmd_plan(argv: list[str]) -> int:
-    _, flags = _parse_flags(argv)
-    source = flags.get("from")
-    if not source:
-        _err("error: plan needs --from <file.json>")
-        _err('  {"tasks": [{"id": "api", "title": "...", "checks": ["test"], "review": true}],')
-        _err('   "edges": [{"from": "api", "to": "ui", "kind": "interface", "provides": "..."}]}')
-        return EXIT_USAGE
-    actor = _actor(flags)
-    _, log_file, lock_file = _task_runtime(flags)
-    try:
-        raw = json.loads(Path(source).expanduser().read_text(encoding="utf-8"))
-    except OSError as exc:
-        _err(f"error: cannot read {source}: {exc.strerror}")
-        return EXIT_USAGE
-    except json.JSONDecodeError as exc:
-        _err(f"error: {source} is not valid JSON: {exc}")
-        return EXIT_USAGE
-
-    if not isinstance(raw, dict):
-        _err(f"error: {source} must contain a JSON object, not a "
-             f"{type(raw).__name__}")
-        _err('  Expected {"tasks": [...], "edges": [...]}.')
-        return EXIT_USAGE
-    _plan_state = _read_state(log_file)
-    _plan_greeting_holder = [_hello_if_unknown(_plan_state, actor)]
-    tasks = raw.get("tasks") or []
-    edges = raw.get("edges") or []
-    if not isinstance(tasks, list) or not isinstance(edges, list):
-        _err("error: 'tasks' and 'edges' must both be lists")
-        return EXIT_USAGE
-
-    # Validate the WHOLE plan before a single byte is written. A half-applied
-    # plan is worse than a refused one: the graph would claim a shape nobody
-    # designed, and the missing half is invisible.
-    declared: set[str] = set()
-    # Minted FIRST, before any task event exists, because fold() orders by
-    # timestamp. Every other command was fixed for this; the plan path was
-    # missed, and a real five-agent run caught it: the planner's hello carried
-    # a timestamp 426us LATER than the tasks it was appended ahead of, so the
-    # log's ids and timestamps disagreed about order.
-    events: list = []
-    for item in tasks:
-        if not isinstance(item, dict):
-            _err(f"error: every task must be an object, got {type(item).__name__}")
-            return EXIT_USAGE
-        slug = _slug_or_exit(str(item.get("id") or ""))
-        declared.add(slug)
-        data: dict = {"task": slug}
-        # A plan can ask for review per task, the same way `task add --review`
-        # does. Without this a decomposition could not express "this one needs
-        # checking" at all, which is exactly where it matters most.
-        if item.get("review"):
-            data["review"] = True
-        for key in ("title", "size", "ref"):
-            if item.get(key):
-                data[key] = str(item[key])
-        if item.get("checks"):
-            checks = item["checks"]
-            if isinstance(checks, str):
-                # A string is iterable, so this used to become one check per
-                # CHARACTER: "test" turned into t, e, s, t: four checks that
-                # can never pass, on a field whose entire job is to gate.
-                _err(f"error: task {slug!r} has checks={checks!r}; "
-                     "it must be a list, e.g. [\"test\"]")
-                return EXIT_USAGE
-            if not isinstance(checks, list):
-                _err(f"error: task {slug!r} has checks of type "
-                     f"{type(checks).__name__}; it must be a list")
-                return EXIT_USAGE
-            data["checks"] = [str(c) for c in checks]
-        events.append(_tagged(_plan_state, actor, _log.TYPE_TASK, None, data))
-
-    pending: list = []
-    for item in edges:
-        if not isinstance(item, dict):
-            _err(f"error: every edge must be an object, got {type(item).__name__}")
-            return EXIT_USAGE
-        from_ = _slug_or_exit(str(item.get("from") or ""), "edge 'from'")
-        to = _slug_or_exit(str(item.get("to") or ""), "edge 'to'")
-        for end in (from_, to):
-            if end not in declared:
-                _err(f"error: edge names {end!r}, which this plan does not declare")
-                return EXIT_USAGE
-        if from_ == to:
-            _err(f"error: {from_!r} cannot come after itself")
-            return EXIT_USAGE
-        kind = str(item.get("kind") or _task.EDGE_SEQUENCE).lower()
-        kind = _task._EDGE_ALIASES.get(kind, kind)
-        if kind not in (_task.EDGE_CONSUMES, _task.EDGE_SEQUENCE):
-            _err(f"error: edge kind {kind!r} is not one of consumes, sequence")
-            return EXIT_USAGE
-        if _task.would_cycle(pending, from_, to):
-            _err(f"error: this plan contains a dependency loop: {from_} -> {to} closes it")
-            return EXIT_USAGE
-        pending.append(_task.TaskEdge(from_=from_, to=to, kind=kind))
-        data = {"from": from_, "to": to, "kind": kind}
-        if item.get("provides"):
-            data["provides"] = str(item["provides"])
-        events.append(_tagged(_plan_state, actor, _log.TYPE_TASK_EDGE, None, data))
-
-    if not events:
-        print("nothing to do: the plan declares no tasks and no edges")
-        return EXIT_OK
-
-    with _lock.file_lock(lock_file) as handle:
-        broken = handle.compromised()
-        if broken:
-            _err(f"error: the coordination lock is no longer exclusive: {broken}")
-            return EXIT_ERROR
-        st = _read_state(log_file)
-        # A loop can also be closed against edges ALREADY in the log, not just
-        # against the ones in this file.
-        existing = list(st.task_edges)
-        for e in pending:
-            if _task.would_cycle(existing, e.from_, e.to):
-                _err(f"error: {e.from_} -> {e.to} would close a loop with edges already recorded")
-                return EXIT_USAGE
-            existing.append(e)
-        greeting = _plan_greeting_holder[0] if _plan_greeting_holder else None
-        if greeting is not None:
-            events.insert(0, greeting)
-        _log.append_batch(log_file, events)
-    print(f"PLAN recorded: {len(tasks)} task(s), {len(edges)} edge(s)")
-    print("  See what is startable with `comms-graph next`.")
-    return EXIT_OK
-
-
 TASK_USAGE = """Usage: comms-graph task <command>
 
   add <id> --as <actor> [--title "..."] [--size S|M|L]   (a rough scale, not a gate)
@@ -2980,8 +2849,6 @@ def _run(argv: list[str]) -> int:
             return _cmd_guard(rest)
         if sub == "ui":
             return _cmd_ui(rest)
-        if sub == "plan":
-            return _cmd_plan(rest)
         if sub == "find":
             return _cmd_find(rest)
         if sub == "note":
@@ -3007,17 +2874,11 @@ def _run(argv: list[str]) -> int:
         if sub == "version":
             from . import hello as _hello
             return _hello.cmd_version(rest)
-        if sub == "lesson":
-            from . import lesson as _lesson
-            return _lesson.main(rest)
         if sub == "mcp":
             from . import mcp as _mcp
             return _mcp.main(rest)
         if sub == "hook":
             return _hooks.main(rest)
-        if sub == "completion":
-            from . import hello as _hello
-            return _hello.cmd_completion(rest)
     except _lock.LockError as exc:
         _err(f"error: could not take the comms lock: {exc}")
         return EXIT_USAGE

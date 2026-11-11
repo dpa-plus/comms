@@ -20,6 +20,7 @@ from contextlib import redirect_stderr, redirect_stdout
 
 import pytest
 
+from comms_graph import __version__
 from comms_graph import cli as ccli
 from comms_graph import hello as chello
 from comms_graph import log as clog
@@ -52,7 +53,7 @@ def _run(repo, *args, session=None, env=None):
         os.environ.update(env or {})
         with redirect_stdout(out), redirect_stderr(err):
             try:
-                code = chello.main(list(args))
+                code = ccli.main(list(args))
             except SystemExit as exc:
                 code = exc.code if isinstance(exc.code, int) else 1
     finally:
@@ -282,20 +283,8 @@ def test_version_prints_the_version_as_the_second_field(tmp_path, monkeypatch):
     assert code == 0
     fields = out.split()
     assert fields[0] == "comms-graph"
-    assert fields[1] and fields[1][0].isdigit() or fields[1] == "dev"
+    assert fields[1] == chello._version() == __version__
     assert len(out.strip().splitlines()) == 1, "one line, so it stays greppable"
-
-
-def test_version_from_a_source_checkout_says_dev_rather_than_failing(monkeypatch):
-    """IF THIS FAILS: running from a checkout: how everyone working ON comms runs
-    it: raises out of a command whose entire job is to answer a question."""
-    from importlib.metadata import PackageNotFoundError
-
-    def _missing(_name):
-        raise PackageNotFoundError(_name)
-
-    monkeypatch.setattr("importlib.metadata.version", _missing)
-    assert chello._version() == "dev"
 
 
 def test_version_refuses_arguments_instead_of_ignoring_them(tmp_path, monkeypatch):
