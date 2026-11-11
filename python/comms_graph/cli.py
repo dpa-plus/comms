@@ -571,6 +571,15 @@ def _rooted_scope(raw: str, root: Path) -> str:
     return rel_text + sep + anchor
 
 
+def _warn_missing_dir(scope_str: str, root: Path) -> None:
+    """One line when the claimed path's directory is not there: usually a typo."""
+    path_part = scope_str.split("#", 1)[0]
+    parent = (root / path_part).parent
+    if parent != root and not parent.exists():
+        _err(f"warning: {parent.relative_to(root)}/ does not exist under {root.name}; "
+             "claimed anyway (a new directory is fine, a typo is not).")
+
+
 def _single_scope_or_exit(positional: list[str], verb: str) -> str:
     """Take exactly one scope, and refuse the spellings that silently lost work.
 
@@ -719,6 +728,7 @@ def _cmd_claim_many(positional: list[str], flags: dict) -> int:
     scopes = []
     for raw in positional:
         scope_str = _rooted_scope(raw, root)
+        _warn_missing_dir(scope_str, root)
         scope = _parse_scope_or_exit(scope_str)
         key = str(scope)
         if key in seen:
@@ -823,6 +833,7 @@ def _cmd_claim(argv: list[str]) -> int:
     intent = flags.get("intent", "")
     root = _repo_root(flags.get("root"))
     scope_str = _rooted_scope(scope_str, root)
+    _warn_missing_dir(scope_str, root)
     scope = _parse_scope_or_exit(scope_str)
     log_file, lock_file = _store(root)
     _warn_if_ephemeral(log_file)
@@ -1008,7 +1019,7 @@ def _cmd_claim(argv: list[str]) -> int:
         print(f"  TAKEN FROM @{stolen_from_actor}: their claim {claim_data['steals']} is ended.")
         print("  Recorded as a steal under your name, with your reason. If they come")
         print("  back and re-claim it, they will be told the same way you were.")
-    advice = _advice(root, flags.get("graph"), scope, others)
+    advice = _advice(root, flags.get("graph"), scope, others) if "map" in flags else ""
     if advice:
         print(advice)
     return EXIT_OK
