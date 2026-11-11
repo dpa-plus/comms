@@ -509,26 +509,24 @@ def test_implicit_hello_never_renames_the_session(tmp_path):
     assert _whoami_actor(repo, SESSION_A) == "lead"
 
 
-def test_explicit_hello_renames_the_session_and_the_latest_wins(tmp_path):
+def test_explicit_hello_adds_a_name_and_never_renames_the_session(tmp_path):
     repo = _repo(tmp_path)
     env = {"CLAUDE_CODE_SESSION_ID": SESSION_A}
     assert _run(repo, ["note", "first", "--as", "lead"], env=env)[0] == 0
     assert _run(repo, ["hello", "--as", "captain"], env=env)[0] == 0
-    assert _run(repo, ["note", "noise", "--as", "sub-1"], env=env)[0] == 0
-    assert _whoami_actor(repo, SESSION_A) == "captain"
-    assert _run(repo, ["hello", "--as", "admiral"], env=env)[0] == 0
-    assert _whoami_actor(repo, SESSION_A) == "admiral"
+    assert _whoami_actor(repo, SESSION_A) == "lead"
+    assert "captain" in cstate.fold(_events(repo)).family_of(SESSION_A)
 
 
-def test_old_logs_without_the_mark_resolve_to_the_first_actor(tmp_path):
+def test_a_session_renamed_by_an_older_build_resolves_to_its_first_actor(tmp_path):
     repo = _repo(tmp_path)
     log_file = clog.log_path(repo)
     log_file.parent.mkdir(parents=True, exist_ok=True)
     t0 = datetime.now(timezone.utc) - timedelta(hours=2)
     clog.append_batch(log_file, [
         clog.Event(ts=t0 + timedelta(minutes=i), id=clog.new_id(), actor=name, type="hello",
-                   scope=None, data={"agent_session": SESSION_A})
+                   scope=None, data={"agent_session": SESSION_A, **({"primary": True} if i else {})})
         for i, name in enumerate(["first-one", "second-one", "third-one"])])
     st = cstate.fold(clog.read(log_file))
-    assert st.families[SESSION_A].own_actor == "first-one"
+    assert st.families[SESSION_A].first_actor == "first-one"
     assert _whoami_actor(repo, SESSION_A) == "first-one"

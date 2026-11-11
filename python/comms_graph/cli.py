@@ -1175,12 +1175,7 @@ def _cmd_release(argv: list[str]) -> int:
         if force:
             return _release_somebody_elses(
                 st, log_file, actor, target, flags.get("reason", "").strip())
-        agent_session = _identity.host_session()
-        names = {actor}
-        family = st.families.get(agent_session)
-        if family is not None and family.own_actor == actor:
-            names.add(_identity.auto_name(st, agent_session))
-        mine = sorted((c for c in st.claims.values() if c.actor in names), key=lambda c: c.ts)
+        mine = sorted((c for c in st.claims.values() if c.actor == actor), key=lambda c: c.ts)
         targets = [p for p in positional if p]
         if not targets:
             if not mine:
@@ -1193,7 +1188,7 @@ def _cmd_release(argv: list[str]) -> int:
             for target in targets:
                 found: list = []
                 by_id = st.claim_by_id(target)
-                if by_id is not None and by_id.actor in names:
+                if by_id is not None and by_id.actor == actor:
                     found = [by_id]
                 else:
                     # Rooted the same way claim roots it, and for the same

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from comms_graph import state as cstate
 
 from .test_session_identity import (
@@ -94,3 +96,51 @@ def test_two_sessions_with_one_specific_comms_actor_still_block_each_other(tmp_p
     assert _edit_env(repo, "src/a.py", SESSION_A, env)[0] == 0
     _dirty(repo, "src/a.py")
     assert _edit_env(repo, "src/a.py", SESSION_B, env)[0] == 2
+
+
+# ---------------------------------------------------------------------------
+# finding 5: a subagent's name never takes over its lead
+# ---------------------------------------------------------------------------
+
+
+def _lead_holding_two(repo):
+    env = {"CLAUDE_CODE_SESSION_ID": SESSION_A}
+    _start_store(repo)
+    (repo / "src" / "c.py").write_text("c = 1\n")
+    code, out, err = _run(repo, ["claim", "src/a.py", "--intent", "real work"], env=env)
+    assert code == 0, out + err
+    lead = out.split(" by @", 1)[1].split()[0]
+    assert _edit(repo, "src/c.py", SESSION_A)[0] == 0
+    return env, lead
+
+
+def _actorless_name(repo, env):
+    code, out, err = _run(repo, ["note", "probe"], env=env)
+    assert code == 0, out + err
+    return out.split(" by @", 1)[1].split()[0]
+
+
+def test_a_subagents_hello_does_not_take_over_its_lead(tmp_path):
+    repo = _repo(tmp_path)
+    env, lead = _lead_holding_two(repo)
+    assert _run(repo, ["hello", "--as", "sub-reviewer"], env=env)[0] == 0
+    assert _actorless_name(repo, env) == lead
+    code, out, _ = _run(repo, ["whoami"], env=env)
+    assert out.startswith(f"@{lead} "), out
+    assert "sub-reviewer" in cstate.fold(_events(repo)).family_of(SESSION_A)
+
+
+@pytest.mark.parametrize("how", ["bare", "--all-mine", "--latest", "path", "id"])
+def test_release_under_a_subagents_name_frees_nothing_of_its_leads(tmp_path, how):
+    repo = _repo(tmp_path)
+    env, lead = _lead_holding_two(repo)
+    assert _run(repo, ["hello", "--as", "sub-reviewer"], env=env)[0] == 0
+    target = {"bare": [], "--all-mine": ["--all-mine"], "--latest": ["--latest"],
+              "path": ["src/a.py"], "id": [_claims(repo)["src/a.py"].id]}[how]
+
+    _run(repo, ["release", "--as", "sub-reviewer", *target], env=env)
+
+    held = _claims(repo)
+    assert held["src/a.py"].actor == lead, "the lead's claim is still held"
+    assert held["src/c.py"].actor == lead, "the lead's auto-claim is still held"
+    assert not [e for e in _events(repo) if e.type == "release"]

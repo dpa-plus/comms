@@ -1,9 +1,9 @@
 """Who is calling: one resolver for every verb, and the liveness marker.
 
 Resolution order: ``--as``, ``COMMS_ACTOR``, the session's own actor (the first
-one tied to the host agent session in this repo's log, or the latest ``hello
---as``), an auto-name derived from that session, else a one-line error. "Mine" is a session family (see ``state.SessionFamily``), not
-a single name.
+one tied to the host agent session in this repo's log), an auto-name derived
+from that session, else a one-line error. On the edit path a claim is the
+caller's by the agent session recorded on it (see ``owns``), not by name.
 """
 
 from __future__ import annotations
@@ -72,8 +72,8 @@ def resolve(explicit: str, st_for_session, agent_session: str, *,
         return None
     st = st_for_session()
     family = st.families.get(agent_session) if st is not None else None
-    if family is not None and family.own_actor:
-        return Resolved(family.own_actor, "session")
+    if family is not None and family.first_actor:
+        return Resolved(family.first_actor, "session")
     return Resolved(auto_name(st, agent_session), "auto")
 
 
