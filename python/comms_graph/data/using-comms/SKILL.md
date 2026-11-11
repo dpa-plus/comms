@@ -46,13 +46,13 @@ You do not need to say hello, and you do not need `--as` on every call. Your ses
 
 ## Choosing a name
 
-Your session is named for you, for example `claude-4f9a1c`. To use a role name, run this once:
+Your session is named for you, for example `claude-4f9a1c`, and a call with no `--as` uses that name. Give it a label so the person watching can tell what you are doing:
 
 ```bash
-comms hello --as claude-billing --label "Billing fixes"
+comms hello --label "Billing fixes"
 ```
 
-Later calls in the session use that name. Pick a name that tells two agents apart. `claude`, `codex`, `agent` and `user` are refused.
+To work under a role name, pass `--as claude-billing` on each call. A name holds only the claims made under it, so release with the same name you claimed with. Pick a name that tells two agents apart. `claude`, `codex`, `agent` and `user` are refused.
 
 ## Looking around
 

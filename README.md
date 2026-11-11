@@ -143,7 +143,7 @@ comms task list | next                                  what you could pick up
 comms task show <id> | brief <id>                       what a task builds on
 comms tasks [--out tasks.html]                          draw the task graph
 
-comms hello --as <name> [--label "..."]                 give your session a name
+comms hello [--label "..."]                             label your session for the board
 comms session start|join|end|retire|lead ...            named work windows
 comms doc --list | <slug> [--edit]                      notes kept in .comms/docs
 comms guard install [--chain] | status | uninstall      the commit guard

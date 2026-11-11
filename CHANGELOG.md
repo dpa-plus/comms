@@ -23,9 +23,9 @@ events. Upgrading has one step, `sh install.sh`, described in
   the two builds had drifted apart in eight behaviors.
 - **Identity comes from the session.** An agent no longer needs `hello`,
   `COMMS_ACTOR` or `--as`. Its session gets a name on first use, and later
-  calls resolve to it. `--as` still wins when given, and `hello --as <role>`
-  renames the session. Every name tied to one session counts as the same
-  owner, so a session is never blocked by its own claim. Before this, the
+  calls resolve to it. `--as` still wins when given. A claim records the
+  session that made it, so a session is never blocked by its own claim under
+  any name, and two sessions that share a name still block each other. Before this, the
   session-start hook failed on every recorded run and half of the early hook
   blocks were an agent blocked by itself.
 - **The first edit claims the file.** `hook pre-edit` records a claim the first
