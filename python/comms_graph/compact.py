@@ -34,10 +34,15 @@ def _age(delta: timedelta) -> str:
     return f"{minutes // (24 * 60)}d"
 
 
-def _names(st: _state.State, me: str) -> frozenset[str]:
+def _session_names(st: _state.State, me: str) -> frozenset[str]:
     if not me:
         return frozenset()
     return st.family_of(_identity.host_session()) | {me}
+
+
+def _also_line(st: _state.State, me: str) -> list[str]:
+    line = _identity.other_names_line(st, _identity.host_session(), me) if me else ""
+    return [line] if line else []
 
 
 def _is_stale(st, store: Path, claim, now: datetime, stale_after: timedelta) -> bool:
@@ -54,10 +59,10 @@ def view(st: _state.State, store: Path, me: str, *, now: datetime | None = None,
     from . import scope as _scope
 
     now = now or datetime.now(timezone.utc)
-    mine_names = _names(st, me)
+    session_names = _session_names(st, me)
     claims = sorted(st.claims.values(), key=lambda c: c.ts)
-    mine = [c for c in claims if c.actor in mine_names]
-    others = [c for c in claims if c.actor not in mine_names]
+    mine = [c for c in claims if me and c.actor == me]
+    others = [c for c in claims if c.actor not in session_names]
     lines: list[str] = []
 
     if me:
@@ -69,6 +74,7 @@ def view(st: _state.State, store: Path, me: str, *, now: datetime | None = None,
         lines.append(f"  {c.scope}{intent}  {_age(now - c.ts)}")
     if len(mine) > OWN_SHOWN:
         lines.append(f"  ... {len(mine) - OWN_SHOWN} older ones")
+    lines.extend(_also_line(st, me))
 
     if others:
         by_actor: dict[str, list] = {}
@@ -92,17 +98,17 @@ def view(st: _state.State, store: Path, me: str, *, now: datetime | None = None,
 
     clashes = []
     for c in mine:
-        for other in st.conflicts_outside(c.scope, mine_names):
+        for other in st.conflicts_outside(c.scope, session_names):
             clashes.append((c, other))
     if clashes:
         lines.append(f"clashes with what you hold ({len(clashes)}):")
         for c, other in clashes[:CLASHES_SHOWN]:
             lines.append(f"  {c.scope} overlaps @{other.actor}'s {other.scope}")
 
-    if mine_names:
+    if session_names:
         addressed = [n for n in st.notes
-                     if n.actor not in mine_names and now - n.ts < timedelta(hours=24)
-                     and any(_cli._mentions(n.body, a) for a in mine_names)]
+                     if n.actor not in session_names and now - n.ts < timedelta(hours=24)
+                     and any(_cli._mentions(n.body, a) for a in session_names)]
         if addressed:
             lines.append("notes to you:")
             for n in addressed[-NOTES_SHOWN:]:
@@ -131,15 +137,16 @@ def claims_main(argv: list[str]) -> int:
         print("no actor, so nothing is yours. `comms-graph board` shows who holds what.")
         return EXIT_OK
     now = datetime.now(timezone.utc)
-    names = _names(st, me)
-    mine = sorted((c for c in st.claims.values() if c.actor in names), key=lambda c: c.ts)
+    mine = sorted((c for c in st.claims.values() if c.actor == me), key=lambda c: c.ts)
     if not mine:
         print(f"@{me} holds nothing here")
-        return EXIT_OK
-    print(f"@{me} holds {len(mine)}:")
+    else:
+        print(f"@{me} holds {len(mine)}:")
     for c in mine:
         intent = f'  "{c.intent}"' if c.intent else ""
         print(f"  {c.scope}{intent}  {_age(now - c.ts)}  [{c.id}]")
+    for line in _also_line(st, me):
+        print(line)
     return EXIT_OK
 
 
@@ -159,9 +166,10 @@ def whoami_main(argv: list[str]) -> int:
     if found is None:
         print("no actor. Pass --as <name>, set COMMS_ACTOR, or run inside a Claude Code session.")
         return EXIT_OK
-    names = _names(st, found.name)
-    held = sum(1 for c in st.claims.values() if c.actor in names)
+    held = sum(1 for c in st.claims.values() if c.actor == found.name)
     print(f"@{found.name}  ({_SOURCE[found.source]})  in {root.name}, holds {held}")
     if session:
         print(f"  session {session[:8]}")
+    for line in _also_line(st, found.name):
+        print(line)
     return EXIT_OK

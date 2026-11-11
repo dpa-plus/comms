@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from comms_graph import log as clog
 from comms_graph import state as cstate
 
 from .test_session_identity import (
@@ -144,3 +146,63 @@ def test_release_under_a_subagents_name_frees_nothing_of_its_leads(tmp_path, how
     assert held["src/a.py"].actor == lead, "the lead's claim is still held"
     assert held["src/c.py"].actor == lead, "the lead's auto-claim is still held"
     assert not [e for e in _events(repo) if e.type == "release"]
+
+
+# ---------------------------------------------------------------------------
+# finding 6: status, claims, whoami and release agree on who "you" is
+# ---------------------------------------------------------------------------
+
+
+def _views(repo, env):
+    return {verb: _run(repo, [verb], env=env)[1] for verb in ("status", "claims", "whoami")}
+
+
+def _assert_views_agree(repo, env, me, mine, others):
+    views = _views(repo, env)
+    assert f"you are @{me}: {mine} claim" in views["status"], views["status"]
+    assert (f"@{me} holds {mine}" in views["claims"]) or (
+        mine == 0 and f"@{me} holds nothing" in views["claims"]), views["claims"]
+    assert views["whoami"].startswith(f"@{me} ") and f"holds {mine}" in views["whoami"]
+    for text in views.values():
+        for name, count in others.items():
+            assert f"@{name} {count}" in text, text
+        assert "release --as" in text, text
+
+
+def test_status_claims_whoami_and_release_count_only_the_callers_name(tmp_path):
+    repo = _repo(tmp_path)
+    env = {"CLAUDE_CODE_SESSION_ID": SESSION_A}
+    for name, path in (("lead-x", "src/a.py"), ("other-name", "src/b.py"),
+                       ("other-name", "src/c.py")):
+        code, out, err = _run(repo, ["claim", path, "--as", name], env=env)
+        assert code == 0, out + err
+
+    _assert_views_agree(repo, env, "lead-x", 1, {"other-name": 2})
+
+    code, out, _ = _run(repo, ["release"], env=env)
+    assert code == 0 and out.count("RELEASED") == 1 and "src/a.py" in out
+    code, out, _ = _run(repo, ["release"], env=env)
+    assert "nothing to release" in out
+    assert "@other-name 2" in out and "release --as other-name" in out
+
+
+def test_a_session_renamed_twice_by_an_older_build_still_agrees_with_release(tmp_path):
+    repo = _repo(tmp_path)
+    env = {"CLAUDE_CODE_SESSION_ID": SESSION_A}
+    log_file = clog.log_path(repo)
+    log_file.parent.mkdir(parents=True)
+    t0 = datetime.now(timezone.utc) - timedelta(minutes=30)
+    events = []
+    for i, name in enumerate(("first-one", "second-one", "third-one")):
+        data = {"agent_session": SESSION_A, **({"primary": True} if i else {})}
+        events.append(clog.Event(ts=t0 + timedelta(minutes=i), id=clog.new_id(),
+                                 actor=name, type="hello", scope=None, data=data))
+    for i, (name, path) in enumerate((("second-one", "src/a.py"), ("third-one", "src/b.py"))):
+        events.append(clog.Event(ts=t0 + timedelta(minutes=5 + i), id=clog.new_id(),
+                                 actor=name, type="claim", scope=[path], data={"intent": "x"}))
+    clog.append_batch(log_file, events)
+
+    _assert_views_agree(repo, env, "first-one", 0, {"second-one": 1, "third-one": 1})
+    code, out, _ = _run(repo, ["release"], env=env)
+    assert "nothing to release" in out and "release --as" in out
+    assert len(_claims(repo)) == 2

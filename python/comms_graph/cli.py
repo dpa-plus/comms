@@ -1180,6 +1180,9 @@ def _cmd_release(argv: list[str]) -> int:
         if not targets:
             if not mine:
                 print(f"nothing to release: @{actor} holds no claims here")
+                also = _identity.other_names_line(st, _identity.host_session(), actor)
+                if also:
+                    print(also)
                 return EXIT_OK
             chosen = mine[-1:] if "latest" in flags else mine
             unmatched: list[str] = []
@@ -1214,6 +1217,9 @@ def _cmd_release(argv: list[str]) -> int:
                 _err("  Held: " + shown + (f" (+{len(mine) - 8} more)" if len(mine) > 8 else ""))
             else:
                 _err(f"  @{actor} holds no claims here.")
+            also = _identity.other_names_line(st, _identity.host_session(), actor)
+            if also:
+                _err("  " + also)
         if chosen:
             data: dict = {"refs": [c.id for c in chosen]}
             if flags.get("result"):

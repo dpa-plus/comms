@@ -101,6 +101,25 @@ def foreign(st, scope, agent_session: str, name: str = "") -> list:
                   key=lambda c: c.ts)
 
 
+def other_names_line(st, agent_session: str, me: str) -> str:
+    """One line naming the claims held under this session's other names, or ''.
+
+    Every view counts only ``me``, the name ``release`` frees, so the rest are
+    said out loud instead of being counted as yours or as somebody else's.
+    """
+    names = st.family_of(agent_session) - {me}
+    counts: dict[str, int] = {}
+    for claim in st.claims.values():
+        if claim.actor in names:
+            counts[claim.actor] = counts.get(claim.actor, 0) + 1
+    if not counts:
+        return ""
+    held = ", ".join(f"@{n} {k}" for n, k in sorted(counts.items()))
+    name = next(iter(counts)) if len(counts) == 1 else "<name>"
+    return (f"this session also holds claims under other names: {held} "
+            f"(`comms-graph release --as {name}` frees them)")
+
+
 def hello_data(agent_session: str, model: str = "") -> dict:
     """Key-for-key what ``cli._hello_if_unknown`` and ``hello`` write."""
     data: dict = {"agent_session": agent_session}
