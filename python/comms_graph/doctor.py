@@ -181,7 +181,7 @@ def _check_hooks() -> Check:
         return Check("claude hooks", False, why, "fix the JSON by hand, then run doctor --fix")
     missing = [f"{event}" for event, matcher, verb in HOOKS
                if not _hook_ok(settings, event, matcher, verb)]
-    stale = any("comms" in c for event, _m, _v in HOOKS
+    stale = any(_COMMS_HOOK.search(c) for event, _m, _v in HOOKS
                 for entry in _entries(settings, event) for c in _commands(entry)
                 if c not in {_expected_command(v) for _e, _mm, v in HOOKS})
     if not missing and not stale:
@@ -191,8 +191,13 @@ def _check_hooks() -> Check:
     return Check("claude hooks", False, detail, _fix_hint(), _fix_hooks)
 
 
+_COMMS_HOOK = re.compile(r"(^|[/\s'\"])comms(-graph)?['\"]?\s+(hook|hello|check|status)\b")
+
+
 def _is_comms_hook(h: object) -> bool:
-    return isinstance(h, dict) and isinstance(h.get("command"), str) and "comms" in h["command"]
+    """A hook that runs this tool, not any command that merely mentions it."""
+    return (isinstance(h, dict) and isinstance(h.get("command"), str)
+            and bool(_COMMS_HOOK.search(h["command"])))
 
 
 def _rewrite_hooks(settings: dict) -> dict:

@@ -7,7 +7,7 @@
 # Safe to run again: it reuses the venv, reinstalls the package, and relinks.
 set -eu
 
-REPO="${COMMS_REPO:-dpa-plus/comms}"
+REPO="${COMMS_INSTALL_REPO:-dpa-plus/comms}"
 VENV="$HOME/.local/share/comms-graph"
 BIN="$HOME/.local/bin"
 FROM=""
