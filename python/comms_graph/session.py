@@ -358,7 +358,7 @@ def _session_hello(st, actor: str, session_id: str, session_name: str,
     #
     # The pre-edit hook has no COMMS_ACTOR of its own; it identifies the caller
     # by matching the host's session id against `agent_session` on the hello
-    # (see _hook_actor in cli.py). This hello REPLACES the actor's previous one
+    # (see hooks.check_edit). This hello REPLACES the actor's previous one
     # in the fold: only the most recent survives, so leaving the pairing out
     # would erase it, and every claim in the repo, the caller's own included,
     # would come back as somebody else's.

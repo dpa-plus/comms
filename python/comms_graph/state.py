@@ -99,6 +99,26 @@ class Claim:
     stolen_from_id: str = ""
     steal_reason: str = ""
     arbitrator: str = ""
+    # Taken by the pre-edit hook on first touch rather than by an agent. Such a
+    # claim is released when its session ends and yields to anyone it blocks
+    # once the file is clean in git.
+    auto: bool = False
+    agent_id: str = ""
+    agent_type: str = ""
+
+
+@dataclass
+class SessionFamily:
+    """Every actor whose hello carried one host agent session.
+
+    They are all the same agent (and its subagents), whatever names it used, so
+    none of them may block another on the pre-edit path.
+    """
+
+    agent_session: str
+    actors: set[str] = field(default_factory=set)
+    # The actor tied most recently: who an actor-less call in this session is.
+    latest_actor: str = ""
 
 
 @dataclass
@@ -254,6 +274,32 @@ class State:
     # moment the rule did its job, and a rule that enforces itself in silence
     # looks exactly like a rule nobody wrote.
     refused_task_states: list["_task.RefusedTransition"] = field(default_factory=list)
+    # Keyed by host agent session id. Never wiped by a comms-session end: who
+    # an agent session is does not change when a coordination window closes.
+    families: dict[str, SessionFamily] = field(default_factory=dict)
+    # Each actor's most recent event of any type, hello or not.
+    last_seen: dict[str, datetime] = field(default_factory=dict)
+
+    def family_of(self, agent_session: str) -> frozenset[str]:
+        family = self.families.get(agent_session) if agent_session else None
+        return frozenset(family.actors) if family is not None else frozenset()
+
+    def agent_sessions_of(self, actor: str) -> list[str]:
+        return [f.agent_session for f in self.families.values() if actor in f.actors]
+
+    def conflicts_outside(self, scope: Scope, actors: frozenset[str]) -> list[Claim]:
+        """Active claims overlapping `scope` held by nobody in `actors`."""
+        out = [
+            claim
+            for claim in self.claims.values()
+            if claim.actor not in actors and scopes_overlap(claim.scope, scope)
+        ]
+        out.sort(key=lambda c: c.ts)
+        return out
+
+    def auto_claims_of(self, actors: frozenset[str]) -> list[Claim]:
+        return sorted((c for c in self.claims.values() if c.auto and c.actor in actors),
+                      key=lambda c: c.ts)
 
     def independence_of(self, verifier: str, doer: str) -> str:
         """Whether a verification came from something with different blind spots.
@@ -280,13 +326,7 @@ class State:
 
         An empty `actor` means "any other", since every claim has an actor.
         """
-        out = [
-            claim
-            for claim in self.claims.values()
-            if claim.actor != actor and scopes_overlap(claim.scope, scope)
-        ]
-        out.sort(key=lambda c: c.ts)
-        return out
+        return self.conflicts_outside(scope, frozenset((actor,)))
 
     def active_claims_by_actor(self, actor: str) -> list[Claim]:
         """Every active claim held by `actor`, oldest first."""
@@ -448,6 +488,13 @@ def fold(events: Iterable[Any]) -> State:
             _sid = _string_of(ev.data, "comms_session_id")
             if _sid:
                 actors_by_session.setdefault(_sid, set()).add(ev.actor)
+            _agent_session = _string_of(ev.data, "agent_session")
+            if _agent_session:
+                family = state.families.get(_agent_session)
+                if family is None:
+                    family = state.families[_agent_session] = SessionFamily(_agent_session)
+                family.actors.add(ev.actor)
+                family.latest_actor = ev.actor
             state.sessions[ev.actor] = Session(
                 actor=ev.actor,
                 ts=ev.ts,
@@ -689,6 +736,7 @@ def fold(events: Iterable[Any]) -> State:
     for session in state.sessions.values():
         seen = last_seen.get(session.actor)
         session.last_seen = seen if seen is not None and seen > session.ts else session.ts
+    state.last_seen = last_seen
 
     # Last, because it reads the finished claim map and the finished sessions:
     # who is doing a task comes from live claims, and whether a verification was
@@ -723,6 +771,9 @@ def _claim_from_event(ev: _Event) -> Claim | None:
         stolen_from_id=_string_of(ev.data, "steals"),
         steal_reason=_string_of(ev.data, "steal_reason"),
         arbitrator=_string_of(ev.data, "arbitrator"),
+        auto=_bool_of(ev.data, "auto"),
+        agent_id=_string_of(ev.data, "agent_id"),
+        agent_type=_string_of(ev.data, "agent_type"),
     )
 
 

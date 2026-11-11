@@ -3469,7 +3469,7 @@ class Board:
             # The store directory is named by the key, so the log is derivable
             # without trusting the root: a project whose directory has been
             # moved still has readable history.
-            log_file = _log.user_data_home() / "comms" / key / _log.LOG_FILENAME
+            log_file = Path(info["dir"]) / _log.LOG_FILENAME
             return (root, log_file) if log_file.exists() else None
         return None
 
@@ -3526,7 +3526,8 @@ class Board:
         derived files, and the store directory already holds the derived data
         for exactly this project and is already writable.
         """
-        d = _log.user_data_home() / "comms" / (key or _log.repo_hash(self.root)) / "render"
+        found = next((Path(i["dir"]) for i in _log.known_stores() if key and i["key"] == key), None)
+        d = (found or (_log.user_data_home() / "comms" / key if key else _log.store_dir(self.root))) / "render"
         d.mkdir(parents=True, exist_ok=True)
         return d
 

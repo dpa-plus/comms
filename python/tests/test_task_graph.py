@@ -1865,13 +1865,13 @@ def test_a_person_can_free_ground_an_agent_abandoned(tmp_path, monkeypatch):
     _, board = _cli(repo, "board", "--as", "x", session="sX")
     cid = board.split("[")[1].split("]")[0]
 
-    code, out = _cli(repo, "release", cid, "--as", "eli", "--force", session="sE")
+    code, out = _cli(repo, "release", cid, "--as", "eli-desk", "--force", session="sE")
     assert code != 0 and "--reason" in out, out
-    code, out = _cli(repo, "release", "a.py", "--as", "eli", "--force",
+    code, out = _cli(repo, "release", "a.py", "--as", "eli-desk", "--force",
                      "--reason", "gone", session="sE")
     assert code != 0, ("a path was accepted; it can match more than was meant:\n" + out)
 
-    code, out = _cli(repo, "release", cid, "--as", "eli", "--force",
+    code, out = _cli(repo, "release", cid, "--as", "eli-desk", "--force",
                      "--reason", "session died 4h ago", session="sE")
     assert code == 0, out
     assert "was @ghost" in out and "@eli" in out, out
@@ -1885,10 +1885,10 @@ def test_a_person_can_free_ground_an_agent_abandoned(tmp_path, monkeypatch):
     log_file, _ = ccli._store(ccli._repo_root(str(repo)), create=False)
     st = cstate.fold(clog2.read(log_file))
     rel = st.releases[-1]
-    assert rel.actor == "eli", rel
+    assert rel.actor == "eli-desk", rel
     assert rel.original_actor == "ghost", ("an arbitrated handover folded as an ordinary "
                                            "release: " + repr(rel))
-    assert rel.arbitrator == "eli", rel
+    assert rel.arbitrator == "eli-desk", rel
 
 
 def test_releasing_your_own_claim_does_not_need_force(tmp_path, monkeypatch):
