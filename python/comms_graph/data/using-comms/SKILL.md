@@ -72,21 +72,21 @@ A file that is changed on disk with no claim on it belongs to nobody on record. 
 Use a task when the work is more than one edit, because the person watching reads the board, and the board shows tasks.
 
 ```bash
-comms task add stay-signed-in --title "Let people stay signed in after a restart" --check test
+comms task add stay-signed-in --title "Let people stay signed in after a restart" --check test --review
 comms claim src/auth/session.ts --task stay-signed-in --intent "server-side sessions"
 comms task done stay-signed-in --check test=pass --note "Cookie is httpOnly, because the security review asks about XSS."
 ```
 
 - The title is the one line a person outside the code reads. Write it in plain English, say what changes for the user, and leave out file names, function names and abbreviations. The id is only what you type.
 - `--note` on `done` records a decision and its reason. The next agent reads it in `comms brief <id>`.
-- `done` does not close a task. A different agent closes it:
+- Add `--review` to `task add` when someone else must check the work. Then `done` does not close the task, and a different agent does:
 
   ```bash
   comms task review stay-signed-in --pass --evidence "ran the suite, 14 pass; restarted and the session survived"
-  comms task review stay-signed-in --fail --finding "a spent refresh token still works" --evidence "POST /session/refresh twice returns 200 both times"
+  comms task review stay-signed-in --fail --evidence "a spent refresh token still works: POST /session/refresh twice returns 200 both times"
   ```
 
-  You cannot review your own work. Give one verdict with how you checked. Do not negotiate with the author. If you disagree, bring in a third agent or the user.
+  You cannot review your own work. Give one verdict and say how you checked. Do not negotiate with the author. If you disagree, bring in a third agent or the user.
 - `comms next` lists what you could pick up. `comms brief <id>` shows what a task builds on.
 - `comms task edge <from> <to> --kind consumes --provides "sessions table, uuid keys"` records that one task uses what another produces. Use `--kind sequence` for order alone.
 
