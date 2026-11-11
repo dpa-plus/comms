@@ -1589,13 +1589,13 @@ def test_reclaiming_ground_you_hold_replaces_it_rather_than_stacking(tmp_path, m
     _cli(repo, "claim", "a.py", "--as", "bob", "--intent", "first", session="sB")
     _cli(repo, "claim", "a.py", "--as", "bob", "--intent", "second", session="sB")
 
-    _, out = _cli(repo, "board", "--as", "bob", session="sB")
+    _, out = _cli(repo, "board", "--all", "--as", "bob", session="sB")
     assert "active claims (1)" in out, out
     assert "second" in out and "first" not in out, out
 
     # a symbol inside the file is different ground; holding both is legitimate
     _cli(repo, "claim", "a.py#parse", "--as", "bob", "--intent", "narrower", session="sB")
-    _, out = _cli(repo, "board", "--as", "bob", session="sB")
+    _, out = _cli(repo, "board", "--all", "--as", "bob", session="sB")
     assert "active claims (2)" in out, out
 
     # and somebody else is still refused
@@ -1722,7 +1722,7 @@ def test_an_abandoned_claim_can_be_taken_over(tmp_path, monkeypatch):
     _, out = _cli(repo, "brief", "t6b", "--as", "x", session="sX")
     assert "phase: blocked" in out, out
 
-    _, board = _cli(repo, "board", "--as", "x", session="sX")
+    _, board = _cli(repo, "board", "--all", "--as", "x", session="sX")
     kid = board.split("[")[1].split("]")[0]
 
     code, out = _cli(repo, "release", kid, "--as", "nate", "--force", session="sN")
@@ -1867,7 +1867,7 @@ def test_a_person_can_free_ground_an_agent_abandoned(tmp_path, monkeypatch):
     repo = _repo(tmp_path, monkeypatch)
     (repo / "a.py").write_text("x = 1\n")
     _cli(repo, "claim", "a.py", "--as", "ghost", "--intent", "then crashed", session="sG")
-    _, board = _cli(repo, "board", "--as", "x", session="sX")
+    _, board = _cli(repo, "board", "--all", "--as", "x", session="sX")
     cid = board.split("[")[1].split("]")[0]
 
     code, out = _cli(repo, "release", cid, "--as", "eli-desk", "--force", session="sE")
@@ -1881,7 +1881,7 @@ def test_a_person_can_free_ground_an_agent_abandoned(tmp_path, monkeypatch):
     assert code == 0, out
     assert "was @ghost" in out and "@eli" in out, out
 
-    _, board = _cli(repo, "board", "--as", "x", session="sX")
+    _, board = _cli(repo, "board", "--all", "--as", "x", session="sX")
     assert "no active claims" in board, board
 
     # and the log says who took it off whom, rather than reading as ghost's own
@@ -1900,7 +1900,7 @@ def test_releasing_your_own_claim_does_not_need_force(tmp_path, monkeypatch):
     repo = _repo(tmp_path, monkeypatch)
     (repo / "a.py").write_text("x = 1\n")
     _cli(repo, "claim", "a.py", "--as", "alice", "--intent", "w", session="sA")
-    _, board = _cli(repo, "board", "--as", "x", session="sX")
+    _, board = _cli(repo, "board", "--all", "--as", "x", session="sX")
     cid = board.split("[")[1].split("]")[0]
     code, out = _cli(repo, "release", cid, "--as", "alice", "--force",
                      "--reason", "x", session="sA")

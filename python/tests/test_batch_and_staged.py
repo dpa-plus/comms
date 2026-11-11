@@ -66,7 +66,7 @@ def test_a_batch_takes_all_of_it_or_none_of_it(repo, monkeypatch, capsys):
     capsys.readouterr()
 
     # The scope bob could have had must NOT be his.
-    cli.main(["board"])
+    cli.main(["board", "--all"])
     board = capsys.readouterr().out
     assert "bob" not in board, f"bob kept part of a refused batch:\n{board}"
 

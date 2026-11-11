@@ -132,7 +132,7 @@ def test_status_since_24h_is_the_invocation_the_session_hook_makes(tmp_path, mon
         _ev("claim", "claude-dev", scope=["a.py"], data={"intent": "fix the parser"}),
     ])
 
-    code, out = _run(repo, "status", "--since", "24h")
+    code, out = _run(repo, "status", "--all", "--since", "24h")
 
     assert code == 0, out
     assert "ACTIVE SESSIONS" in out and "ACTIVE CLAIMS" in out
@@ -146,7 +146,7 @@ def test_an_empty_store_reports_an_empty_board_not_an_error(tmp_path, monkeypatc
     nothing to report, and that is a 0 with `(none)`, not an error."""
     repo = _repo(tmp_path, monkeypatch)
 
-    code, out = _run(repo, "status")
+    code, out = _run(repo, "status", "--all")
 
     assert code == 0, out
     assert out.count("(none)") >= 2
@@ -166,7 +166,7 @@ def test_a_claim_held_past_the_stale_window_is_flagged_and_its_holder_named_dead
             data={"intent": "half a refactor"}),
     ])
 
-    code, out = _run(repo, "status")
+    code, out = _run(repo, "status", "--all")
 
     assert code == 0, out
     assert "STALE" in out, "a six-hour-old claim must not read like a fresh one"
@@ -188,7 +188,7 @@ def test_a_silent_holder_stays_on_the_roster_even_though_the_window_dropped_it(
         _ev("hello", "alive"),
     ])
 
-    code, out = _run(repo, "status")
+    code, out = _run(repo, "status", "--all")
 
     roster = out.split("ACTIVE CLAIMS")[0]
     assert "@crashed" in roster
@@ -239,7 +239,7 @@ def test_collisions_prevented_is_reported_all_time(tmp_path, monkeypatch):
             data={"scope": "a.py", "holder": "alice", "intent": "also mine"}),
     ])
 
-    code, out = _run(repo, "status", "--since", "24h")
+    code, out = _run(repo, "status", "--all", "--since", "24h")
 
     assert code == 0, out
     assert "COLLISIONS PREVENTED: 1 all time" in out, (
@@ -258,7 +258,7 @@ def test_a_task_refusal_is_not_rendered_as_an_editing_collision(tmp_path, monkey
                                      "reason": "self-review"}),
     ])
 
-    code, out = _run(repo, "status")
+    code, out = _run(repo, "status", "--all")
 
     assert code == 0, out
     assert "stopped from editing" not in out
@@ -274,7 +274,7 @@ def test_findings_and_notes_outside_the_window_are_not_shown(tmp_path, monkeypat
         _ev("note", "new", data={"body": "just now"}),
     ])
 
-    code, out = _run(repo, "status", "--since", "24h")
+    code, out = _run(repo, "status", "--all", "--since", "24h")
 
     assert "just now" in out
     assert "ancient history" not in out
@@ -531,7 +531,7 @@ def test_a_truncated_final_line_still_reports_everything_before_it(
     with open(path, "a") as fh:
         fh.write('{"ts":"2026-05-22T14:30:00Z","id":"01H","actor":"dev","ty')
 
-    code, out = _run(repo, verb)
+    code, out = _run(repo, verb, "--all") if verb == "status" else _run(repo, verb)
 
     assert code == 0, out
     assert "real work" in out

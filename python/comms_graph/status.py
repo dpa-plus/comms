@@ -42,6 +42,7 @@ from .cli import (
     EXIT_OK,
     EXIT_USAGE,
     FINDING_CATEGORIES,
+    _actor,
     _err,
     _parse_flags,
     _repo_root,
@@ -441,8 +442,24 @@ def status_main(argv: list[str]) -> int:
     if "json" in flags:
         _emit_status_json(st, root, now, cutoff, stale_after)
         return EXIT_OK
+    if "all" not in flags:
+        _emit_status_compact(st, root, flags, now, stale_after)
+        return EXIT_OK
     _emit_status_human(st, root, now, cutoff, since_raw, stale_after)
     return EXIT_OK
+
+
+def _emit_status_compact(st: _state.State, root: Path, flags: dict, now: datetime,
+                         stale_after: timedelta) -> None:
+    from . import compact as _compact
+
+    lines = _compact.view(st, _log.log_path(root).parent, _actor(flags, write=False),
+                          now=now, stale_after=stale_after)
+    if st.tasks:
+        closed = sum(1 for t in st.tasks.values() if t.phase == _task.PHASE_CLOSED)
+        lines.append(f"tasks: {len(st.tasks) - closed} open, {closed} closed (`comms-graph next`)")
+    lines.append(_compact.all_hint("status"))
+    print("\n".join(lines))
 
 
 def _emit_status_human(

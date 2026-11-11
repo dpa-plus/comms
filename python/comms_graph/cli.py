@@ -2244,7 +2244,7 @@ def _cmd_note(argv: list[str]) -> int:
 
 def _cmd_next(argv: list[str]) -> int:
     _, flags = _parse_flags(argv)
-    actor = _actor(flags)
+    actor = _actor(flags, write=False)
     _, log_file, _lockf = _task_runtime(flags)
     st = _read_state(log_file)
     if not st.tasks:
@@ -2279,7 +2279,7 @@ def _cmd_next(argv: list[str]) -> int:
         for t in mine_to_review:
             print(f"  {t.id}  {t.title}".rstrip())
             print(f"    done by @{t.did}" + (f"; notes: {t.notes[-1]}" if t.notes else ""))
-            print(f"    comms-graph task review {t.id} --pass --as {actor}")
+            print(f"    comms-graph task review {t.id} --pass --as {actor or '<you>'}")
     if ready:
         print("READY: nothing upstream is outstanding:")
         for t in ready:
@@ -2547,6 +2547,16 @@ def _cmd_board(argv: list[str]) -> int:
         if guard_line:
             print(guard_line)
         return EXIT_OK
+    if "all" not in flags:
+        from . import compact as _compact
+
+        print("\n".join(_compact.view(st, log_file.parent, me)))
+        if head:
+            print(head)
+        if guard_line:
+            print(guard_line.strip())
+        print(_compact.all_hint("board"))
+        return EXIT_OK
     print(f"active claims ({len(claims)}):")
     for claim in claims:
         when = claim.ts.isoformat().replace("+00:00", "Z")
@@ -2773,6 +2783,8 @@ _HANDLERS = {
     "hello": _lazy("hello", "cmd_hello"),
     "mcp": _lazy("mcp", "main"),
     "doctor": _lazy("doctor", "main"),
+    "whoami": _lazy("compact", "whoami_main"),
+    "claims": _lazy("compact", "claims_main"),
     "ui": _cmd_ui,
     "version": _version_verb,
     "help": _help_verb,

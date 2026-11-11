@@ -178,7 +178,7 @@ def test_the_first_edit_of_a_free_file_claims_it_for_the_session(tmp_path):
     holder = _claims(repo)["src/a.py"]
     assert holder.actor == _auto_name(SESSION_A)
     assert holder.auto and holder.intent == "auto: edited"
-    code, board, _ = _run(repo, ["board"])
+    code, board, _ = _run(repo, ["board", "--all"])
     assert "src/a.py" in board and _auto_name(SESSION_A) in board, board
 
     before = clog.log_path(repo).read_bytes()
