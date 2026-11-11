@@ -146,37 +146,35 @@ def check_edit(target: Path, *, agent_session: str, explicit: str,
 
     store = log_file.parent
     _identity.touch_marker(store, agent_session)
-    me = _session_actor(st, agent_session, explicit)
-    mine = _identity.family(st, agent_session, explicit)
+    found = _identity.resolve(explicit, lambda: st, agent_session, hook=payload is not None)
+    me = found.name if found is not None else ""
     scope = _scope.parse(rel_text)
-    conflicts = _blocking(st, scope, rel_text, root, mine)
+    conflicts = _blocking(st, scope, rel_text, root, agent_session, me)
     if conflicts:
-        conflicts = _yield_clean_auto_claims_locked(root, log_file, conflicts, me)
+        conflicts = _yield_clean_auto_claims_locked(root, log_file, conflicts, me,
+                                                    agent_session)
     if conflicts:
         _cli._err(render_block(st, store, root, rel_text, conflicts[0],
-                               identified=bool(mine)))
+                               identified=bool(agent_session or me)))
         return EXIT_BLOCK
     if payload is not None and agent_session and me:
-        held = any(c.actor in mine and _scope.overlaps(c.scope, scope)
-                   for c in st.claims.values())
-        if not held:
+        if not _held(st, scope, agent_session):
             _auto_claim(root, log_file, scope, rel_text, me, agent_session, payload)
     return EXIT_OK
 
 
-def _session_actor(st, agent_session: str, explicit: str) -> str:
-    if explicit:
-        return explicit
-    found = _identity.resolve("", lambda: st, agent_session)
-    return found.name if found is not None else ""
+def _held(st, scope, agent_session: str) -> bool:
+    return any(_identity.owns(st, c, agent_session) and _scope.overlaps(c.scope, scope)
+               for c in st.claims.values())
 
 
-def _blocking(st, scope, rel_text: str, root: Path, mine: frozenset[str]) -> list:
+def _blocking(st, scope, rel_text: str, root: Path, agent_session: str, me: str) -> list:
     from . import cli as _cli
 
-    conflicts = st.conflicts_outside(scope, mine)
+    conflicts = _identity.foreign(st, scope, agent_session, me)
     if not conflicts:
-        twin = _cli._uncreated_twin(st, rel_text, root, mine)
+        twin = _cli._uncreated_twin(
+            st, rel_text, root, lambda c: _identity.owns(st, c, agent_session, me))
         if twin is not None:
             conflicts = [twin]
     return conflicts
@@ -190,11 +188,9 @@ def _auto_claim(root: Path, log_file: Path, scope, rel_text: str, actor: str,
     try:
         with _lock.file_lock(log_file.parent / ".lock", timeout=_HOOK_LOCK_TIMEOUT) as handle:
             st = _cli._read_state(log_file)
-            mine = _identity.family(st, agent_session, actor)
-            if _blocking(st, scope, rel_text, root, mine):
+            if _blocking(st, scope, rel_text, root, agent_session, actor):
                 return
-            if any(c.actor in mine and _scope.overlaps(c.scope, scope)
-                   for c in st.claims.values()):
+            if _held(st, scope, agent_session):
                 return
             if handle.compromised():
                 return
@@ -202,7 +198,8 @@ def _auto_claim(root: Path, log_file: Path, scope, rel_text: str, actor: str,
             if actor not in st.family_of(agent_session):
                 batch.append(_cli._tagged(st, actor, _log.TYPE_HELLO, None,
                                           _identity.hello_data(agent_session)))
-            data: dict = {"intent": AUTO_INTENT, "auto": True}
+            data: dict = {"intent": AUTO_INTENT, "auto": True,
+                          "agent_session": agent_session}
             if payload.agent_id:
                 data["agent_id"] = payload.agent_id
             if payload.agent_type:
@@ -230,11 +227,11 @@ def _clean_in_git(root: Path, path: str) -> bool:
 
 
 def yield_auto_claims(st, log_file: Path, root: Path, conflicts: list, actor: str,
-                      mine: frozenset[str] = frozenset()) -> list:
+                      agent_session: str = "") -> list:
     """Release blocking auto-claims that should not block. Caller holds the lock.
 
     One yields when its file has nothing uncommitted, or when it belongs to the
-    caller's own session (``mine``). Returns the conflicts that still stand.
+    caller's own agent session. Returns the conflicts that still stand.
     """
     from . import cli as _cli
 
@@ -242,7 +239,7 @@ def yield_auto_claims(st, log_file: Path, root: Path, conflicts: list, actor: st
     for claim in conflicts:
         reason = ""
         if claim.auto and claim.id in st.claims:
-            if claim.actor in mine:
+            if agent_session and _identity.owns(st, claim, agent_session):
                 reason = SAME_SESSION_REASON
             elif _clean_in_git(root, str(claim.scope).split("#", 1)[0]):
                 reason = CLEAN_RELEASE_REASON
@@ -260,7 +257,7 @@ def yield_auto_claims(st, log_file: Path, root: Path, conflicts: list, actor: st
 
 
 def _yield_clean_auto_claims_locked(root: Path, log_file: Path, conflicts: list,
-                                    actor: str) -> list:
+                                    actor: str, agent_session: str) -> list:
     from . import cli as _cli
 
     if not any(c.auto for c in conflicts):
@@ -269,7 +266,7 @@ def _yield_clean_auto_claims_locked(root: Path, log_file: Path, conflicts: list,
         with _lock.file_lock(log_file.parent / ".lock", timeout=_HOOK_LOCK_TIMEOUT):
             st = _cli._read_state(log_file)
             current = [st.claims[c.id] for c in conflicts if c.id in st.claims]
-            return yield_auto_claims(st, log_file, root, current, actor)
+            return yield_auto_claims(st, log_file, root, current, actor, agent_session)
     except Exception:
         return conflicts
 
@@ -388,8 +385,8 @@ def folder_briefing(payload: HookPayload) -> str:
     for entry in found[:FOLDER_REPOS_SHOWN]:
         try:
             st = _cli._read_state(Path(entry["dir"]) / _log.LOG_FILENAME)
-            mine = _identity.family(st, payload.session_id)
-            held = sum(1 for c in st.claims.values() if c.actor not in mine)
+            held = sum(1 for c in st.claims.values()
+                       if not _identity.owns(st, c, payload.session_id))
         except BaseException:  # noqa: BLE001
             continue
         lines.append(f"  {entry['name'] or Path(entry['root']).name}  "
@@ -413,14 +410,14 @@ def briefing(st, store: Path, root: Path, actor: str, agent_session: str) -> str
     from . import cli as _cli
 
     now = datetime.now(timezone.utc)
-    mine = _identity.family(st, agent_session, actor)
+    names = st.family_of(agent_session) | {actor}
     lines = [
         f"comms: you are @{actor} in {root.name}. Your first edit of a file claims it "
         "for this session; a file someone else holds blocks the edit.",
         *COMMAND_LINES,
     ]
     others = [c for c in sorted(st.claims.values(), key=lambda c: c.ts, reverse=True)
-              if c.actor not in mine]
+              if not _identity.owns(st, c, agent_session, actor)]
     if others:
         lines.append(f"Held by others ({len(others)}):")
         for claim in others[:5]:
@@ -428,7 +425,7 @@ def briefing(st, store: Path, root: Path, actor: str, agent_session: str) -> str
             stale = "  STALE" if now - alive >= SILENT_AFTER else ""
             lines.append(f"  {claim.scope}  @{claim.actor}  {_age(now - claim.ts)}{stale}")
     addressed = [n for n in st.notes
-                 if n.actor not in mine and any(_cli._mentions(n.body, a) for a in mine)
+                 if n.actor not in names and any(_cli._mentions(n.body, a) for a in names)
                  and now - n.ts < timedelta(hours=24)]
     if addressed:
         lines.append("Notes to you:")
@@ -448,9 +445,8 @@ def session_end(payload: HookPayload) -> None:
         return
     with _lock.file_lock(log_file.parent / ".lock", timeout=_HOOK_LOCK_TIMEOUT):
         st = _cli._read_state(log_file)
-        mine = _identity.family(st, payload.session_id)
         by_actor: dict[str, list[str]] = {}
-        for claim in st.auto_claims_of(mine):
+        for claim in st.auto_claims_of(payload.session_id):
             by_actor.setdefault(claim.actor, []).append(claim.id)
         events = [_cli._tagged(st, actor, _log.TYPE_RELEASE, None,
                                {"refs": refs, "result": SESSION_END_RESULT})

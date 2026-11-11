@@ -105,6 +105,9 @@ class Claim:
     auto: bool = False
     agent_id: str = ""
     agent_type: str = ""
+    # The host agent session that wrote it. Empty on claims older than 0.5.0
+    # and on CLI calls made outside an agent session.
+    agent_session: str = ""
 
 
 @dataclass
@@ -303,8 +306,9 @@ class State:
         out.sort(key=lambda c: c.ts)
         return out
 
-    def auto_claims_of(self, actors: frozenset[str]) -> list[Claim]:
-        return sorted((c for c in self.claims.values() if c.auto and c.actor in actors),
+    def auto_claims_of(self, agent_session: str) -> list[Claim]:
+        return sorted((c for c in self.claims.values()
+                       if c.auto and agent_session and c.agent_session == agent_session),
                       key=lambda c: c.ts)
 
     def independence_of(self, verifier: str, doer: str) -> str:
@@ -783,6 +787,7 @@ def _claim_from_event(ev: _Event) -> Claim | None:
         auto=_bool_of(ev.data, "auto"),
         agent_id=_string_of(ev.data, "agent_id"),
         agent_type=_string_of(ev.data, "agent_type"),
+        agent_session=_string_of(ev.data, "agent_session"),
     )
 
 

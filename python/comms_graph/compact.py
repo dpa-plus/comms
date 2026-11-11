@@ -37,7 +37,7 @@ def _age(delta: timedelta) -> str:
 def _names(st: _state.State, me: str) -> frozenset[str]:
     if not me:
         return frozenset()
-    return _identity.family(st, _identity.host_session(), me)
+    return st.family_of(_identity.host_session()) | {me}
 
 
 def _is_stale(st, store: Path, claim, now: datetime, stale_after: timedelta) -> bool:

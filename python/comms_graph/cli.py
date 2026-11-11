@@ -305,6 +305,9 @@ def _tagged(st, actor: str, etype: str, scope: list[str] | None, data: dict) -> 
 
 
 def _event(actor: str, etype: str, scope: list[str] | None, data: dict) -> _log.Event:
+    if etype == _log.TYPE_CLAIM and "agent_session" not in data and _identity.host_session():
+        # Ownership on the edit path is by session; a name alone can be shared.
+        data = {**data, "agent_session": _identity.host_session()}
     return _log.Event(
         ts=datetime.now(timezone.utc),
         id=_log.new_id(),
@@ -485,7 +488,7 @@ def _same_file_by_name(a: str, b: str) -> bool:
     return na == nb
 
 
-def _uncreated_twin(st, scope_str: str, root: Path, actor: "str | frozenset[str]"):
+def _uncreated_twin(st, scope_str: str, root: Path, is_mine):
     """A live claim naming the same not-yet-created file under another spelling.
 
     THE HOLE THIS CLOSES. Everything below the deepest existing directory is
@@ -513,9 +516,8 @@ def _uncreated_twin(st, scope_str: str, root: Path, actor: "str | frozenset[str]
         probe = probe.parent
     if not _case_blind_here(probe):
         return None
-    mine = actor if isinstance(actor, frozenset) else frozenset((actor,))
     for claim in st.claims.values():
-        if claim.actor in mine:
+        if is_mine(claim):
             continue
         other = str(claim.scope).split("#", 1)[0]
         if other != path_part and _same_file_by_name(other, path_part):
@@ -768,9 +770,9 @@ def _cmd_claim_many(positional: list[str], flags: dict) -> int:
         for scope_str, scope in scopes:
             conflicts = _hooks.yield_auto_claims(
                 st, log_file, root, st.conflicts_for(scope, actor), actor,
-                _identity.family(st, _identity.host_session(), actor))
+                _identity.host_session())
             if not conflicts:
-                twin = _uncreated_twin(st, scope_str, root, actor)
+                twin = _uncreated_twin(st, scope_str, root, lambda c: c.actor == actor)
                 conflicts = [twin] if twin is not None else []
             if conflicts:
                 blocked.append((scope_str, conflicts[0]))
@@ -922,10 +924,9 @@ def _cmd_claim(argv: list[str]) -> int:
         else:
             claim_data_steal = {}
         conflicts = _hooks.yield_auto_claims(
-            st, log_file, root, conflicts, actor,
-            _identity.family(st, _identity.host_session(), actor))
+            st, log_file, root, conflicts, actor, _identity.host_session())
         if not conflicts:
-            twin = _uncreated_twin(st, scope_str, root, actor)
+            twin = _uncreated_twin(st, scope_str, root, lambda c: c.actor == actor)
             if twin is not None:
                 conflicts = [twin]
         if conflicts:
@@ -1178,7 +1179,7 @@ def _cmd_release(argv: list[str]) -> int:
         names = {actor}
         family = st.families.get(agent_session)
         if family is not None and family.own_actor == actor:
-            names.add(_identity.auto_name(agent_session))
+            names.add(_identity.auto_name(st, agent_session))
         mine = sorted((c for c in st.claims.values() if c.actor in names), key=lambda c: c.ts)
         targets = [p for p in positional if p]
         if not targets:
@@ -1545,8 +1546,8 @@ def _cmd_check_staged(flags: dict) -> int:
     # `--as` cannot be the answer on its own: a pre-commit hook does not know
     # which agent is committing, so it has nothing to pass.
     actor = _actor(flags, write=False)
-    mine = _identity.family(st, _identity.host_session(), actor)
-    unidentified = not mine
+    agent_session = _identity.host_session()
+    unidentified = not (actor or agent_session)
 
     # Carry WHERE each path came from. A path in HEAD is not a staged path, and
     # telling somebody to `git restore --staged` a file that is not in their
@@ -1563,7 +1564,7 @@ def _cmd_check_staged(flags: dict) -> int:
             canon = _canonical_relpath(target.resolve(), root.resolve())
         except (ValueError, OSError):
             canon = rel_text
-        conflicts = st.conflicts_outside(_scope.parse(canon), mine)
+        conflicts = _identity.foreign(st, _scope.parse(canon), agent_session, actor)
         if conflicts:
             blocked.append((canon, conflicts[0]))
 
@@ -1666,7 +1667,7 @@ def _cmd_check_inner(argv: list[str]) -> int:
     positional, flags = _parse_flags(argv)
     if "staged" in flags:
         return _cmd_check_staged(flags)
-    explicit = (flags.get("as") or os.environ.get("COMMS_ACTOR", "")).strip().lstrip("@")
+    explicit = (flags.get("as") or "").strip().lstrip("@")
 
     if "stdin-json" in flags:
         try:
