@@ -89,7 +89,7 @@ def _base_name(actor: str) -> str:
     return actor[:i] if i > 0 else actor
 
 
-def _identity_data(label: str, model: str, vendor: str) -> dict:
+def _identity_data(label: str, model: str, vendor: str, primary: bool = False) -> dict:
     """The hello payload. Must stay key-for-key what ``cli._hello_if_unknown`` writes.
 
     Two writers, one record: if this spelled the host session ``session_id``
@@ -113,6 +113,8 @@ def _identity_data(label: str, model: str, vendor: str) -> dict:
         data["model"] = model
     if vendor:
         data["vendor"] = vendor
+    if primary:
+        data["primary"] = True
     try:
         data["hostname"] = socket.gethostname()
     except Exception:
@@ -167,7 +169,9 @@ def cmd_hello(argv: list[str]) -> int:
         # asking to be registered NOW, and a re-run that changes only --label
         # would otherwise print success and record nothing.
         _log.append(log_file, _cli._event(actor, _log.TYPE_HELLO, None,
-                                          _identity_data(label, model, vendor)))
+                                          _identity_data(
+                                              label, model, vendor,
+                                              primary=bool(named or flags.get("as")))))
         base = _base_name(actor)
         # Counted as a SET of actor names that includes this one, not as a
         # number of hello events: an agent that says hello twice is still one

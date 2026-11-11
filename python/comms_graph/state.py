@@ -117,8 +117,14 @@ class SessionFamily:
 
     agent_session: str
     actors: set[str] = field(default_factory=set)
-    # The actor tied most recently: who an actor-less call in this session is.
-    latest_actor: str = ""
+    first_actor: str = ""
+    # Set only by a `hello --as` the caller typed. The latest one wins.
+    primary_actor: str = ""
+
+    @property
+    def own_actor(self) -> str:
+        """Who an actor-less call in this session is, whatever subagents did since."""
+        return self.primary_actor or self.first_actor
 
 
 @dataclass
@@ -494,7 +500,10 @@ def fold(events: Iterable[Any]) -> State:
                 if family is None:
                     family = state.families[_agent_session] = SessionFamily(_agent_session)
                 family.actors.add(ev.actor)
-                family.latest_actor = ev.actor
+                if not family.first_actor:
+                    family.first_actor = ev.actor
+                if _bool_of(ev.data, "primary"):
+                    family.primary_actor = ev.actor
             state.sessions[ev.actor] = Session(
                 actor=ev.actor,
                 ts=ev.ts,

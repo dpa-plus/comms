@@ -485,3 +485,50 @@ def test_a_log_with_every_old_event_type_still_folds_and_enforces(tmp_path):
     assert _edit(repo, "src/a.py", "old-s")[0] == 0, "the old hello still identifies its session"
     code, _, err = _edit(repo, "src/a.py", SESSION_B)
     assert code == 2 and "@old-dev" in err
+
+
+def _whoami_actor(repo: Path, session: str) -> str:
+    code, out, _ = _run(repo, ["note", "probe"], env={"CLAUDE_CODE_SESSION_ID": session})
+    assert code == 0, out
+    return out.split(" by @", 1)[1].split()[0]
+
+
+def test_session_name_survives_a_subagent_speaking_last(tmp_path):
+    repo = _repo(tmp_path)
+    env = {"CLAUDE_CODE_SESSION_ID": SESSION_A}
+    assert _run(repo, ["hello", "--as", "lead"], env=env)[0] == 0
+    assert _run(repo, ["claim", "src/b.py", "--intent", "x", "--as", "sub-1"], env=env)[0] == 0
+    assert _whoami_actor(repo, SESSION_A) == "lead"
+
+
+def test_implicit_hello_never_renames_the_session(tmp_path):
+    repo = _repo(tmp_path)
+    env = {"CLAUDE_CODE_SESSION_ID": SESSION_A}
+    assert _run(repo, ["note", "first", "--as", "lead"], env=env)[0] == 0
+    assert _run(repo, ["note", "later", "--as", "sub-1"], env=env)[0] == 0
+    assert _whoami_actor(repo, SESSION_A) == "lead"
+
+
+def test_explicit_hello_renames_the_session_and_the_latest_wins(tmp_path):
+    repo = _repo(tmp_path)
+    env = {"CLAUDE_CODE_SESSION_ID": SESSION_A}
+    assert _run(repo, ["note", "first", "--as", "lead"], env=env)[0] == 0
+    assert _run(repo, ["hello", "--as", "captain"], env=env)[0] == 0
+    assert _run(repo, ["note", "noise", "--as", "sub-1"], env=env)[0] == 0
+    assert _whoami_actor(repo, SESSION_A) == "captain"
+    assert _run(repo, ["hello", "--as", "admiral"], env=env)[0] == 0
+    assert _whoami_actor(repo, SESSION_A) == "admiral"
+
+
+def test_old_logs_without_the_mark_resolve_to_the_first_actor(tmp_path):
+    repo = _repo(tmp_path)
+    log_file = clog.log_path(repo)
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    t0 = datetime.now(timezone.utc) - timedelta(hours=2)
+    clog.append_batch(log_file, [
+        clog.Event(ts=t0 + timedelta(minutes=i), id=clog.new_id(), actor=name, type="hello",
+                   scope=None, data={"agent_session": SESSION_A})
+        for i, name in enumerate(["first-one", "second-one", "third-one"])])
+    st = cstate.fold(clog.read(log_file))
+    assert st.families[SESSION_A].own_actor == "first-one"
+    assert _whoami_actor(repo, SESSION_A) == "first-one"

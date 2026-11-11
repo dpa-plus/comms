@@ -102,7 +102,7 @@ def test_hello_lets_the_pre_edit_hook_recognise_the_actor(tmp_path, monkeypatch)
     code, out, err = _run(repo, "hello", "--as", "claude-dev", session="sess-1")
     assert code == 0, out + err
     st = _state_of(repo)
-    assert st.families["sess-1"].latest_actor == "claude-dev"
+    assert st.families["sess-1"].own_actor == "claude-dev"
 
 
 def test_an_explicit_hello_is_written_exactly_like_the_automatic_one(tmp_path, monkeypatch):
@@ -132,7 +132,8 @@ def test_an_explicit_hello_is_written_exactly_like_the_automatic_one(tmp_path, m
             else:
                 os.environ[key] = value
     assert automatic is not None
-    assert written[0].data == automatic.data
+    assert {k: v for k, v in written[0].data.items() if k != "primary"} == automatic.data
+    assert written[0].data["primary"] is True
 
 
 def test_saying_hello_again_updates_the_label(tmp_path, monkeypatch):
