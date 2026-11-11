@@ -102,12 +102,8 @@ ACTIVE_WINDOW = timedelta(hours=4)
 STALE_CLAIM_AFTER = timedelta(hours=1)
 
 
-# Go's time.ParseDuration grammar, which is what the Go build's --since accepts.
-# Deliberately NOT extended with a `d` unit: the two builds read the same log and
-# scripts get copied between them, so a window this build accepted and the Go one
-# rejected would work here and die there: with the failure landing on whoever
-# inherited the script, not whoever wrote it.
-_DURATION_PART = re.compile(r"(\d+(?:\.\d*)?|\.\d+)(ns|us|µs|μs|ms|s|m|h)")
+# Go's time.ParseDuration grammar, plus d and w: agents type 7d.
+_DURATION_PART = re.compile(r"(\d+(?:\.\d*)?|\.\d+)(ns|us|µs|μs|ms|s|m|h|d|w)")
 _UNIT_SECONDS = {
     "ns": 1e-9,
     "us": 1e-6,
@@ -117,6 +113,8 @@ _UNIT_SECONDS = {
     "s": 1.0,
     "m": 60.0,
     "h": 3600.0,
+    "d": 86400.0,
+    "w": 604800.0,
 }
 
 
@@ -156,8 +154,7 @@ def _duration_flag(flags: dict, name: str, default: timedelta) -> timedelta | No
     try:
         value = _parse_duration(raw)
     except ValueError:
-        _err(f"error: invalid --{name} {raw!r} (use 1h, 30m, 168h, etc.)")
-        _err("  Days are not a unit here, in either build: say 168h, not 7d.")
+        _err(f"error: invalid --{name} {raw!r} (use 30m, 6h, 7d, 1h30m)")
         return None
     if value < timedelta(0):
         _err(f"error: --{name} must not be negative (got {raw!r})")
@@ -746,6 +743,16 @@ def log_main(argv: list[str]) -> int:
         return EXIT_ERROR
     _root, events = opened
 
+    limit = 0
+    if flags.get("limit"):
+        try:
+            limit = int(flags["limit"])
+        except ValueError:
+            limit = -1
+        if limit < 1:
+            _err(f"error: --limit {flags['limit']!r} is not a positive number")
+            return EXIT_USAGE
+
     cutoff = datetime.now(timezone.utc) - since
     as_json = "json" in flags
     shown: list = []
@@ -766,14 +773,16 @@ def log_main(argv: list[str]) -> int:
                 continue
             if (ev.data or {}).get("category") != category:
                 continue
-        if as_json:
+        shown.append(ev)
+    if limit:
+        shown = shown[-limit:]
+    if as_json:
+        for ev in shown:
             # The stored bytes, re-encoded canonically: the same line the Go
             # build would write. Piping `log --json` back into a log must not
             # change what it says.
             sys.stdout.write(ev.encode().decode("utf-8"))
-        else:
-            shown.append(ev)
-    if not as_json:
+    else:
         _print_events_human(shown)
     return EXIT_OK
 

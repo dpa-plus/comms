@@ -26,6 +26,7 @@ from pathlib import Path
 
 import pytest
 
+from comms_graph import cli
 from comms_graph import log as clog
 from comms_graph import status as cstatus
 
@@ -576,19 +577,31 @@ def test_a_read_surface_does_not_create_the_store(verb, tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("verb", ["status", "log"])
-def test_a_window_the_go_build_would_reject_is_rejected_here_too(
-    verb, tmp_path, monkeypatch
-):
-    """IF THIS FAILS: the two builds accept different windows over one shared
-    log. `--since 7d` works here and dies on the Go build, so a script copied
-    between them breaks for whoever inherited it, and quietly accepting it as
-    something else would show the wrong window under the right label."""
+def test_days_and_weeks_are_units_and_nonsense_is_refused(verb, tmp_path, monkeypatch):
+    """IF THIS FAILS: `--since 7d`, which agents type, is refused again."""
     repo = _repo(tmp_path, monkeypatch)
 
-    code, out = _run(repo, verb, "--since", "7d")
-
+    assert _run(repo, verb, "--since", "7d")[0] == 0
+    assert _run(repo, verb, "--since", "2w")[0] == 0
+    code, out = _run(repo, verb, "--since", "7 days")
     assert code == 2, out
-    assert "168h" in out, "the error has to name the spelling that works"
+    assert "7d" in out, "the error has to name a spelling that works"
+
+
+def test_log_limit_keeps_the_newest_events(tmp_path, monkeypatch):
+    """IF THIS FAILS: `log --limit` is refused or prints everything."""
+    repo = _repo(tmp_path, monkeypatch)
+    for word in ("one", "two", "three"):
+        was = os.getcwd()
+        os.chdir(repo)
+        try:
+            with redirect_stdout(io.StringIO()):
+                assert cli.main(["note", word, "--as", "writer-a"]) == 0
+        finally:
+            os.chdir(was)
+    code, out = _run(repo, "log", "--type", "note", "--limit", "2")
+    assert code == 0 and "three" in out and "two" in out and "one" not in out, out
+    assert _run(repo, "log", "--limit", "0")[0] == 2
 
 
 @pytest.mark.parametrize("verb", ["status", "log"])
