@@ -961,7 +961,7 @@ def _temp_store_base(root: str) -> Path | None:
     A throwaway repo (a test fixture, a scratch checkout) would otherwise leave
     a store in the real data home that outlives the repo by years.
     """
-    for base in _temp_dirs():
+    for base in sorted(_temp_dirs(), key=len, reverse=True):
         if root.startswith(base.rstrip(os.sep) + os.sep):
             return Path(base) / "comms-stores"
     return None
