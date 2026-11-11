@@ -30,6 +30,13 @@ SAME_SESSION_REASON = "auto-claim: superseded by a claim from the same session"
 SESSION_END_RESULT = "session ended"
 SILENT_AFTER = timedelta(hours=1)
 BRIEFING_CAP = 900
+FOLDER_WINDOW = timedelta(days=14)
+FOLDER_REPOS_SHOWN = 8
+COMMAND_LINES = (
+    '  comms-graph claim <path> --intent "..."   take several files before a change',
+    '  comms-graph release --result "..."        give everything back when done',
+    '  comms-graph note "@who ..."               tell another agent something',
+)
 _HOOK_LOCK_TIMEOUT = 1.0
 
 USAGE = """Usage: comms-graph hook session-start | pre-edit | session-end
@@ -324,7 +331,12 @@ def session_start(payload: HookPayload) -> None:
     from . import cli as _cli
 
     root = _root_of(payload)
-    if root is None or not payload.session_id:
+    if root is None:
+        text = folder_briefing(payload)
+        if text:
+            print(text)
+        return
+    if not payload.session_id:
         return
     log_file = _log.log_path(root)
     if not log_file.is_file():
@@ -345,6 +357,58 @@ def session_start(payload: HookPayload) -> None:
     print(briefing(st, store, root, actor, payload.session_id))
 
 
+def folder_briefing(payload: HookPayload) -> str:
+    """For a session started above its repositories: which of them are in use.
+
+    Silent when none had an event lately. Nothing is written: identity is
+    recorded on the first edit or call inside a repository.
+    """
+    from . import cli as _cli
+
+    try:
+        cwd = Path(payload.cwd).expanduser().resolve() if payload.cwd else Path.cwd().resolve()
+    except OSError:
+        return ""
+    cutoff = datetime.now(timezone.utc).timestamp() - FOLDER_WINDOW.total_seconds()
+    found = []
+    for entry in _log.known_stores():
+        root = entry.get("root") or ""
+        if not entry.get("exists") or entry["modified"] < cutoff:
+            continue
+        try:
+            Path(root).resolve().relative_to(cwd)
+        except (ValueError, OSError):
+            continue
+        found.append(entry)
+    if not found:
+        return ""
+    lines = [f"comms: {len(found)} repositor{'y' if len(found) == 1 else 'ies'} under "
+             f"{cwd.name or str(cwd)} use{'s' if len(found) == 1 else ''} it. "
+             "Your first edit or call inside one identifies you there."]
+    for entry in found[:FOLDER_REPOS_SHOWN]:
+        try:
+            st = _cli._read_state(Path(entry["dir"]) / _log.LOG_FILENAME)
+            mine = _identity.family(st, payload.session_id)
+            held = sum(1 for c in st.claims.values() if c.actor not in mine)
+        except BaseException:  # noqa: BLE001
+            continue
+        lines.append(f"  {entry['name'] or Path(entry['root']).name}  "
+                     f"{held} file{'' if held == 1 else 's'} held by others")
+    if len(found) > FOLDER_REPOS_SHOWN:
+        lines.append(f"  ... {len(found) - FOLDER_REPOS_SHOWN} more")
+    lines.extend(COMMAND_LINES)
+    return _cap(lines)
+
+
+def _cap(lines: list[str]) -> str:
+    out = ""
+    for line in lines:
+        if len(out) + len(line) + 1 > BRIEFING_CAP:
+            break
+        out += line + "\n"
+    return out.rstrip("\n")
+
+
 def briefing(st, store: Path, root: Path, actor: str, agent_session: str) -> str:
     from . import cli as _cli
 
@@ -353,9 +417,7 @@ def briefing(st, store: Path, root: Path, actor: str, agent_session: str) -> str
     lines = [
         f"comms: you are @{actor} in {root.name}. Your first edit of a file claims it "
         "for this session; a file someone else holds blocks the edit.",
-        '  comms-graph claim <path> --intent "..."   take several files before a change',
-        '  comms-graph release --result "..."        give everything back when done',
-        '  comms-graph note "@who ..."               tell another agent something',
+        *COMMAND_LINES,
     ]
     others = [c for c in sorted(st.claims.values(), key=lambda c: c.ts, reverse=True)
               if c.actor not in mine]
@@ -372,12 +434,7 @@ def briefing(st, store: Path, root: Path, actor: str, agent_session: str) -> str
         lines.append("Notes to you:")
         for note in addressed[-3:]:
             lines.append(f"  @{note.actor}: {note.body[:100]}")
-    out = ""
-    for line in lines:
-        if len(out) + len(line) + 1 > BRIEFING_CAP:
-            break
-        out += line + "\n"
-    return out.rstrip("\n")
+    return _cap(lines)
 
 
 def session_end(payload: HookPayload) -> None:
