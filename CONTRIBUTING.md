@@ -1,48 +1,44 @@
 # Contributing to comms
 
-Thanks for your interest in improving `comms`. It's a small, lean project: a
-single Go binary with no runtime dependencies, and contributions that keep it
-that way are very welcome.
+Thanks for your interest in improving `comms`. It is one Python package,
+`comms-graph`, that installs two console scripts (`comms-graph` and `comms`)
+running the same code.
 
 ## Development setup
 
-You need **Go 1.25.13+** (see `go.mod`). Everything runs through the `Makefile`:
+You need **Python 3.11+**. Everything runs through the `Makefile`:
 
 ```bash
-make build      # build ./comms with version info baked in
-make test       # go test ./...
-make race       # go test -race ./...   (what CI runs)
-make fmt        # gofmt -w .
-make vet        # go vet ./...
-make lint       # golangci-lint run     (config in .golangci.yml)
+make test        # pytest in python/ (creates python/.venv on first run)
+make build       # wheel and sdist into python/dist/
+make install     # install this checkout like a user would, then run doctor --fix
+make sync-skill  # copy skills/using-comms/SKILL.md into the package
 ```
 
-There is no codegen, no external services, and no database: `comms` reads and
-writes a per-machine append-only JSONL log under a file lock.
+There is no codegen and no database: `comms` reads and writes a per-machine
+append-only JSONL log under a file lock. Tests point `HOME` at a temp directory;
+never run `install.sh` against your own machine while testing changes to it.
 
 ## Before you open a PR
 
-CI mirrors these exactly, so run them first:
+CI runs `python -m pytest -q` on Ubuntu and macOS with Python 3.11 and 3.13, and
+a clean wheel install. Run `make test` first.
 
-```bash
-make fmt vet test race lint
-```
+New behavior needs tests that assert what a caller can observe: exit codes,
+output, files on disk. If you change `skills/using-comms/SKILL.md`, run
+`make sync-skill`; a test fails when the packaged copy drifts.
 
-All of the following must be green:
+## Releases
 
-- `gofmt` reports no files (the CI step fails on any unformatted file)
-- `go vet ./...` is clean
-- `go test -race ./...` passes
-- `golangci-lint run` passes
-
-New behavior needs tests. The project leans on a strong test suite: if you add
-or change a command, the reducer, or the dashboard's derived state, add a
-`*_test.go` covering it.
+The version lives in one place, `python/comms_graph/__init__.py`
+(`__version__`). To release, bump it, merge to `main`, and push a tag `v<version>`.
+The release workflow fails unless the tag matches, then attaches the wheel, the
+sdist and `install.sh` to the GitHub release. Users upgrade by rerunning
+`install.sh`; `comms-graph doctor` says when an install is stale.
 
 ## Branching model
 
-- **`main`** is always-releasable and is what `go install ...@latest` and the
-  README links resolve to. Tags (`v*`) are cut from `main` and trigger a release.
+- **`main`** is always-releasable and is what the README links resolve to. Tags (`v*`) are cut from `main` and trigger a release.
 - **`develop`** is the integration branch. Open feature branches off `develop`
   and target your PR at `develop`.
 - At release time, `develop` is merged to `main` and a tag is pushed.
