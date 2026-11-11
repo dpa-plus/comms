@@ -6,8 +6,63 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-11
+
+comms is one build now, and it no longer depends on an agent remembering to
+introduce itself or to claim first. This release was shaped by replaying how
+agents used the tool: 26,349 calls from their transcripts and 53,599 logged
+events. Upgrading has one step, `sh install.sh`, described in
+`docs/INSTALL.md`.
+
+### Changed
+
+- **One build.** The Go binary is retired. `comms` and `comms-graph` are the
+  same Python program, installed by `install.sh` from the wheel attached to
+  each release. The log format is unchanged, so every existing log still loads.
+  Agents made 13 calls to the Go build in the month before this release, and
+  the two builds had drifted apart in eight behaviors.
+- **Identity comes from the session.** An agent no longer needs `hello`,
+  `COMMS_ACTOR` or `--as`. Its session gets a name on first use, and later
+  calls resolve to it. `--as` still wins when given, and `hello --as <role>`
+  renames the session. Every name tied to one session counts as the same
+  owner, so a session is never blocked by its own claim. Before this, the
+  session-start hook failed on every recorded run and half of the early hook
+  blocks were an agent blocked by itself.
+- **The first edit claims the file.** `hook pre-edit` records a claim the first
+  time a session edits a free file through Edit, Write or NotebookEdit. Claims
+  made this way are released at session end, when the same session claims the
+  file by hand, or when someone else wants the file and it has nothing
+  uncommitted. Claiming before the first edit had stayed at about 65% across
+  model generations.
+- `status` and `board` print a short view by default: your claims, who else
+  holds how many files, notes to you. `--all` prints everything and `--json`
+  is unchanged.
+- A claim is marked STALE only when it is old and its holder has also been
+  silent for the threshold. A block on a silent holder prints the exact
+  command that takes the file over.
+- The skill ships inside the package and is 112 lines, down from 831. It loads
+  when the session briefing says comms is on, and it covers what agents still
+  have to do themselves: claim before a shell write, name subagents, release,
+  stop at a refusal.
+
 ### Added
 
+- `comms hook session-start`, `hook pre-edit` and `hook session-end` for
+  Claude Code. Session start prints a briefing of at most 900 characters in a
+  repository that uses comms and nothing anywhere else.
+- `comms doctor` checks the install: both commands on `PATH` at this version,
+  the three hooks, the skill copies for Claude and Codex, the board service,
+  the data home and the commit guard. Each failing check prints the command
+  that fixes it, and `doctor --fix` applies what it can.
+- `install.sh`, a real version (`comms version`, `--version`), and a release
+  workflow that refuses a tag that differs from the package version.
+- Commands accept what agents type: global flags before the verb, `task list`,
+  `task show`, `claims`, `whoami`, `findings`, several paths on `check` and
+  `release`, task ids up to 64 characters in any case, and notes up to 1000
+  characters. A mistake is answered in a few lines that name the valid form.
+  `<verb> --help` prints that verb with every flag it takes.
+- `COMMS_HOME` moves the data home. A repository under a temp directory keeps
+  its store under that temp directory.
 - Graph-first work view with readable task names, owners and holds. Open work is
   shown first; completed work, search, zoom, keyboard selection and a list
   alternative are available without leaving the board.
@@ -21,6 +76,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `release <path>` for a path the caller does not hold now fails instead of
+  printing success.
+- An unknown flag is refused. `claim x --reason y` used to drop the flag and
+  exit 0.
+- `check --staged` no longer leaks a git usage error when the coordination
+  root is not a git repository.
+- Tests can no longer write the real data home. 251 of the 258 store folders
+  on the author's machine were test leftovers.
 - Live graph updates preserve search text, keyboard focus, selection and scroll.
 - Multi-word task search retains spaces and leaves no unrelated task selected
   when there are no matches.
@@ -31,6 +94,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   remain unchanged.
 - History retains legacy release references, all affected holders and both ends
   of task dependencies. Resubmitted work no longer inherits an old checked label.
+
+### Removed
+
+- The Go build and its release archives.
+- `lesson`, `plan` and `completion`. None was called after September 2026, and
+  no lesson was ever written.
 
 ## [0.4.0] - 2026-11-11
 
