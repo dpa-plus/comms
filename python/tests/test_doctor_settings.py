@@ -42,3 +42,53 @@ def test_fix_writes_through_a_symlinked_settings_file_and_keeps_the_link(tmp_pat
     assert written["model"] == "opus"
     assert doctor._expected_command("pre-edit") in _commands(real)
     assert doctor._check_hooks().ok
+
+
+@pytest.mark.parametrize("text", [
+    'echo "comms check ok" >> file',
+    "echo comms hook pre-edit is great",
+    "grep comms status.txt",
+    "printf 'comms-graph check' | cat",
+])
+def test_a_hook_that_only_mentions_comms_is_kept(text):
+    path = _settings({"PreToolUse": [{"matcher": "Edit", "hooks": [_cmd(text)]}]})
+    doctor._fix_hooks()
+    assert text in _commands(path)
+
+
+@pytest.mark.parametrize("text", [
+    "comms hello && comms status --since 24h",
+    "/Users/x/.local/bin/comms-graph check --stdin-json",
+    "cd /tmp; comms-graph hook pre-edit",
+    "true || comms status",
+    "cat payload | comms check --stdin-json",
+    "'/opt/my tools/comms' hook session-start",
+])
+def test_a_hook_that_runs_comms_is_replaced(text):
+    path = _settings({"PreToolUse": [{"matcher": "Edit", "hooks": [_cmd(text)]}]})
+    doctor._fix_hooks()
+    assert text not in _commands(path)
+
+
+def test_only_the_comms_hook_leaves_a_mixed_entry():
+    keep = ['echo "comms check ok" >> file', "echo guard"]
+    path = _settings({"SessionStart": [{"hooks": [_cmd(keep[0]), _cmd("comms hello"),
+                                                  _cmd(keep[1])]}]})
+    doctor._fix_hooks()
+    entries = json.loads(path.read_text())["hooks"]["SessionStart"]
+    assert {"hooks": [_cmd(keep[0]), _cmd(keep[1])]} in entries
+
+
+@pytest.mark.parametrize("hooks", [
+    "not an object",
+    {"PreToolUse": {"matcher": "Edit"}},
+    {"PreToolUse": [{"matcher": "Edit", "hooks": "comms check --stdin-json"}]},
+])
+def test_a_hooks_value_of_the_wrong_shape_is_reported_and_left_alone(hooks):
+    path = _settings(hooks)
+    before = path.read_bytes()
+    check = doctor._check_hooks()
+    assert not check.ok
+    assert "by hand" in check.command
+    assert check.fixer is None
+    assert path.read_bytes() == before
