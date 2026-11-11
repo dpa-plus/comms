@@ -44,6 +44,8 @@ class Verb:
     # The verb parses its own argv; global flags before it are dropped, not moved.
     raw: bool = False
     default_sub: str = ""
+    # False for a verb that reads no positional words, so a stray one is refused.
+    words: bool = True
 
 
 class Refusal(Exception):
@@ -140,7 +142,7 @@ VERBS: tuple[Verb, ...] = (
              Flag("reason", "<text>", "why it is not theirs to hold", needs="force",
                   hint='To say how it went, use --result "...".'),
          )),
-    Verb("board", "your claims, and how many files others hold",
+    Verb("board", "your claims, and how many files others hold", words=False,
          usage=("board [--all]",),
          flags=(Flag("all", "", "every claim, the way it used to print"),)),
     Verb("check", "would an edit or a commit collide?",
@@ -157,9 +159,9 @@ VERBS: tuple[Verb, ...] = (
                Verb("list", "what you could start now (same as next)", expands=("next",)),
                Verb("show", "what a task is and what came before (same as brief)",
                     expands=("brief",)))),
-    Verb("next", "what you could start now", usage=("next",)),
+    Verb("next", "what you could start now", usage=("next",), words=False),
     Verb("brief", "what a task is, and what came before", usage=("brief <task-id>",)),
-    Verb("tasks", "draw the task graph to an HTML file", usage=("tasks [--out <file.html>]",),
+    Verb("tasks", "draw the task graph to an HTML file", words=False, usage=("tasks [--out <file.html>]",),
          flags=(Flag("out", "<file>", "where to write the page"),)),
     Verb("find", "record something worth keeping", writes=True,
          usage=('find <bug|fix|ship|decision|gotcha> "..." [--ref kind:value]...',),
@@ -187,14 +189,14 @@ VERBS: tuple[Verb, ...] = (
                   usage=('session lead [<actor>] [--reason "..."]',),
                   flags=(Flag("reason", "<text>", "why, in the log, under your name"),)),
          )),
-    Verb("status", "your claims, who else holds what, notes to you, open tasks",
+    Verb("status", "your claims, who else holds what, notes to you, open tasks", words=False,
          usage=("status [--all] [--since 24h]",),
          flags=(
              Flag("all", "", "everything: roster, every claim, findings, notes, tasks"),
              Flag("since", "<dur>", "lookback for findings and notes (default 24h; 30m, 6h, 7d)"),
              Flag("stale-after", "<dur>", "age past which a held claim is STALE (default 1h)"),
          )),
-    Verb("log", "the history, filtered", usage=('log [--type claim,note] [--since 24h] [--limit 20]',),
+    Verb("log", "the history, filtered", words=False, usage=('log [--type claim,note] [--since 24h] [--limit 20]',),
          flags=(
              Flag("since", "<dur>", "lookback window (default 24h; 30m, 6h, 7d)"),
              Flag("type", "<a,b>", "only these event types"),
@@ -209,8 +211,9 @@ VERBS: tuple[Verb, ...] = (
              Flag("model", "<id>", "the model you run on"),
              Flag("vendor", "<name>", "who made you (anthropic, openai)"),
          )),
-    Verb("whoami", "who this call is, and where", usage=("whoami",)),
-    Verb("claims", "the ground you hold right now", aliases=("mine",), usage=("claims",)),
+    Verb("whoami", "who this call is, and where", usage=("whoami",), words=False),
+    Verb("claims", "the ground you hold right now", aliases=("mine",), usage=("claims",),
+         words=False),
     Verb("findings", "the findings log (same as log --type finding, 7 days)",
          expands=("log", "--type", "finding", "--since", "168h")),
     Verb("notes", "the notes log (same as log --type note, 7 days)",
@@ -236,7 +239,7 @@ VERBS: tuple[Verb, ...] = (
              Flag("board", "", "also install the launchd board job"),
          )),
     Verb("mcp", "serve these as MCP tools", raw=True, usage=("mcp",)),
-    Verb("ui", "live board: both graphs, live claims", usage=("ui [--port 7878]",),
+    Verb("ui", "live board: both graphs, live claims", words=False, usage=("ui [--port 7878]",),
          flags=(
              Flag("port", "<n>", "port to listen on (default 7878)"),
              Flag("host", "<addr>", "address to listen on (default 127.0.0.1)"),
@@ -390,6 +393,15 @@ def _unknown_flag(path: str, verb: Verb, name: str) -> Refusal:
     return Refusal(lines)
 
 
+def _stray_word(path: str, word: str) -> Refusal:
+    lines = [f"error: {path} takes no arguments, got {word!r}"]
+    task = _BY_NAME["task"]
+    if path == "tasks" and any(s.name == word for s in task.subs):
+        lines.append(f"  Did you mean `comms-graph task {word}`?")
+    lines.append(f"  `comms-graph {path} --help` shows its flags.")
+    return Refusal(lines)
+
+
 def check_flags(path: str, verb: Verb, args: list[str]) -> list[str]:
     """``args`` with aliases spelled canonically, or a Refusal for an unknown flag."""
     out: list[str] = []
@@ -400,6 +412,8 @@ def check_flags(path: str, verb: Verb, args: list[str]) -> list[str]:
         m = _FLAG.match(tok)
         i += 1
         if m is None:
+            if not verb.words:
+                raise _stray_word(path, tok)
             out.append(tok)
             continue
         flag = _flag_lookup(verb, m.group(1))

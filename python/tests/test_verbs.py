@@ -149,3 +149,18 @@ def test_a_flag_that_needs_a_value_and_has_none_is_refused(tmp_path, monkeypatch
     assert code == 2
     assert err.splitlines()[0] == f"error: {flag} needs a value", err
     assert not clog.log_path(repo).exists(), "nothing is written"
+
+
+@pytest.mark.parametrize("argv", [["status", "extra"], ["board", "x"], ["whoami", "me"],
+                                  ["claims", "a"], ["next", "x"], ["log", "x"],
+                                  ["tasks", "list"]])
+def test_a_verb_without_positionals_refuses_stray_words(tmp_path, monkeypatch, capsys, argv):
+    code, out, err, repo = _main(tmp_path, monkeypatch, capsys, *argv)
+    assert code == 2, out + err
+    assert repr(argv[1]) in err.splitlines()[0], err
+    assert not list(repo.glob("*.html")), "nothing is written into the repository"
+
+
+def test_tasks_list_points_at_task_list(tmp_path, monkeypatch, capsys):
+    code, out, err, _repo = _main(tmp_path, monkeypatch, capsys, "tasks", "list")
+    assert "`comms-graph task list`" in err, err
