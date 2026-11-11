@@ -241,6 +241,9 @@ def _fix_hooks() -> list[str]:
     text = json.dumps(updated, indent=_indent_of(raw), ensure_ascii=False) + "\n"
     out: list[str] = []
     path.parent.mkdir(parents=True, exist_ok=True)
+    # A dotfiles setup links settings.json elsewhere: write the file the link
+    # names, so the link survives and the real file gets the hooks.
+    path = path.resolve()
     if path.exists():
         stamp = _dt.datetime.now().strftime("%Y%m%dT%H%M%S%f")
         backup = path.with_name(f"{path.name}.bak-{stamp}")
