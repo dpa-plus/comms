@@ -407,7 +407,10 @@ def check_flags(path: str, verb: Verb, args: list[str]) -> list[str]:
             raise _unknown_flag(path, verb, m.group(1))
         seen.add(flag.name)
         out.append(f"--{flag.name}{m.group(2) or ''}")
-        if flag.arg and m.group(2) is None and i < len(args) and not _FLAG.match(args[i]):
+        if flag.arg and m.group(2) is None:
+            if i >= len(args) or _FLAG.match(args[i]):
+                raise Refusal([f"error: --{m.group(1)} needs a value",
+                               f"  `comms-graph {path} --help` shows each flag."])
             out.append(args[i])
             i += 1
     for f in verb.flags:

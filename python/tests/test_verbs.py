@@ -121,3 +121,31 @@ def test_the_flags_each_verb_reads_are_all_in_the_table():
     read = set(re.findall(r'flags\.get\("([a-z-]+)"', src))
     read |= set(re.findall(r'"([a-z-]+)" (?:not )?in flags', src))
     assert read <= named, f"read by the code but not in the table: {sorted(read - named)}"
+
+
+def _main(tmp_path, monkeypatch, capsys, *argv):
+    import subprocess
+
+    repo = tmp_path / "r"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", "."], cwd=repo, check=True)
+    monkeypatch.chdir(repo)
+    code = cli.main(list(argv))
+    out = capsys.readouterr()
+    return code, out.out, out.err, repo
+
+
+@pytest.mark.parametrize("argv,flag", [
+    (["claim", "p.txt", "--as"], "--as"),
+    (["claim", "e.txt", "--intent"], "--intent"),
+    (["claim", "e.txt", "--intent", "--as", "someone"], "--intent"),
+    (["release", "--result"], "--result"),
+])
+def test_a_flag_that_needs_a_value_and_has_none_is_refused(tmp_path, monkeypatch, capsys,
+                                                         argv, flag):
+    from comms_graph import log as clog
+
+    code, out, err, repo = _main(tmp_path, monkeypatch, capsys, *argv)
+    assert code == 2
+    assert err.splitlines()[0] == f"error: {flag} needs a value", err
+    assert not clog.log_path(repo).exists(), "nothing is written"
