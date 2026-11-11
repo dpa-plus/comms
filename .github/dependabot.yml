@@ -1,11 +1,11 @@
 version: 2
 updates:
-  - package-ecosystem: gomod
-    directory: /
+  - package-ecosystem: pip
+    directory: /python
     schedule:
       interval: weekly
     groups:
-      go-dependencies:
+      python-dependencies:
         update-types: [minor, patch]
     commit-message:
       prefix: "chore"
