@@ -47,13 +47,11 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import contact as _contact
 from . import hooks as _hooks
 from . import identity as _identity
 from . import lock as _lock
 from . import log as _log
 from . import task as _task
-from . import taskcode as _taskcode
 from . import taskview as _taskview
 from . import resolve as _resolve
 from . import scope as _scope
@@ -1178,6 +1176,8 @@ def _advice(root: Path, graph_flag: str | None, scope: _scope.Scope, others: lis
     for actor, scope_str, other_scope in others:
         res = _resolve.resolve(graph, other_scope, root)
         resolved_others.append((actor, scope_str, res))
+    from . import contact as _contact
+
     body = _contact.render(_contact.contact(graph, mine, resolved_others))
     return (stale + "\n" + body) if stale else body
 
@@ -2435,6 +2435,8 @@ def _cmd_brief(argv: list[str]) -> int:
             def _sof(d, k):
                 v = (d or {}).get(k)
                 return v if isinstance(v, str) else ""
+            from . import taskcode as _taskcode
+
             files, actors = _taskcode.files_from_log(_log.read(log_file), _sof)
             me = _actor(flags, write=False)
             links = _taskcode.link(graph, st.tasks, files, root, actors, me)
