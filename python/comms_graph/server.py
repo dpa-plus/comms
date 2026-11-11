@@ -35,6 +35,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from . import __version__
 from . import lock as _lock
 from . import log as _log
 from . import state as _state
@@ -3451,6 +3452,7 @@ class Board:
         # request does not go out only to come back 403.
         snap["board_actor"] = _actor_name(os.environ.get("COMMS_ACTOR", ""))
         snap["frontend_build"] = self.frontend_build
+        snap["version"] = __version__
         return snap
 
     def _store_by_key(self, key: str):
