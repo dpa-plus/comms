@@ -28,6 +28,7 @@ import os
 import subprocess
 import secrets
 import sys
+import tempfile
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -857,7 +858,12 @@ def user_data_home() -> Path:
     darwin and linux only, and inventing a third layout here would put the log
     somewhere no ``comms`` binary looks: a store that exists but that nothing
     else on the machine can find is worse than a clear error.
+
+    An absolute ``COMMS_HOME`` wins over all of it.
     """
+    override = os.environ.get("COMMS_HOME", "")
+    if override and os.path.isabs(override):
+        return Path(override)
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Application Support"
     if sys.platform.startswith(("linux", "freebsd", "netbsd", "openbsd")):
@@ -934,7 +940,26 @@ def store_dir(repo_root: str | os.PathLike[str]) -> Path:
     so an existing store is found rather than a second one started beside it.
     The lock file lives here too, next to the log it guards.
     """
+    temp_base = _temp_store_base(coordination_root(repo_root))
+    if temp_base is not None:
+        return temp_base / repo_hash(repo_root)
     return user_data_home() / "comms" / repo_hash(repo_root)
+
+
+def _temp_dirs() -> list[str]:
+    return sorted({os.path.realpath(tempfile.gettempdir()), os.path.realpath("/tmp")})
+
+
+def _temp_store_base(root: str) -> Path | None:
+    """``<tempdir>/comms-stores`` for a repo that itself lives under a temp dir.
+
+    A throwaway repo (a test fixture, a scratch checkout) would otherwise leave
+    a store in the real data home that outlives the repo by years.
+    """
+    for base in _temp_dirs():
+        if root.startswith(base.rstrip(os.sep) + os.sep):
+            return Path(base) / "comms-stores"
+    return None
 
 
 def log_path(repo_root: str | os.PathLike[str]) -> Path:
@@ -979,12 +1004,15 @@ def known_stores(data_home: Path | None = None) -> list[dict]:
     lists every project on the machine and folding 188 logs to draw a sidebar
     would cost seconds.
     """
-    home = data_home or (user_data_home() / "comms")
+    homes = [data_home] if data_home else [
+        user_data_home() / "comms", *(Path(t) / "comms-stores" for t in _temp_dirs())]
+    entries: list[Path] = []
+    for home in homes:
+        try:
+            entries.extend(sorted(home.iterdir()))
+        except OSError:
+            continue
     out: list[dict] = []
-    try:
-        entries = sorted(home.iterdir())
-    except OSError:
-        return out
     for d in entries:
         log = d / LOG_FILENAME
         try:
@@ -1000,6 +1028,7 @@ def known_stores(data_home: Path | None = None) -> list[dict]:
             pass
         out.append({
             "key": d.name,
+            "dir": str(d),
             "root": root,
             "name": os.path.basename(root) if root else "",
             "bytes": st.st_size,
@@ -1022,4 +1051,8 @@ def is_ephemeral_store(path: str | os.PathLike[str]) -> bool:
     through logs that cannot see each other.
     """
     clean = os.path.normpath(os.fspath(path)) + os.sep
+    chosen = os.environ.get("COMMS_HOME", "")
+    if "/comms-stores/" in clean or (
+            chosen and clean.startswith(os.path.normpath(chosen) + os.sep)):
+        return False
     return clean.startswith(_EPHEMERAL_ROOTS)

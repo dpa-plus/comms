@@ -57,6 +57,7 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(h))
     monkeypatch.setenv("XDG_DATA_HOME", str(h / ".local" / "share"))
     monkeypatch.delenv("COMMS_ACTOR", raising=False)
+    monkeypatch.delenv("COMMS_HOME", raising=False)
     monkeypatch.delenv("VISUAL", raising=False)
     monkeypatch.delenv("EDITOR", raising=False)
     return h
