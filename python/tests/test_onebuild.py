@@ -60,14 +60,6 @@ def test_wheel_has_both_console_scripts_and_the_source_version(tmp_path):
     assert packaged_skill == (src / "comms_graph" / "data" / "using-comms" / "SKILL.md").read_bytes()
 
 
-def test_packaged_skill_is_the_repo_skill():
-    repo_skill = REPO / "skills" / "using-comms" / "SKILL.md"
-    if not repo_skill.exists():
-        pytest.skip("not inside the repo checkout")
-    assert doctor._packaged_skill() == repo_skill.read_bytes(), \
-        "run `make sync-skill`: the packaged skill drifted from skills/using-comms/SKILL.md"
-
-
 # --- 2. doctor --------------------------------------------------------------
 
 

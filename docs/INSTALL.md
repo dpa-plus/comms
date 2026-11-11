@@ -38,7 +38,7 @@ every check passes and 1 when something still needs fixing.
 
 | Check | Passes when |
 |---|---|
-| `comms-graph on PATH`, `comms on PATH` | Both commands are found and report this version. |
+| **comms-graph on PATH**, **comms on PATH** | Both commands are found and report this version. |
 | `claude hooks` | `~/.claude/settings.json` has the three comms hooks, pointing at this install. |
 | `skill copies` | `~/.claude/skills/using-comms/SKILL.md` and `~/.codex/skills/using-comms/SKILL.md` match the skill inside the package. |
 | `board job` | The board runs as a login service and reports this version. Skipped where there is no `launchd`. |

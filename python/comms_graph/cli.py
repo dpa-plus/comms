@@ -15,7 +15,7 @@ and they are not the same kind of thing:
   * A CONTACT WARNING is advisory. It is derived from the map, which is measured
     to flag more pairs than really change together and to miss between a third
     and a half of the ones that do. It never blocks, never sets a non-zero exit
-    status, and is never phrased as a verdict. See ``docs/COMMS.md``.
+    status, and is never phrased as a verdict. See ``the README (the task graph and the code map)``.
 
 Mixing those two would destroy the value of both: an advisory that blocks gets
 switched off, and a hard conflict buried in advice gets skimmed past.
@@ -1175,8 +1175,10 @@ def _cmd_release(argv: list[str]) -> int:
             return _release_somebody_elses(
                 st, log_file, actor, target, flags.get("reason", "").strip())
         agent_session = _identity.host_session()
-        names = ({actor} | set(st.family_of(agent_session))
-                 if actor in st.family_of(agent_session) else {actor})
+        names = {actor}
+        family = st.families.get(agent_session)
+        if family is not None and family.own_actor == actor:
+            names.add(_identity.auto_name(agent_session))
         mine = sorted((c for c in st.claims.values() if c.actor in names), key=lambda c: c.ts)
         targets = [p for p in positional if p]
         if not targets:
@@ -1501,7 +1503,8 @@ def _cmd_check_staged(flags: dict) -> int:
     # commit is refused outright in that state, so anything still proceeding is
     # an amend or --allow-empty, and looking costs nothing.
     amend_paths: list[str] = []
-    if _amending(root) or not staged:
+    in_git_hook = bool(os.environ.get("GIT_INDEX_FILE"))
+    if _amending(root) or (not staged and in_git_hook):
         amend_paths = _head_paths(git, root)
 
     if not staged and not amend_paths:

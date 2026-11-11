@@ -12,7 +12,6 @@ You need **Python 3.11+**. Everything runs through the `Makefile`:
 make test        # pytest in python/ (creates python/.venv on first run)
 make build       # wheel and sdist into python/dist/
 make install     # install this checkout like a user would, then run doctor --fix
-make sync-skill  # copy skills/using-comms/SKILL.md into the package
 ```
 
 There is no codegen and no database: `comms` reads and writes a per-machine
@@ -25,8 +24,9 @@ CI runs `python -m pytest -q` on Ubuntu and macOS with Python 3.11 and 3.13, and
 a clean wheel install. Run `make test` first.
 
 New behavior needs tests that assert what a caller can observe: exit codes,
-output, files on disk. If you change `skills/using-comms/SKILL.md`, run
-`make sync-skill`; a test fails when the packaged copy drifts.
+output, files on disk. The agent skill has one copy,
+`python/comms_graph/data/using-comms/SKILL.md`, and a test checks that every
+command it shows is one the CLI dispatches.
 
 ## Releases
 

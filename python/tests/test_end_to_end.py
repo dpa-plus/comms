@@ -613,8 +613,26 @@ def test_the_hook_path_is_the_one_the_cli_dispatches():
 
 def _package_docs():
     """Every prose file that ships with or documents this package."""
-    root = Path(__file__).resolve().parents[1]
-    return [root / "README.md", *sorted((root / "docs").glob("*.md"))]
+    package = Path(__file__).resolve().parents[1]
+    repo = package.parent
+    return [repo / "README.md", *sorted((repo / "docs").glob("*.md")),
+            repo / "examples" / "AGENTS.md.template",
+            package / "comms_graph" / "data" / "using-comms" / "SKILL.md"]
+
+
+def _shown_commands(text: str) -> set[str]:
+    """Verbs in code spans and code blocks. Prose such as "comms is" is not a command."""
+    import re
+
+    code = re.findall(r"`([^`\n]+)`", text)
+    for block in re.findall(r"```[a-z]*\n(.*?)```", text, re.S):
+        code.extend(block.splitlines())
+    shown = set()
+    for line in code:
+        m = re.match(r"\s*(?:[A-Z_]+=\S+ )*comms(?:-graph)?((?: --(?:repo|root|as) \S+)*) ([a-z][a-z-]*)", line)
+        if m:
+            shown.add(m.group(2))
+    return shown
 
 
 def test_no_document_teaches_a_command_from_the_tree_this_was_split_out_of():
@@ -644,7 +662,7 @@ def test_every_command_the_documents_show_is_one_the_cli_dispatches():
     from comms_graph import verbs as cverbs
 
     for doc in _package_docs():
-        shown = set(re.findall(r"comms-graph ([a-z-]+)", doc.read_text(encoding="utf-8")))
+        shown = _shown_commands(doc.read_text(encoding="utf-8"))
         missing = {v for v in shown if cverbs.lookup(v) is None}
         assert not missing, f"{doc.name} shows {sorted(missing)}, which the CLI does not dispatch"
 

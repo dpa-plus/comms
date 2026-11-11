@@ -240,6 +240,7 @@ VERBS: tuple[Verb, ...] = (
          flags=(
              Flag("port", "<n>", "port to listen on (default 7878)"),
              Flag("host", "<addr>", "address to listen on (default 127.0.0.1)"),
+             Flag("no-open", "", "accepted for old launchers; the board never opens a browser"),
          )),
     Verb("version", "print the version", usage=("version",)),
     Verb("help", "this list, or one command's flags", usage=("help [<command>]",)),

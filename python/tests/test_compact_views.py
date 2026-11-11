@@ -115,15 +115,27 @@ def test_whoami_and_claims_for_the_session_name(tmp_path):
     assert code == 0 and "a.txt" in mine
 
 
-def test_bare_release_gives_back_everything_the_session_holds(tmp_path):
+def test_bare_release_gives_back_the_callers_claims_and_leaves_a_subagents(tmp_path):
     repo = _git_repo(tmp_path / "repo")
     (repo / "b.txt").write_text("b\n")
     env = {"CLAUDE_CODE_SESSION_ID": SESSION}
     _run(repo, ["claim", "a.txt", "--intent", "lead"], env)
     _run(repo, ["claim", "b.txt", "--intent", "subagent", "--as", "sub-1"], env)
     code, text = _run(repo, ["release", "--result", "done"], env)
-    assert code == 0 and "RELEASED a.txt" in text and "RELEASED b.txt" in text
-    assert "holds nothing" in _run(repo, ["claims"], env)[1]
+    assert code == 0 and "RELEASED a.txt" in text and "b.txt" not in text
+    code, text = _run(repo, ["release", "--as", "sub-1"], env)
+    assert code == 0 and "RELEASED b.txt" in text
+
+
+def test_a_subagents_bare_release_leaves_the_leads_claims(tmp_path):
+    repo = _git_repo(tmp_path / "repo")
+    (repo / "b.txt").write_text("b\n")
+    env = {"CLAUDE_CODE_SESSION_ID": SESSION}
+    _run(repo, ["claim", "a.txt", "--intent", "lead"], env)
+    _run(repo, ["claim", "b.txt", "--intent", "subagent", "--as", "sub-1"], env)
+    code, text = _run(repo, ["release", "--as", "sub-1", "--result", "done"], env)
+    assert code == 0 and "RELEASED b.txt" in text and "a.txt" not in text
+    assert "a.txt" in _run(repo, ["claims"], env)[1]
 
 
 def test_bare_release_never_touches_another_sessions_claims(tmp_path):
