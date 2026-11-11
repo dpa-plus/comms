@@ -680,6 +680,31 @@ def _parse_scope_or_exit(raw: str) -> _scope.Scope:
 # ---------------------------------------------------------------------------
 
 
+def _claim_obstacles(st, root: Path, scope, scope_str: str, actor: str,
+                     agent_session: str) -> tuple[list, list]:
+    """What stands in the way of a CLI claim, and the releases that clear the rest.
+
+    The caller's own claims never block it: those under its name, and on the
+    edit path's rule those of its agent session under any name. The session's
+    auto-claims under another name are superseded. Writes nothing, so a refused
+    claim leaves the log as it was.
+    """
+    def mine(claim) -> bool:
+        return claim.actor == actor or (
+            bool(agent_session) and _identity.owns(st, claim, agent_session))
+
+    overlapping = sorted((c for c in st.claims.values() if _scope.overlaps(c.scope, scope)),
+                         key=lambda c: c.ts)
+    candidates = [c for c in overlapping
+                  if not mine(c) or (c.auto and c.actor != actor)]
+    conflicts, releases = _hooks.give_way(st, root, candidates, actor, agent_session)
+    if not conflicts:
+        twin = _uncreated_twin(st, scope_str, root, mine)
+        if twin is not None:
+            conflicts = [twin]
+    return conflicts, releases
+
+
 def _render_conflicts(conflicts: list, scope_str: str) -> str:
     lines = [
         "CLAIM CONFLICT: not recorded. Somebody else already holds this ground.",
@@ -767,13 +792,12 @@ def _cmd_claim_many(positional: list[str], flags: dict) -> int:
         # EVERY scope first. The whole point is that nothing is written until we
         # know all of them are free.
         blocked: list[tuple[str, object]] = []
+        releases: dict[str, object] = {}
         for scope_str, scope in scopes:
-            conflicts = _hooks.yield_auto_claims(
-                st, log_file, root, st.conflicts_for(scope, actor), actor,
-                _identity.host_session())
-            if not conflicts:
-                twin = _uncreated_twin(st, scope_str, root, lambda c: c.actor == actor)
-                conflicts = [twin] if twin is not None else []
+            conflicts, gives_way = _claim_obstacles(
+                st, root, scope, scope_str, actor, _identity.host_session())
+            for event in gives_way:
+                releases.setdefault(event.data["refs"][0], event)
             if conflicts:
                 blocked.append((scope_str, conflicts[0]))
 
@@ -806,6 +830,7 @@ def _cmd_claim_many(positional: list[str], flags: dict) -> int:
             claim_data["task"] = task_tag
         greeting = _hello_if_unknown(st, actor)
         batch = [greeting] if greeting is not None else []
+        batch.extend(releases.values())
         superseded = [c for c in st.claims.values()
                       if c.actor == actor and str(c.scope) in seen]
         if superseded:
@@ -885,7 +910,8 @@ def _cmd_claim(argv: list[str]) -> int:
                 for c in holders[:3]:
                     _err(f"    @{c.actor} holds {c.scope}  [{c.id}]")
                 return EXIT_CONFLICT
-        conflicts = st.conflicts_for(scope, actor)
+        conflicts, gives_way = _claim_obstacles(
+            st, root, scope, scope_str, actor, _identity.host_session())
         # Taking ground off somebody who is not coming back. The fold has always
         # understood this: a claim carrying `steals` displaces the named one
         # atomically, and nothing wrote it, so an abandoned claim could only be
@@ -923,12 +949,6 @@ def _cmd_claim(argv: list[str]) -> int:
             conflicts = [c for c in conflicts if c.id != target.id]
         else:
             claim_data_steal = {}
-        conflicts = _hooks.yield_auto_claims(
-            st, log_file, root, conflicts, actor, _identity.host_session())
-        if not conflicts:
-            twin = _uncreated_twin(st, scope_str, root, lambda c: c.actor == actor)
-            if twin is not None:
-                conflicts = [twin]
         if conflicts:
             # Write down the refusal. A prevented collision that leaves no trace
             # is why a log of thousands of claims can honestly report having
@@ -995,7 +1015,7 @@ def _cmd_claim(argv: list[str]) -> int:
         # it are different ground and holding both is legitimate.
         superseded = [c for c in st.claims.values()
                       if c.actor == actor and str(c.scope) == str(scope)]
-        batch = ([greeting] if greeting is not None else [])
+        batch = ([greeting] if greeting is not None else []) + gives_way
         if superseded:
             batch.append(_tagged(st, actor, _log.TYPE_RELEASE, None, {
                 "refs": [c.id for c in superseded],

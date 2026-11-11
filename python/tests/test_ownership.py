@@ -206,3 +206,47 @@ def test_a_session_renamed_twice_by_an_older_build_still_agrees_with_release(tmp
     code, out, _ = _run(repo, ["release"], env=env)
     assert "nothing to release" in out and "release --as" in out
     assert len(_claims(repo)) == 2
+
+
+# ---------------------------------------------------------------------------
+# finding 7: a batch claim follows the single-claim rule and writes nothing on failure
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("scopes", [["src/a.py"], ["src/a.py", "src/b.py"]])
+def test_a_claim_is_not_blocked_by_its_sessions_claim_under_another_name(tmp_path, scopes):
+    repo = _repo(tmp_path)
+    env = {"CLAUDE_CODE_SESSION_ID": SESSION_A}
+    code, out, err = _run(repo, ["claim", "src/a.py", "--as", "lead-x"], env=env)
+    assert code == 0, out + err
+    code, out, err = _run(repo, ["claim", *scopes, "--as", "sub-y", "--intent", "x"], env=env)
+    assert code == 0, out + err
+    assert _run(repo, ["claim", "src/a.py", "--as", "sub-y"], env={
+        "CLAUDE_CODE_SESSION_ID": SESSION_B})[0] == 1, "another session is still blocked"
+
+
+def test_a_failed_batch_claim_writes_no_release(tmp_path):
+    repo = _repo(tmp_path)
+    _start_store(repo)
+    env = {"CLAUDE_CODE_SESSION_ID": SESSION_A}
+    assert _edit(repo, "src/a.py", SESSION_A)[0] == 0
+    before = [e.id for e in _events(repo) if e.type in ("claim", "release")]
+
+    code, out, err = _run(repo, ["claim", "src/a.py", "src/b.py", "--as", "lead-x",
+                                 "--intent", "both"], env=env)
+    assert code == 1, out + err
+    after = [e.id for e in _events(repo) if e.type in ("claim", "release")]
+    assert after == before, "a refused batch changes no claim"
+    assert _claims(repo)["src/a.py"].auto
+
+
+def test_a_batch_claim_takes_over_its_sessions_auto_claim(tmp_path):
+    repo = _repo(tmp_path)
+    env = {"CLAUDE_CODE_SESSION_ID": SESSION_A}
+    _run(repo, ["note", "hi", "--as", "other-agent"], env={"CLAUDE_CODE_SESSION_ID": "x"})
+    assert _edit(repo, "src/a.py", SESSION_A)[0] == 0
+    code, out, err = _run(repo, ["claim", "src/a.py", "src/b.py", "--as", "lead-x",
+                                 "--intent", "both"], env=env)
+    assert code == 0, out + err
+    held = _claims(repo)
+    assert held["src/a.py"].actor == "lead-x" and not held["src/a.py"].auto

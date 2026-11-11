@@ -226,16 +226,16 @@ def _clean_in_git(root: Path, path: str) -> bool:
     return status.returncode == 0 and not status.stdout.strip()
 
 
-def yield_auto_claims(st, log_file: Path, root: Path, conflicts: list, actor: str,
-                      agent_session: str = "") -> list:
-    """Release blocking auto-claims that should not block. Caller holds the lock.
+def give_way(st, root: Path, conflicts: list, actor: str,
+             agent_session: str = "") -> tuple[list, list]:
+    """The conflicts that still stand, and the releases of auto-claims that give way.
 
-    One yields when its file has nothing uncommitted, or when it belongs to the
-    caller's own agent session. Returns the conflicts that still stand.
+    An auto-claim gives way when it belongs to the caller's own agent session,
+    or when its file has nothing uncommitted. Writes nothing.
     """
     from . import cli as _cli
 
-    remaining = []
+    remaining, releases = [], []
     for claim in conflicts:
         reason = ""
         if claim.auto and claim.id in st.claims:
@@ -247,13 +247,13 @@ def yield_auto_claims(st, log_file: Path, root: Path, conflicts: list, actor: st
             remaining.append(claim)
             continue
         writer = actor or claim.actor
-        _log.append(log_file, _cli._tagged(st, writer, _log.TYPE_RELEASE, None, {
+        releases.append(_cli._tagged(st, writer, _log.TYPE_RELEASE, None, {
             "refs": [claim.id],
             "result": reason,
             "original_actor": claim.actor,
             "arbitrator": writer,
         }))
-    return remaining
+    return remaining, releases
 
 
 def _yield_clean_auto_claims_locked(root: Path, log_file: Path, conflicts: list,
@@ -266,7 +266,10 @@ def _yield_clean_auto_claims_locked(root: Path, log_file: Path, conflicts: list,
         with _lock.file_lock(log_file.parent / ".lock", timeout=_HOOK_LOCK_TIMEOUT):
             st = _cli._read_state(log_file)
             current = [st.claims[c.id] for c in conflicts if c.id in st.claims]
-            return yield_auto_claims(st, log_file, root, current, actor, agent_session)
+            remaining, releases = give_way(st, root, current, actor, agent_session)
+            if releases:
+                _log.append_batch(log_file, releases)
+            return remaining
     except Exception:
         return conflicts
 
