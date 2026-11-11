@@ -102,7 +102,7 @@ def test_hello_lets_the_pre_edit_hook_recognise_the_actor(tmp_path, monkeypatch)
     code, out, err = _run(repo, "hello", "--as", "claude-dev", session="sess-1")
     assert code == 0, out + err
     st = _state_of(repo)
-    assert ccli._hook_actor(st, "sess-1", "") == "claude-dev"
+    assert st.families["sess-1"].latest_actor == "claude-dev"
 
 
 def test_an_explicit_hello_is_written_exactly_like_the_automatic_one(tmp_path, monkeypatch):
@@ -216,14 +216,20 @@ def test_a_positional_name_overrides_the_environment(tmp_path, monkeypatch):
     assert set(_state_of(repo).sessions) == {"alice"}
 
 
-def test_hello_with_no_actor_anywhere_refuses_rather_than_guessing(tmp_path, monkeypatch):
-    """IF THIS FAILS: an unnamed agent gets a default identity, and two agents
-    sharing one name cannot detect a conflict between them: the exact failure
-    the actor requirement exists to prevent."""
+def test_hello_with_no_actor_and_no_session_refuses_rather_than_guessing(tmp_path, monkeypatch):
+    """IF THIS FAILS: an agent with no name and no host session gets a shared
+    default identity, and two agents sharing one name cannot detect a conflict."""
     repo = _repo(tmp_path, monkeypatch)
-    code, out, err = _run(repo, "hello", session="s1")
+    code, out, err = _run(repo, "hello")
     assert code == 2 and "no actor" in err
     assert _events_of(repo) == []
+
+
+def test_hello_in_a_session_with_no_name_uses_the_session_auto_name(tmp_path, monkeypatch):
+    repo = _repo(tmp_path, monkeypatch)
+    code, out, err = _run(repo, "hello", session="5f3a9c-rest-of-id")
+    assert code == 0, out + err
+    assert out.startswith("@claude-5f3a9c registered."), out
 
 
 def test_hello_names_the_actor_on_the_first_line(tmp_path, monkeypatch):

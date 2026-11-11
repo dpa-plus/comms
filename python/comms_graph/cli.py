@@ -48,6 +48,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import contact as _contact
+from . import hooks as _hooks
+from . import identity as _identity
 from . import lock as _lock
 from . import log as _log
 from . import task as _task
@@ -72,6 +74,7 @@ USAGE = """Usage: comms-graph <command>
   check <path> | check --stdin-json             would an edit here collide?
   check --staged [--as <actor>]                 would this COMMIT take
                                                 somebody else's claimed work?
+  hook session-start|pre-edit|session-end       Claude Code hooks (JSON on stdin)
 
   task add|edge|done|review ...                 declare and move work
   plan --from <file.json>                       a whole plan, atomically
@@ -99,8 +102,8 @@ USAGE = """Usage: comms-graph <command>
       src/foo.py#L20-48       a line range
 
   Options:
-    --as <actor>     who you are. Required (or set COMMS_ACTOR); two agents
-                     sharing one name cannot detect a conflict between them.
+    --as <actor>     who you are. Else COMMS_ACTOR, else the name this Claude
+                     Code session already used here, else claude-<session>.
     --intent "..."   one line on what you are about to do
     --result "..."   one line on how it went (release only)
     --root <path>    repo root (default: the git root above the cwd)
@@ -267,26 +270,9 @@ def _parse_flags(argv: list[str]) -> tuple[list[str], dict[str, str]]:
     return positional, flags
 
 
-def _actor(flags: dict[str, str]) -> str:
-    name = (flags.get("as") or os.environ.get("COMMS_ACTOR") or "").strip()
-    # Every surface PRINTS an actor as "@name", so an agent copying its own name
-    # off the board and passing it back arrives here as "@name", and a stored
-    # "@name" is a different agent from "name". Measured on a real store: one
-    # agent held 24 events under "@claude-karte-fachebenen" while everyone else
-    # was plain, so `check` refused it access to its own files and, worse,
-    # `release --all-mine` answered "nothing to release": a failure that reads
-    # exactly like success. The @ is display, never identity.
-    name = name.lstrip("@").strip()
-    if not name:
-        _err(
-            "error: no actor. Pass --as <name> or set COMMS_ACTOR.\n"
-            "  e.g.  comms-graph hello --as claude-dev --label \"Claude Dev\"\n"
-            "        export COMMS_ACTOR=claude-dev\n"
-            "  Two agents sharing one name cannot detect a conflict between them,\n"
-            "  so this refuses to guess."
-        )
-        sys.exit(EXIT_USAGE)
-    return name
+def _actor(flags: dict[str, str], *, write: bool = True) -> str:
+    """Who is calling. See ``identity`` for the order; '' only when not writing."""
+    return _identity.cli_actor(flags, write=write)
 
 
 def _store(root: Path, *, create: bool = True) -> tuple[Path, Path]:
@@ -544,7 +530,7 @@ def _same_file_by_name(a: str, b: str) -> bool:
     return na == nb
 
 
-def _uncreated_twin(st, scope_str: str, root: Path, actor: str):
+def _uncreated_twin(st, scope_str: str, root: Path, actor: "str | frozenset[str]"):
     """A live claim naming the same not-yet-created file under another spelling.
 
     THE HOLE THIS CLOSES. Everything below the deepest existing directory is
@@ -572,8 +558,9 @@ def _uncreated_twin(st, scope_str: str, root: Path, actor: str):
         probe = probe.parent
     if not _case_blind_here(probe):
         return None
+    mine = actor if isinstance(actor, frozenset) else frozenset((actor,))
     for claim in st.claims.values():
-        if claim.actor == actor:
+        if claim.actor in mine:
             continue
         other = str(claim.scope).split("#", 1)[0]
         if other != path_part and _same_file_by_name(other, path_part):
@@ -814,7 +801,9 @@ def _cmd_claim_many(positional: list[str], flags: dict) -> int:
         # know all of them are free.
         blocked: list[tuple[str, object]] = []
         for scope_str, scope in scopes:
-            conflicts = st.conflicts_for(scope, actor)
+            conflicts = _hooks.yield_auto_claims(
+                st, log_file, root, st.conflicts_for(scope, actor), actor,
+                _identity.family(st, _identity.host_session(), actor))
             if not conflicts:
                 twin = _uncreated_twin(st, scope_str, root, actor)
                 conflicts = [twin] if twin is not None else []
@@ -970,6 +959,9 @@ def _cmd_claim(argv: list[str]) -> int:
             conflicts = [c for c in conflicts if c.id != target.id]
         else:
             claim_data_steal = {}
+        conflicts = _hooks.yield_auto_claims(
+            st, log_file, root, conflicts, actor,
+            _identity.family(st, _identity.host_session(), actor))
         if not conflicts:
             twin = _uncreated_twin(st, scope_str, root, actor)
             if twin is not None:
@@ -1339,30 +1331,6 @@ def _task_runtime(flags: dict) -> tuple[Path, Path, Path]:
 EXIT_BLOCK = 2
 
 
-def _hook_payload(stream) -> tuple[str, str]:
-    """(file_path, agent_session) from Claude Code's PreToolUse JSON.
-
-    The payload looks like:
-        {"session_id": "...", "tool_name": "Edit",
-         "tool_input": {"file_path": "/abs/or/rel/path.ts", ...}}
-
-    A missing file_path is NOT an error: plenty of tool calls have no file at
-    all (Bash, Read of a URL), and the caller treats an empty path as "nothing
-    to check".
-    """
-    raw = stream.read()
-    if not raw.strip():
-        raise ValueError("empty stdin: expected Claude Code's PreToolUse JSON")
-    payload = json.loads(raw)
-    if not isinstance(payload, dict):
-        raise ValueError("expected a JSON object")
-    tool_input = payload.get("tool_input")
-    path = ""
-    if isinstance(tool_input, dict):
-        path = str(tool_input.get("file_path") or "")
-    return path, str(payload.get("session_id") or "")
-
-
 def _repo_root_for_file(target: Path) -> Path | None:
     """The repository a FILE belongs to, not the one the process is standing in.
 
@@ -1383,32 +1351,6 @@ def _repo_root_for_file(target: Path) -> Path | None:
         if (candidate / ".git").exists():
             return candidate
     return None
-
-
-def _hook_actor(st, agent_session: str, explicit: str) -> str:
-    """Who is asking, when the caller is a hook with no environment of its own.
-
-    An explicit actor wins. Otherwise the agent session id from the payload is
-    matched against the hello events in the log, which is the entire reason
-    claim writes one. With no match we deliberately return a sentinel that can
-    never equal a real actor, so the caller's own claims are NOT excluded and it
-    is blocked by its own work rather than waved through on somebody else's.
-    Being told to wait for yourself is annoying; editing a file somebody else
-    holds because we could not identify you is the failure this tool exists to
-    prevent.
-    """
-    if explicit:
-        return explicit
-    if agent_session:
-        best = None
-        for sess in st.sessions.values():
-            if getattr(sess, "agent_session", "") != agent_session:
-                continue
-            if best is None or (sess.ts and best.ts and sess.ts > best.ts):
-                best = sess
-        if best is not None:
-            return best.actor
-    return "\x00not-a-real-actor"
 
 
 def _cmd_ui(argv: list[str]) -> int:
@@ -1607,10 +1549,9 @@ def _cmd_check_staged(flags: dict) -> int:
     #
     # `--as` cannot be the answer on its own: a pre-commit hook does not know
     # which agent is committing, so it has nothing to pass.
-    explicit = (flags.get("as") or os.environ.get("COMMS_ACTOR", "")).strip()
-    session = os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
-    actor = _hook_actor(st, session, explicit)
-    unidentified = actor == "\x00not-a-real-actor"
+    actor = _actor(flags, write=False)
+    mine = _identity.family(st, _identity.host_session(), actor)
+    unidentified = not mine
 
     # Carry WHERE each path came from. A path in HEAD is not a staged path, and
     # telling somebody to `git restore --staged` a file that is not in their
@@ -1627,7 +1568,7 @@ def _cmd_check_staged(flags: dict) -> int:
             canon = _canonical_relpath(target.resolve(), root.resolve())
         except (ValueError, OSError):
             canon = rel_text
-        conflicts = st.conflicts_for(_scope.parse(canon), actor)
+        conflicts = st.conflicts_outside(_scope.parse(canon), mine)
         if conflicts:
             blocked.append((canon, conflicts[0]))
 
@@ -1730,123 +1671,37 @@ def _cmd_check_inner(argv: list[str]) -> int:
     positional, flags = _parse_flags(argv)
     if "staged" in flags:
         return _cmd_check_staged(flags)
-    use_stdin = "stdin-json" in flags
+    explicit = (flags.get("as") or os.environ.get("COMMS_ACTOR", "")).strip().lstrip("@")
 
-    agent_session = ""
-    if use_stdin:
+    if "stdin-json" in flags:
         try:
-            raw_path, agent_session = _hook_payload(sys.stdin)
+            payload = _hooks.parse_payload(sys.stdin.read())
         except (ValueError, json.JSONDecodeError) as exc:
             _err(f"check: cannot read the hook payload: {exc}")
             return EXIT_BLOCK
-        if not raw_path:
-            # A tool call with no file in it. Nothing to check; allow.
+        if not payload.path:
             return EXIT_OK
-    else:
-        if not positional:
-            _err("error: check needs a path, or --stdin-json to read a hook payload")
-            return EXIT_USAGE
-        if len(positional) > 1:
-            # Say what is actually wrong. It used to answer three paths with
-            # "check needs a path", which reads as "you gave none" and sent a
-            # reader back to --help to find a flag that was never missing.
-            _err(f"error: check takes one path at a time; you gave {len(positional)}.")
-            _err("  Loop over them, or claim them together and let the pre-edit hook")
-            _err("  check each one as you touch it:")
-            for one in positional[:4]:
-                _err(f"    comms-graph check {shlex.quote(one)}")
-            if len(positional) > 4:
-                _err(f"    ... and {len(positional) - 4} more")
-            return EXIT_USAGE
-        raw_path = positional[0]
-
-    target = Path(raw_path).expanduser()
-    if not target.is_absolute():
-        target = (Path.cwd() / target)
-
-    explicit_root = flags.get("root")
-    root = Path(explicit_root).expanduser().resolve() if explicit_root else _repo_root_for_file(target)
-    if root is None:
-        # Not in a repository at all. There is nothing this could conflict with,
-        # and blocking every edit made outside a checkout would be absurd.
-        return EXIT_OK
-
-    try:
-        resolved_target = target.resolve()
-        resolved_root = root.resolve()
-        resolved_target.relative_to(resolved_root)
-    except (ValueError, OSError):
-        # Outside the repo we know about. We claim nothing there.
-        return EXIT_OK
-    rel_text = _canonical_relpath(resolved_target, resolved_root)
-    rel = Path(rel_text)
-
-    log_file, _lock_file = _store(root, create=False)
-    try:
-        log_file.stat()
-    except FileNotFoundError:
-        # Genuinely absent: nobody has ever coordinated in this repo, so there
-        # is nothing this edit can collide with. Do NOT create the store to
-        # find that out: check never writes, and mkdir'ing here meant an
-        # unwritable data home denied every edit on the machine.
-        return EXIT_OK
-    except OSError as exc:
-        # ANY OTHER failure means we could not find out. Path.is_file() was used
-        # here and returns False for ENOTDIR, ELOOP and ENOENT alike, so a store
-        # that was merely UNREACHABLE: a stray file where the directory should
-        # be, a symlink loop: read as "nobody has ever coordinated here" and
-        # the edit was allowed while a live claim sat on disk the whole time.
-        # One stray file in the data home turned enforcement off for every
-        # repository, silently, with exit 0. Absent and unreachable are not the
-        # same answer and must not share a branch.
-        _err(f"check: cannot reach the coordination log: {exc.strerror or exc}")
-        _err("  comms could not establish that this path is free, so it is not "
-             "saying that it is.")
-        return EXIT_BLOCK
-    try:
-        st = _read_state(log_file)
-    except Exception as exc:
-        _err(f"check: cannot read the coordination log: {exc}")
-        return EXIT_BLOCK
-
-    scope = _scope.parse(rel_text)
-    actor = _hook_actor(st, agent_session, (flags.get("as") or os.environ.get("COMMS_ACTOR", "")).strip())
-    conflicts = st.conflicts_for(scope, actor)
-    if not conflicts:
-        twin = _uncreated_twin(st, rel_text, root, actor)
-        if twin is None:
-            return EXIT_OK
-        conflicts = [twin]
-
-    holder = conflicts[0]
-    when = holder.ts.isoformat().replace("+00:00", "Z")
-    # WHO WE THINK YOU ARE changes what this message can honestly say. With no
-    # actor and no session that resolves, the answer is not "somebody else holds
-    # this": we do not know that. It was saying exactly that, and naming the
-    # caller as the holder in the next line: "Holder: @you ... Do not edit ground
-    # you were refused." An agent read that about a file it had just claimed and
-    # believed it was locked out of its own work.
-    #
-    # It still blocks, because failing closed is right when identity cannot be
-    # established. But it says which problem it has.
-    unidentified = actor == "\x00not-a-real-actor"
-    _err(f"BLOCKED: {rel_text} is claimed.")
-    _err(f"  Holder:  @{holder.actor}")
-    _err(f"  Claim:   {holder.id}")
-    if holder.intent:
-        _err(f'  Intent:  "{holder.intent}"')
-    _err(f"  Since:   {when}")
-    if unidentified:
-        _err("  comms could not work out who you are, so it cannot tell whether "
-             "this claim is yours.")
-        _err("  If it is: set COMMS_ACTOR, or pass --as <actor>. If the pre-edit "
-             "hook is doing the asking,")
-        _err("  run `comms-graph hello --as <actor>` in this session so the log "
-             "can recognise it.")
-    else:
-        _err("  Ask them, or claim something narrower. Do not edit ground you "
-             "were refused.")
-    return EXIT_BLOCK
+        return _hooks.check_edit(Path(payload.path).expanduser(),
+                                 agent_session=payload.session_id, explicit=explicit,
+                                 explicit_root=flags.get("root"), payload=payload)
+    if not positional:
+        _err("error: check needs a path, or --stdin-json to read a hook payload")
+        return EXIT_USAGE
+    if len(positional) > 1:
+        # Say what is actually wrong. It used to answer three paths with
+        # "check needs a path", which reads as "you gave none" and sent a
+        # reader back to --help to find a flag that was never missing.
+        _err(f"error: check takes one path at a time; you gave {len(positional)}.")
+        _err("  Loop over them, or claim them together and let the pre-edit hook")
+        _err("  check each one as you touch it:")
+        for one in positional[:4]:
+            _err(f"    comms-graph check {shlex.quote(one)}")
+        if len(positional) > 4:
+            _err(f"    ... and {len(positional) - 4} more")
+        return EXIT_USAGE
+    return _hooks.check_edit(Path(positional[0]).expanduser(),
+                             agent_session=_identity.host_session(), explicit=explicit,
+                             explicit_root=flags.get("root"), payload=None)
 
 
 def _cmd_tasks(argv: list[str]) -> int:
@@ -2581,7 +2436,7 @@ def _cmd_brief(argv: list[str]) -> int:
                 v = (d or {}).get(k)
                 return v if isinstance(v, str) else ""
             files, actors = _taskcode.files_from_log(_log.read(log_file), _sof)
-            me = (flags.get("as") or os.environ.get("COMMS_ACTOR", "")).strip()
+            me = _actor(flags, write=False)
             links = _taskcode.link(graph, st.tasks, files, root, actors, me)
             rel = (links.get(slug) or {}).get("related") or []
             if rel:
@@ -2859,7 +2714,7 @@ def _cmd_guard(argv: list[str]) -> int:
 
 def _cmd_board(argv: list[str]) -> int:
     _, flags = _parse_flags(argv)
-    me = (flags.get("as") or os.environ.get("COMMS_ACTOR") or "").strip()
+    me = _actor(flags, write=False)
     root = _repo_root(flags.get("root"))
     log_file, _lock_file = _store(root)
     _warn_if_ephemeral(log_file)
@@ -3156,6 +3011,8 @@ def _run(argv: list[str]) -> int:
         if sub == "mcp":
             from . import mcp as _mcp
             return _mcp.main(rest)
+        if sub == "hook":
+            return _hooks.main(rest)
         if sub == "completion":
             from . import hello as _hello
             return _hello.cmd_completion(rest)
@@ -3183,11 +3040,11 @@ def main(argv: list[str]) -> int:
         # --json is being parsed by something that did not ask for prose.
         if verb in ("check",) and "stdin-json" in flags:
             return code
-        if "json" in flags or verb in ("mcp", "ui"):
+        if "json" in flags or verb in ("mcp", "ui", "hook"):
             return code
-        actor = (flags.get("as") or os.environ.get("COMMS_ACTOR") or "").strip().lstrip("@")
+        actor = _actor(flags, write=False)
         if actor:
             _deliver_addressed_notes(_repo_root(flags.get("root")), actor)
-    except Exception:
+    except (Exception, SystemExit):
         pass  # never let delivery break the command that carried it
     return code

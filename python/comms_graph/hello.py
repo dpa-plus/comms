@@ -36,6 +36,7 @@ import sys
 import unicodedata
 
 from . import cli as _cli
+from . import identity as _identity
 from . import lock as _lock
 from . import log as _log
 
@@ -136,8 +137,12 @@ def cmd_hello(argv: list[str]) -> int:
     # same process: the server and the test suite both make several.
     # An empty name is no name: it falls through to --as / $COMMS_ACTOR, and to
     # the refusal there, rather than registering an actor called "".
-    named = positional[0].strip() if positional else ""
+    named = positional[0].strip().lstrip("@").strip() if positional else ""
     actor = named or _cli._actor(flags)
+    if _identity.is_generic(actor):
+        _cli._err(f"error: {actor!r} is too generic to tell two agents apart; pick a "
+                  "specific name, or set COMMS_ALLOW_GENERIC_ACTOR=1.")
+        return _cli.EXIT_USAGE
 
     label = (flags.get("label") or os.environ.get("COMMS_LABEL", "")).strip()
     model = (flags.get("model") or os.environ.get("COMMS_MODEL", "")).strip()
