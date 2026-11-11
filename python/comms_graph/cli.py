@@ -58,53 +58,7 @@ from . import scope as _scope
 from . import guard as _guard
 from . import tree as _tree
 from . import state as _state
-
-USAGE = """Usage: comms-graph <command>
-
-  claim <scope> --as <actor> [--intent "..."] [--task <id>]
-                                                take ground before you edit it
-        ... --steal <claim-id> --reason "..."    take it off somebody who is
-                                                not coming back
-  release <scope|claim-id> --as <actor> [--result "..."]   give it back
-        ... <claim-id> --force --reason "..."     free ground somebody else
-                                                 abandoned
-  board [--as <actor>]                          who holds what right now
-  check <path> | check --stdin-json             would an edit here collide?
-  check --staged [--as <actor>]                 would this COMMIT take
-                                                somebody else's claimed work?
-  hook session-start|pre-edit|session-end       Claude Code hooks (JSON on stdin)
-
-  task add|edge|done|review ...                 declare and move work
-  next [--as <actor>]                           what you could start now
-  brief <task-id>                               what it is, and what came before
-  find <category> "..." [--ref kind:value]      something worth keeping
-  note "..."                                    a short FYI
-  doc [--list | <slug> [--edit]]                the repo's own wiki
-
-  session start|join|end|retire|lead ...        named coordination windows
-  status [--since 24h]                          who is here, what is held
-  log [--type ...] [--since ...]                the history, filtered
-  hello [--label "..."]                         announce yourself
-  mcp                                           serve these as MCP tools
-  version
-  help
-  tasks [--out <file.html>]                     draw the task graph
-  ui [--port 7878]                              live board: both graphs, live claims
-
-  <scope> is a path, optionally anchored:
-      src/foo.py              the whole file
-      src/foo.py#parse        one symbol
-      src/foo.py#L20-48       a line range
-
-  Options:
-    --as <actor>     who you are. Else COMMS_ACTOR, else the name this Claude
-                     Code session already used here, else claude-<session>.
-    --intent "..."   one line on what you are about to do
-    --result "..."   one line on how it went (release only)
-    --root <path>    repo root (default: the git root above the cwd)
-    --graph <path>   graph.json (default: <root>/graphify-out/graph.json)
-
-  Exit status: 0 recorded, 1 blocked by somebody else's claim, 2 bad usage."""
+from . import verbs as _verbs
 
 # Exit codes. 1 is reserved for "somebody else holds this" so a wrapper script
 # can tell a real conflict from a typo without parsing text.
@@ -130,6 +84,10 @@ def _err(msg: str) -> None:
 #: Repository named by a global --repo/--root, before the verb. Module state
 #: rather than an environment write, and reset on every main() entry.
 _GLOBAL_ROOT: str | None = None
+
+#: Booleans of the verb being run, so `_parse_flags` does not hand a flag the
+#: positional that follows it. Set per call by `main`.
+_BOOLEANS: frozenset[str] = frozenset()
 
 
 def _repo_root(explicit: str | None) -> Path:
@@ -237,14 +195,16 @@ def _parse_flags(argv: list[str]) -> tuple[list[str], dict[str, str]]:
     i = 0
     while i < len(argv):
         arg = argv[i]
-        if arg.startswith("--"):
+        if _verbs.is_flag(arg):
             if "=" in arg:
                 key, value = arg[2:].split("=", 1)
                 flags[key] = value
                 i += 1
             else:
                 key = arg[2:]
-                value = argv[i + 1] if i + 1 < len(argv) and not argv[i + 1].startswith("--") else ""
+                value = ""
+                if key not in _BOOLEANS and i + 1 < len(argv) and not _verbs.is_flag(argv[i + 1]):
+                    value = argv[i + 1]
                 flags[key] = value
                 i += 2 if value else 1
         else:
@@ -1740,25 +1700,6 @@ def _title_smells_technical(title: str) -> str:
     return ""
 
 
-def _cmd_task(argv: list[str]) -> int:
-    verb = argv[0] if argv else ""
-    rest = argv[1:]
-    if verb == "add":
-        return _task_add(rest)
-    if verb == "edge":
-        return _task_edge(rest)
-    if verb == "done":
-        return _task_done(rest)
-    if verb == "review":
-        return _task_review(rest)
-    if verb in ("", "-h", "--help"):
-        print(TASK_USAGE)
-        return EXIT_OK if verb else EXIT_USAGE
-    _err(f"error: unknown task command {verb!r}")
-    _err(TASK_USAGE)
-    return EXIT_USAGE
-
-
 def _task_add(argv: list[str]) -> int:
     positional, flags = _parse_flags(argv)
     if not positional:
@@ -2480,27 +2421,6 @@ def _cmd_brief(argv: list[str]) -> int:
     return EXIT_OK
 
 
-TASK_USAGE = """Usage: comms-graph task <command>
-
-  add <id> --as <actor> [--title "..."] [--size S|M|L]   (a rough scale, not a gate)
-        --title is what people read on the board: plain English, no file or
-        function names, no jargon, short enough to say out loud. The id is
-        just what you type.
-                        [--review]        somebody else must check it to close
-                        [--probe]         a diagnostic; kept out of derived neighbours
-                        [--check <name>]... [--ref "tracker:PROJ-1234"]
-  edge <from> <to> --as <actor> [--kind consumes|sequence]
-                                [--provides "..."]      <to> comes AFTER <from>
-  done <id> --as <actor> [--check name=pass]... [--note "..."]
-  review <id> --as <actor> --pass|--fail [--evidence "..."]
-                        [--acknowledge-self-review]  last resort: sign off your
-                        own work, recorded as self-acknowledged, never verified
-
-  A task unblocks what follows it when it is VERIFIED, not when it is done,
-  and you cannot verify your own work."""
-
-
-
 def _release_somebody_elses(st, log_file, actor: str, target: str, reason: str) -> int:
     """`release <claim-id> --force --reason "..."`: end a claim that is not yours.
 
@@ -2537,21 +2457,6 @@ def _release_somebody_elses(st, log_file, actor: str, target: str, reason: str) 
     return EXIT_OK
 
 
-GUARD_USAGE = """Usage: comms-graph guard <command>
-
-  install [--chain]   put the commit check into this repo's git hooks, so it
-                      runs on every commit whether anybody remembers or not.
-                      --chain keeps a pre-commit hook that is already there and
-                      runs it first.
-  status              is it wired in, and where
-  uninstall           take it out, restoring any hook it displaced
-
-  Without it, `check --staged` only ever runs when somebody types it. Measured:
-  three separate incidents where the check would have refused the commit and
-  nobody ran it.
-"""
-
-
 def _cmd_guard(argv: list[str]) -> int:
     positional, flags = _parse_flags(argv)
     sub = positional[0] if positional else "status"
@@ -2578,8 +2483,6 @@ def _cmd_guard(argv: list[str]) -> int:
             (print if ok else _err)(line)
         return EXIT_OK if ok else EXIT_CONFLICT
 
-    _err(f"error: unknown guard command {sub!r}")
-    _err(GUARD_USAGE)
     return EXIT_BLOCK
 
 
@@ -2778,113 +2681,124 @@ def _remember_seen(marker: Path, events) -> None:
         pass  # a board that cannot remember re-shows once; never fatal
 
 
+def _lazy(module: str, name: str):
+    """A handler that imports its module only when the verb runs.
+
+    `claim` and `check` are on the pre-edit path and must survive any other
+    module failing to import.
+    """
+    def call(argv: list[str]) -> int:
+        import importlib
+
+        return getattr(importlib.import_module("." + module, __package__), name)(argv)
+    return call
+
+
+def _help_verb(argv: list[str]) -> int:
+    positional, _ = _parse_flags(argv)
+    if not positional:
+        print(_verbs.global_usage())
+        return EXIT_OK
+    try:
+        call = _verbs.prepare([*positional, "--help"])
+    except _verbs.Refusal as refusal:
+        for line in refusal.lines:
+            _err(line)
+        return refusal.code
+    print(_verbs.verb_help(call.verb, call.path))
+    return EXIT_OK
+
+
+def _guard_verb(sub: str):
+    return lambda argv: _cmd_guard([sub, *argv])
+
+
+def _hook_verb(sub: str):
+    return lambda argv: _hooks.main([sub, *argv])
+
+
+def _session_verb(sub: str):
+    def call(argv: list[str]) -> int:
+        from . import session as _session
+        return _session.main([sub, *argv])
+    return call
+
+
+def _version_verb(argv: list[str]) -> int:
+    from . import hello as _hello
+    return _hello.cmd_version(argv)
+
+
+#: One handler per dispatchable path in ``verbs.leaves()`` that is not an alias.
+_HANDLERS = {
+    "claim": _cmd_claim,
+    "release": _cmd_release,
+    "board": _cmd_board,
+    "check": _cmd_check,
+    "task add": _task_add,
+    "task edge": _task_edge,
+    "task done": _task_done,
+    "task review": _task_review,
+    "next": _cmd_next,
+    "brief": _cmd_brief,
+    "tasks": _cmd_tasks,
+    "find": _cmd_find,
+    "note": _cmd_note,
+    "doc": _lazy("doc", "main"),
+    "status": _lazy("status", "status_main"),
+    "log": _lazy("status", "log_main"),
+    "hello": _lazy("hello", "cmd_hello"),
+    "mcp": _lazy("mcp", "main"),
+    "doctor": _lazy("doctor", "main"),
+    "ui": _cmd_ui,
+    "version": _version_verb,
+    "help": _help_verb,
+    "guard install": _guard_verb("install"),
+    "guard status": _guard_verb("status"),
+    "guard uninstall": _guard_verb("uninstall"),
+    "hook session-start": _hook_verb("session-start"),
+    "hook pre-edit": _hook_verb("pre-edit"),
+    "hook session-end": _hook_verb("session-end"),
+    "session start": _session_verb("start"),
+    "session join": _session_verb("join"),
+    "session end": _session_verb("end"),
+    "session retire": _session_verb("retire"),
+    "session lead": _session_verb("lead"),
+}
+
+
 def _run(argv: list[str]) -> int:
     """``argv`` is everything after ``comms-graph``."""
-    # A GLOBAL --repo/--root, before the verb. The Go build takes it there and
-    # the briefing documents `comms --repo /abs/path status` as the recovery
-    # when the working directory cannot be read, which on macOS is not exotic:
-    # a repo under Desktop, Documents or Downloads loses privacy access and
-    # every tool that calls getcwd() starts failing at once. Without this the
-    # recovery path simply does not exist in this build, and the one moment you
-    # need it is the moment you cannot cd anywhere either.
-    #
-    # `--repo` is the spelling to accept even though the per-verb flag is
-    # `--root`, because it is the one already in the briefing and in muscle
-    # memory. Rejecting it would be technically defensible and practically just
-    # a way to fail during an outage.
-    # Held in a module global rather than exported into os.environ. Writing the
-    # environment would have been fewer lines and is a trap: the value outlives
-    # the call, so anything sharing the process afterwards inherits a repository
-    # it never asked for. Caught by 64 unrelated tests failing together while
-    # each passed alone. Reset unconditionally on every entry, so one call can
-    # never colour the next.
-    global _GLOBAL_ROOT
+    # A global --repo/--root before the verb is held in a module global rather
+    # than exported into os.environ: the environment outlives the call and
+    # would hand the next one in the same process a repository it never asked
+    # for. Reset on every entry, so one call can never colour the next.
+    global _GLOBAL_ROOT, _BOOLEANS
     _GLOBAL_ROOT = None
-    # Same rule for the environment, normalised once so every reader downstream
-    # (including the ones that never call _actor) sees the canonical form.
+    _BOOLEANS = frozenset()
     env_actor = os.environ.get("COMMS_ACTOR")
     if env_actor and env_actor.strip() != env_actor.strip().lstrip("@").strip():
         os.environ["COMMS_ACTOR"] = env_actor.strip().lstrip("@").strip()
-    argv = list(argv)
-    while argv and argv[0] in ("--repo", "--root"):
-        if len(argv) < 2:
-            _err(f"error: {argv[0]} needs a path")
-            return EXIT_USAGE
-        _GLOBAL_ROOT = argv[1]
-        argv = argv[2:]
-
-    sub = argv[0] if argv else ""
-    rest = argv[1:]
-    if sub in ("", "-h", "--help", "help"):
-        print(USAGE)
-        return EXIT_OK if sub else EXIT_USAGE
-    # --help on a LEAF verb. Without this, every leaf ignored it: `task done
-    # --help` errored with "needs an id", and `board --help` / `tasks --help`
-    # ran the command: `tasks` wrote an HTML file. Asking how a verb works is
-    # the one thing that must never have a side effect, and for a tool whose
-    # users are agents it is the whole discovery path. Exact-match only, so a
-    # free-text --intent that mentions --help is unaffected.
-    if any(a in ("-h", "--help", "-?") for a in rest):
-        print(TASK_USAGE if sub == "task"
-              else GUARD_USAGE if sub == "guard" else USAGE)
-        return EXIT_OK
     try:
-        if sub == "claim":
-            return _cmd_claim(rest)
-        if sub == "release":
-            return _cmd_release(rest)
-        if sub == "board":
-            return _cmd_board(rest)
-        if sub == "task":
-            return _cmd_task(rest)
-        if sub == "next":
-            return _cmd_next(rest)
-        if sub == "brief":
-            return _cmd_brief(rest)
-        if sub == "tasks":
-            return _cmd_tasks(rest)
-        if sub == "check":
-            return _cmd_check(rest)
-        if sub == "guard":
-            return _cmd_guard(rest)
-        if sub == "ui":
-            return _cmd_ui(rest)
-        if sub == "find":
-            return _cmd_find(rest)
-        if sub == "note":
-            return _cmd_note(rest)
-        # Ported from the Go build, each in its own module. Imported lazily so
-        # a broken or missing one cannot stop `claim` and `check` from working
-        # because those two are on the pre-edit path and must survive anything.
-        if sub == "session":
-            from . import session as _session
-            return _session.main(rest)
-        if sub == "doc":
-            from . import doc as _doc
-            return _doc.main(rest)
-        if sub == "status":
-            from . import status as _status
-            return _status.status_main(rest)
-        if sub == "log":
-            from . import status as _status
-            return _status.log_main(rest)
-        if sub == "hello":
-            from . import hello as _hello
-            return _hello.cmd_hello(rest)
-        if sub == "version":
-            from . import hello as _hello
-            return _hello.cmd_version(rest)
-        if sub == "mcp":
-            from . import mcp as _mcp
-            return _mcp.main(rest)
-        if sub == "hook":
-            return _hooks.main(rest)
+        call = _verbs.prepare(argv)
+    except _verbs.Refusal as refusal:
+        for line in refusal.lines:
+            _err(line)
+        return refusal.code
+    if call.root:
+        _GLOBAL_ROOT = call.root
+    if call.help:
+        print(_verbs.verb_help(call.verb, call.path))
+        return EXIT_OK
+    _BOOLEANS = _verbs.booleans(call.verb)
+    handler = _HANDLERS.get(call.path)
+    try:
+        return handler(call.argv)
     except _lock.LockError as exc:
         _err(f"error: could not take the comms lock: {exc}")
         return EXIT_USAGE
-    _err(f"error: unknown comms command {sub!r}")
-    _err(USAGE)
-    return EXIT_USAGE
+    finally:
+        _BOOLEANS = frozenset()
 
 
 def main(argv: list[str]) -> int:
@@ -2896,14 +2810,15 @@ def main(argv: list[str]) -> int:
     """
     code = _run(argv)
     try:
-        _, flags = _parse_flags(list(argv[1:]))
-        verb = argv[0] if argv else ""
+        call = _verbs.prepare(argv)
+        flags = _parse_flags(list(call.argv))[1]
+        verb = call.verb.name
         # Not on the hook path and not into machine-readable output. `check
         # --stdin-json` has a strict contract with Claude Code, and anything
         # --json is being parsed by something that did not ask for prose.
-        if verb in ("check",) and "stdin-json" in flags:
+        if verb == "check" and "stdin-json" in flags:
             return code
-        if "json" in flags or verb in ("mcp", "ui", "hook"):
+        if "json" in flags or verb in ("mcp", "ui", "hook", "help", "version", "doctor"):
             return code
         actor = _actor(flags, write=False)
         if actor:

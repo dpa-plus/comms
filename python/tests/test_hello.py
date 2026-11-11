@@ -24,6 +24,7 @@ from comms_graph import __version__
 from comms_graph import cli as ccli
 from comms_graph import hello as chello
 from comms_graph import log as clog
+from comms_graph import verbs as cverbs
 from comms_graph import state as cstate
 
 
@@ -302,7 +303,8 @@ def test_help_prints_the_same_usage_the_bare_command_does(tmp_path, monkeypatch)
     repo = _repo(tmp_path, monkeypatch)
     code, out, err = _run(repo, "help")
     assert code == 0
-    assert out.strip() == ccli.USAGE.strip()
+    assert out.strip() == cverbs.global_usage().strip()
+    assert _run(repo, "claim", "--help")[1].startswith("Usage: comms-graph claim")
 
 
 def test_an_unknown_verb_is_a_usage_error_not_a_silent_success(tmp_path, monkeypatch):

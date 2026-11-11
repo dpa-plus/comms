@@ -1342,7 +1342,7 @@ def test_a_full_task_is_not_offered(tmp_path, monkeypatch):
     direction."""
     repo = _repo(tmp_path, monkeypatch)
     (repo / "b.py").write_text("y = 2\n")
-    _cli(repo, "task", "add", "solo", "--slots", "1", "--as", "p", session="agent-P")
+    _cli(repo, "task", "add", "solo", "--as", "p", session="agent-P")
     _cli(repo, "claim", "a.py", "--as", "carol", "--intent", "z", "--task", "solo",
          session="agent-C")
     code, out = _cli(repo, "next", "--as", "dave", session="agent-D")
@@ -1388,9 +1388,10 @@ def test_help_on_a_leaf_verb_explains_it_instead_of_running_it(tmp_path, monkeyp
         code, out = _cli(repo, *args)
         assert code == 0, (args, out)
         assert out.startswith("Usage: comms-graph"), (args, out[:90])
-        if args[0] == "task":
-            # the task block is the only place the per-flag detail lives
+        if args[:2] == ("task", "review"):
             assert "--acknowledge-self-review" in out, args
+        if args[:2] == ("task", "add"):
+            assert "--title" in out and "--probe" in out, args
 
     assert not out_file.exists(), "`tasks --help` wrote its output file"
 
@@ -1618,7 +1619,7 @@ def test_a_claim_taken_after_a_sign_off_does_not_unsign_it(tmp_path, monkeypatch
     repo = _repo(tmp_path, monkeypatch)
     for f in ("a.py", "c.py"):
         (repo / f).write_text("x = 1\n")
-    _cli(repo, "task", "add", "ta", "--as", "p", "--title", "TA", "--slots", "2", session="sP")
+    _cli(repo, "task", "add", "ta", "--as", "p", "--title", "TA", session="sP")
     _cli(repo, "task", "add", "tb", "--as", "p", "--title", "TB", session="sP")
     _cli(repo, "task", "edge", "ta", "tb", "--as", "p", "--kind", "interface", session="sP")
     _cli(repo, "claim", "a.py", "--as", "alice", "--task", "ta", "--intent", "A", session="sA")
