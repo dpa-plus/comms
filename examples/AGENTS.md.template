@@ -1,58 +1,22 @@
-<!-- COMMS PROTOCOL — READ FIRST -->
+<!-- COMMS: READ FIRST -->
+## Coordinating through comms
 
-This repo can use `comms` (github.com/dpa-plus/comms) for opt-in multi-agent coordination.
+Other agents edit this repository at the same time. `comms` keeps you off their files.
+Nothing claims or checks for you here, so do each step yourself, and read the
+`using-comms` skill for the details.
 
-Only start the workflow when the user explicitly asks to use `comms` or invokes the `using-comms` skill.
+1. Pick a name that tells you apart, such as `codex-billing`, and pass `--as <name>` on
+   every comms call. `codex`, `agent` and `user` are refused.
+2. See who holds what: `comms status --as codex-billing`
+3. Claim every file before you change it, shell writes included:
+   `comms claim src/auth.ts src/login.ts --as codex-billing --intent "rework the session cookie"`
+4. If the claim is refused, do not edit those files another way. Leave a note and take other work:
+   `comms note --as codex-billing "@claude-4f9a1c I need src/auth.ts, tell me when it is free"`
+5. Before every commit, run `comms check --staged --as codex-billing`.
+   If it refuses, run the `git restore --staged` command it prints.
+6. When the work is committed, release:
+   `comms release --all-mine --as codex-billing --result "committed 4f2a9c1"`
 
-**When the workflow starts:**
-```bash
-COMMS_ACTOR=codex-20260527-a comms hello
-COMMS_ACTOR=codex-20260527-a comms status
-```
-Pick one concrete per-session actor and reuse it for this conversation.
-
-If cwd discovery fails with `operation not permitted`, run from a safe cwd and
-target the repo explicitly:
-```bash
-cd /tmp
-COMMS_ACTOR=codex-20260527-a comms --repo /absolute/repo/path status
-```
-
-**UI / session archive:**
-The user may open `comms ui` to watch the workflow. The UI can start/end the
-whole project-level comms session and exposes backend metadata at
-`GET /api/status`: `actions`, `current_session.events`, and
-`comms_sessions[].events`. Agents should still coordinate through the CLI unless
-the user explicitly asks them to inspect the UI API.
-
-**Before any file edit during the workflow:**
-```bash
-COMMS_ACTOR=codex-20260527-a comms claim "src/path/to/file.ts" --intent "what you're changing"
-```
-If exit code 1: read stderr, surface the conflict to the user, ask whether the prior session is alive. If user authorizes, use `--steal <id> --reason "..."`.
-
-**When done with a claim:**
-```bash
-COMMS_ACTOR=codex-20260527-a comms release --latest --result "PR #123 merged"
-```
-
-**Before every commit:**
-```bash
-COMMS_ACTOR=codex-20260527-a comms check --staged
-```
-If exit code 1: run the printed literal-path recovery commands. Comms uses
-`git restore --staged` normally and `git rm --cached` before the first commit;
-both keep the working-tree changes.
-
-**Record findings:**
-```bash
-COMMS_ACTOR=codex-20260527-a comms find fix "..." --ref path:src/foo.ts --ref commit:abc1234
-COMMS_ACTOR=codex-20260527-a comms find bug "..." --ref path:src/bar.ts
-COMMS_ACTOR=codex-20260527-a comms find decision "..." --ref doc:slug
-COMMS_ACTOR=codex-20260527-a comms find gotcha "..." --ref path:src/auth.ts
-COMMS_ACTOR=codex-20260527-a comms find ship "..." --ref pr:#123
-```
-
-Do not install hooks or edit shell startup files unless the user explicitly asks.
-
-<!-- END COMMS PROTOCOL -->
+If the working directory gives `operation not permitted`, run from your home folder
+and name the repository: `comms --repo /abs/path/to/repo status --as codex-billing`.
+<!-- END COMMS -->
