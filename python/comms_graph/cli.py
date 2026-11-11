@@ -1163,50 +1163,57 @@ def _cmd_release(argv: list[str]) -> int:
         if force:
             return _release_somebody_elses(
                 st, log_file, actor, target, flags.get("reason", "").strip())
-        mine = st.active_claims_by_actor(actor)
-        if not mine:
-            print(f"nothing to release: @{actor} holds no claims here")
-            return EXIT_OK
-        if not target:
-            chosen = mine
+        agent_session = _identity.host_session()
+        names = ({actor} | set(st.family_of(agent_session))
+                 if actor in st.family_of(agent_session) else {actor})
+        mine = sorted((c for c in st.claims.values() if c.actor in names), key=lambda c: c.ts)
+        targets = [p for p in positional if p]
+        if not targets:
+            if not mine:
+                print(f"nothing to release: @{actor} holds no claims here")
+                return EXIT_OK
+            chosen = mine[-1:] if "latest" in flags else mine
+            unmatched: list[str] = []
         else:
-            by_id = st.claim_by_id(target)
-            if by_id is not None and by_id.actor == actor:
-                chosen = [by_id]
+            chosen, unmatched = [], []
+            for target in targets:
+                found: list = []
+                by_id = st.claim_by_id(target)
+                if by_id is not None and by_id.actor in names:
+                    found = [by_id]
+                else:
+                    # Rooted the same way claim roots it, and for the same
+                    # reason: a claim taken at the repo root must be releasable
+                    # from a subdirectory. Only reached when the target was not a
+                    # claim id, so an id is never mangled by path resolution.
+                    # The canonical spelling AND the raw one: after a case-only
+                    # rename the frozen scope and the disk disagree, and the
+                    # holder must still be able to release her own claim.
+                    for spelling in (_rooted_scope(target, root), target):
+                        wanted = _parse_scope_or_exit(spelling)
+                        found = [c for c in mine if _scope.overlaps(c.scope, wanted)]
+                        if found:
+                            break
+                if not found:
+                    unmatched.append(target)
+                chosen.extend(c for c in found if c not in chosen)
+        if unmatched:
+            _err("error: @" + actor + " holds nothing matching "
+                 + ", ".join(repr(t) for t in unmatched))
+            if mine:
+                shown = ", ".join(str(c.scope) for c in mine[:8])
+                _err("  Held: " + shown + (f" (+{len(mine) - 8} more)" if len(mine) > 8 else ""))
             else:
-                # Rooted the same way claim roots it, and for the same reason: a
-                # claim taken at the repo root must be releasable from a
-                # subdirectory. Without this the two spellings of one file stop
-                # matching and an agent cannot give back ground it holds: the
-                # claim then sits there until it goes stale, blocking everybody.
-                # Only reached when the target was not a claim id, so an id is
-                # never mangled by path resolution.
-                # Try the canonicalised spelling AND the raw one. The scope was
-                # frozen into the log at claim time; the canonicaliser answers
-                # from the disk as it is NOW. After a case-only rename those two
-                # disagree, and the holder could not release her own claim:
-                # the refusal even printed "holds nothing matching
-                # 'src/Widget.py'  Held: src/Widget.py", naming the string it
-                # had just said matched nothing. Only the claim id worked, so
-                # the ground sat stranded on the board.
-                chosen = []
-                for spelling in (_rooted_scope(target, root), target):
-                    wanted = _parse_scope_or_exit(spelling)
-                    chosen = [c for c in mine if _scope.overlaps(c.scope, wanted)]
-                    if chosen:
-                        break
-        if not chosen:
-            _err(f"error: @{actor} holds nothing matching {target!r}")
-            _err("  Held: " + ", ".join(str(c.scope) for c in mine))
-            return EXIT_USAGE
-        data: dict = {"refs": [c.id for c in chosen]}
-        if flags.get("result"):
-            data["result"] = flags["result"]
-        _log.append(log_file, _tagged(st, actor, _log.TYPE_RELEASE, None, data))
+                _err(f"  @{actor} holds no claims here.")
+        if chosen:
+            data: dict = {"refs": [c.id for c in chosen]}
+            if flags.get("result"):
+                data["result"] = flags["result"]
+            _log.append(log_file, _tagged(st, actor, _log.TYPE_RELEASE, None, data))
 
     for claim in chosen:
-        print(f"RELEASED {claim.scope}  (was @{actor}, id {claim.id})")
-    return EXIT_OK
+        print(f"RELEASED {claim.scope}  (was @{claim.actor}, id {claim.id})")
+    return EXIT_CONFLICT if unmatched else EXIT_OK
 
 
 # ---------------------------------------------------------------------------
@@ -1447,6 +1454,9 @@ def _cmd_check_staged(flags: dict) -> int:
     one file at a time turns one fix into five commits.
     """
     root = _repo_root(flags.get("root"))
+    if not (root / ".git").exists():
+        print(f"check --staged: {root} is not a git repository, so nothing is staged.")
+        return EXIT_OK
     git = shutil.which("git")
     if git is None:
         _err("check --staged: git is not installed, so the index cannot be read")
@@ -1658,21 +1668,14 @@ def _cmd_check_inner(argv: list[str]) -> int:
     if not positional:
         _err("error: check needs a path, or --stdin-json to read a hook payload")
         return EXIT_USAGE
-    if len(positional) > 1:
-        # Say what is actually wrong. It used to answer three paths with
-        # "check needs a path", which reads as "you gave none" and sent a
-        # reader back to --help to find a flag that was never missing.
-        _err(f"error: check takes one path at a time; you gave {len(positional)}.")
-        _err("  Loop over them, or claim them together and let the pre-edit hook")
-        _err("  check each one as you touch it:")
-        for one in positional[:4]:
-            _err(f"    comms-graph check {shlex.quote(one)}")
-        if len(positional) > 4:
-            _err(f"    ... and {len(positional) - 4} more")
-        return EXIT_USAGE
-    return _hooks.check_edit(Path(positional[0]).expanduser(),
-                             agent_session=_identity.host_session(), explicit=explicit,
-                             explicit_root=flags.get("root"), payload=None)
+    worst = EXIT_OK
+    for one in positional:
+        code = _hooks.check_edit(Path(one).expanduser(),
+                                 agent_session=_identity.host_session(), explicit=explicit,
+                                 explicit_root=flags.get("root"), payload=None)
+        if code == EXIT_BLOCK:
+            worst = EXIT_BLOCK
+    return worst
 
 
 def _cmd_tasks(argv: list[str]) -> int:
