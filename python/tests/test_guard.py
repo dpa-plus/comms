@@ -429,10 +429,10 @@ def test_a_refused_length_hands_back_something_that_fits(tmp_path, monkeypatch):
     refused, trimmed to 401, refused a second time for one character. Two round
     trips for one finding, when the answer was computable at the first."""
     repo = _repo(tmp_path, monkeypatch)
-    long = "word " * 200
+    long = "word " * 400
     code, out = _cli(repo, "find", "decision", long, "--as", "a", session="sA")
     assert code != 0, out
     assert "This fits" in out, out
     fitted = [l for l in out.splitlines() if l.strip().startswith("word")]
     assert fitted, out
-    assert len(fitted[-1].strip()) <= 400, f"the suggestion is itself over the cap: {len(fitted[-1].strip())}"
+    assert len(fitted[-1].strip()) <= 1000, f"the suggestion is itself over the cap: {len(fitted[-1].strip())}"

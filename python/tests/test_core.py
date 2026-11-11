@@ -727,9 +727,7 @@ def test_an_over_long_note_says_where_it_would_cut_and_what_to_use(tmp_path, mon
     first. Splitting is the option that looks like it works and does not, so it
     is ruled out explicitly.
 
-    The cap itself is not the problem and is not moved. Measured on 469 real
-    notes: median 171 characters, p90 194, longest 352. Nothing written normally
-    has ever come near it.
+    The cap is 1000 characters: agents hit the old 400 cap 48 times.
     """
     from comms_graph import cli
 
@@ -738,9 +736,9 @@ def test_an_over_long_note_says_where_it_would_cut_and_what_to_use(tmp_path, mon
     monkeypatch.setenv("COMMS_ACTOR", "alice")
     monkeypatch.chdir(tmp_path)
 
-    assert cli.main(["note", "x" * 500]) != 0
+    assert cli.main(["note", "x" * 1100]) != 0
     err = capsys.readouterr().err
-    assert "500 characters, 100 over" in err, "it should say how far over"
+    assert "1100 characters, 100 over" in err, "it should say how far over"
     assert "It would end here" in err, "it should show where it cuts"
     # Every route it offers must accept a long body. `doc --edit` hands control
     # to $EDITOR, which an agent cannot drive, so it must not be one of them.

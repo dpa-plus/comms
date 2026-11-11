@@ -738,7 +738,7 @@ def _cmd_claim_many(positional: list[str], flags: dict) -> int:
         if flags.get("task"):
             task_tag = _slug_or_exit(flags["task"])
             if task_tag not in st.tasks:
-                _err(f"error: no task called {task_tag!r} to tag these claims with")
+                _no_such_task(st, task_tag, "to tag these claims with")
                 return EXIT_USAGE
             # Same rule and same wording as the single-scope path: a task
             # belongs to one agent at a time. Batching must not be a way round it.
@@ -839,11 +839,7 @@ def _cmd_claim(argv: list[str]) -> int:
                 # Silently ignoring an unknown tag would put us back where we
                 # started: the claim records, the task never shows a doer, and
                 # nothing says why.
-                _err(f"error: no task called {task_tag!r} to tag this claim with")
-                if st.tasks:
-                    _err("  Declared: " + ", ".join(sorted(st.tasks)[:8]))
-                else:
-                    _err("  Declare one first with `comms-graph task add <id>`.")
+                _no_such_task(st, task_tag, "to tag this claim with")
                 return EXIT_USAGE
             # ONE TASK, ONE AGENT: enforced here rather than counted.
             #
@@ -1223,7 +1219,7 @@ def _cmd_release(argv: list[str]) -> int:
 # tasks
 # ---------------------------------------------------------------------------
 
-_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
+_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 
 
 def _slug_or_exit(raw: str, what: str = "task id") -> str:
@@ -1233,14 +1229,32 @@ def _slug_or_exit(raw: str, what: str = "task id") -> str:
     shared their six-character prefix, so an agent asked to name one had nothing
     short to say and nothing memorable to repeat. A slug is what somebody can
     type into the next command without going back to look it up.
+
+    Case, spaces and underscores are normalized to hyphens rather than refused:
+    agents wrote `Fix_Login` and `fix login` and were told "not a slug".
     """
-    slug = (raw or "").strip().lower()
+    slug = re.sub(r"[\s_]+", "-", (raw or "").strip().lower())
     if not _SLUG_RE.match(slug):
-        _err(f"error: {what} {raw!r} is not a slug")
-        _err("  Lowercase letters, digits and hyphens, up to 32 characters, "
-             "starting with a letter or digit. For example: auth-api.")
+        _err(f"error: {what} {raw!r} cannot be turned into an id")
+        _err("  Letters, digits and hyphens, up to 64 characters, starting with a "
+             "letter or digit. For example: auth-api.")
         sys.exit(EXIT_USAGE)
     return slug
+
+
+def _no_such_task(st, slug: str, why: str = "") -> None:
+    """Say which tasks exist and the exact line that declares this one."""
+    import difflib
+
+    _err(f"error: no task called {slug!r}" + (f" {why}" if why else ""))
+    live = sorted(t.id for t in st.tasks.values() if t.phase != _task.PHASE_CLOSED)
+    close = difflib.get_close_matches(slug, sorted(st.tasks), n=1, cutoff=0.6)
+    if close:
+        _err(f"  Did you mean {close[0]}?")
+    if live:
+        more = f" (+{len(live) - 8} more)" if len(live) > 8 else ""
+        _err("  Open tasks: " + ", ".join(live[:8]) + more)
+    _err(f'  To declare it: comms-graph task add {slug} --title "..."')
 
 
 def _repeated(argv: list[str], name: str) -> list[str]:
@@ -1801,8 +1815,7 @@ def _task_edge(argv: list[str]) -> int:
         st = _read_state(log_file)
         for end in (from_, to):
             if end not in st.tasks:
-                _err(f"error: no task called {end!r}")
-                _err("  Declare it first with `comms-graph task add " + end + "`.")
+                _no_such_task(st, end)
                 return EXIT_USAGE
         # Refuse the edge that would close a loop rather than accept it and then
         # describe the wreckage: the fold survives a cycle, but a graph
@@ -1859,7 +1872,7 @@ def _task_done(argv: list[str]) -> int:
         st = _read_state(log_file)
         t = st.tasks.get(slug)
         if t is None:
-            _err(f"error: no task called {slug!r}")
+            _no_such_task(st, slug)
             return EXIT_USAGE
         # Say no here as well as in the fold. The fold is the authority: a
         # second writer must not be able to sneak past a rule by not asking:
@@ -1929,7 +1942,7 @@ def _task_review(argv: list[str]) -> int:
         st = _read_state(log_file)
         t = st.tasks.get(slug)
         if t is None:
-            _err(f"error: no task called {slug!r}")
+            _no_such_task(st, slug)
             return EXIT_USAGE
         if not t.did:
             _err(f"error: nothing is awaiting review on {slug}")
@@ -2143,11 +2156,9 @@ def _cmd_find(argv: list[str]) -> int:
 
 
 
-#: Notes and findings are one line somebody reads later, not the writeup.
-#: Measured on 469 real notes: median 171 characters, p90 194, longest 352. So
-#: the cap is not tight: nothing written normally has ever come close to it,
-#: and everything that hit it was a handoff being posted to the wrong verb.
-NOTE_MAX = 400
+#: Notes and findings are one line somebody reads later, not the writeup. Agents
+#: hit the old 400 cap 48 times, so it is now 1000.
+NOTE_MAX = 1000
 
 
 def _too_long(kind: str, text: str, cap: int) -> int:
@@ -2284,9 +2295,7 @@ def _cmd_brief(argv: list[str]) -> int:
     st = _read_state(log_file)
     t = st.tasks.get(slug)
     if t is None:
-        _err(f"error: no task called {slug!r}")
-        if st.tasks:
-            _err("  Declared: " + ", ".join(sorted(st.tasks)[:8]))
+        _no_such_task(st, slug)
         return EXIT_USAGE
 
     print(f"{t.id}  {t.title}".rstrip())

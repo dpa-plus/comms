@@ -487,9 +487,21 @@ def test_an_id_that_is_not_speakable_is_refused(tmp_path, monkeypatch):
     is not: measured on a real store, 99.5% of 11,049 event ids shared their
     six-character prefix, so there was nothing short to say."""
     repo = _repo(tmp_path, monkeypatch)
-    for bad in ("Not A Slug", "has_underscore", "x" * 40, "-leading", ""):
+    for bad in ("x" * 65, "-leading", "", "no/slashes", "emoji-\u2603"):
         code, out = _cli(repo, "task", "add", bad, "--as", "p")
         assert code == 2, f"{bad!r} should have been refused: {out}"
+    assert len(out.strip().splitlines()) <= 3
+
+
+def test_an_id_is_normalized_instead_of_refused(tmp_path, monkeypatch):
+    """Agents typed `Fix_Login`, `fix login` and 40-character ids and were told
+    "not a slug" 44 times."""
+    repo = _repo(tmp_path, monkeypatch)
+    for typed in ("Not A Slug", "has_underscore", "x" * 40, "Fix_Login-Flow"):
+        code, out = _cli(repo, "task", "add", typed, "--as", "p")
+        assert code == 0, f"{typed!r}: {out}"
+    code, out = _cli(repo, "brief", "fix login flow")
+    assert code == 0 and "fix-login-flow" in out
 
 
 def test_a_task_id_is_matched_the_way_a_person_would_say_it(tmp_path, monkeypatch):
