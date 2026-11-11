@@ -930,7 +930,11 @@ def repo_hash(repo_root: str | os.PathLike[str]) -> str:
     Note this hashes the COORDINATION root, not the path handed in, so all
     worktrees of a repository agree. See ``coordination_root``.
     """
-    return hashlib.sha256(coordination_root(repo_root).encode("utf-8")).hexdigest()[:12]
+    return _hash_of(coordination_root(repo_root))
+
+
+def _hash_of(coordination_root_path: str) -> str:
+    return hashlib.sha256(coordination_root_path.encode("utf-8")).hexdigest()[:12]
 
 
 def store_dir(repo_root: str | os.PathLike[str]) -> Path:
@@ -940,10 +944,11 @@ def store_dir(repo_root: str | os.PathLike[str]) -> Path:
     so an existing store is found rather than a second one started beside it.
     The lock file lives here too, next to the log it guards.
     """
-    temp_base = _temp_store_base(coordination_root(repo_root))
+    coord = coordination_root(repo_root)
+    temp_base = _temp_store_base(coord)
     if temp_base is not None:
-        return temp_base / repo_hash(repo_root)
-    return user_data_home() / "comms" / repo_hash(repo_root)
+        return temp_base / _hash_of(coord)
+    return user_data_home() / "comms" / _hash_of(coord)
 
 
 def _temp_dirs() -> list[str]:
