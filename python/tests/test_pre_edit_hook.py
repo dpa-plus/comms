@@ -323,26 +323,33 @@ def test_canonicalising_a_huge_directory_is_not_slow(tmp_path, monkeypatch):
     """IF THIS FAILS the hook pays O(entries) on every agent tool call.
 
     The listing-based version cost 21.7ms per call per component in a
-    50,000-entry node_modules. Asking the filesystem directly is one syscall.
+    50,000-entry node_modules. Asking the filesystem directly is one syscall,
+    so a huge directory costs about what a small one does. Compared against a
+    small directory in the same run, so a slow runner cannot fail it.
     """
     import time
 
     from comms_graph.cli import _canonical_relpath
 
     repo = _repo(tmp_path, monkeypatch)
-    big = repo / "node_modules"
-    big.mkdir()
-    for i in range(4000):
-        (big / ("f%05d.js" % i)).touch()
 
-    target = big / "f00001.js"
-    started = time.perf_counter()
-    for _ in range(50):
-        _canonical_relpath(target, repo)
-    per_call = (time.perf_counter() - started) / 50
-    # Generous: this is about catching a return to per-entry scanning, not
-    # pinning a number to one machine.
-    assert per_call < 0.010, f"{per_call * 1000:.1f} ms per call"
+    def per_call(directory, count):
+        directory.mkdir()
+        for i in range(count):
+            (directory / ("f%05d.js" % i)).touch()
+        target = directory / "f00001.js"
+        best = float("inf")
+        for _ in range(5):
+            started = time.perf_counter()
+            for _ in range(20):
+                _canonical_relpath(target, repo)
+            best = min(best, (time.perf_counter() - started) / 20)
+        return best
+
+    small = per_call(repo / "small", 10)
+    huge = per_call(repo / "node_modules", 4000)
+    assert huge < 4 * small + 0.0005, (
+        f"{huge * 1000:.2f} ms per call in 4000 entries, {small * 1000:.2f} ms in 10")
 
 
 def test_a_file_being_created_still_canonicalises_the_directories_above_it(
