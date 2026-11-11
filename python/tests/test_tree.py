@@ -390,7 +390,8 @@ def test_a_claim_still_says_it_could_not_check_when_somebody_else_does_hold(
     _commit(repo, a_ts="x\n", b_ts="x\n")
     _cli(repo, "claim", "b_ts", "--as", "peer", "--intent", "theirs", session="sP")
 
-    code, out = _cli(repo, "claim", "a_ts", "--as", "alpha", "--intent", "i", session="sA")
+    code, out = _cli(repo, "claim", "a_ts", "--as", "alpha", "--intent", "i", "--map",
+                     session="sA")
     assert code == 0, out
     assert "not on the map" in out, out
     # One line about it, not a paragraph.

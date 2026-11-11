@@ -47,69 +47,18 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import contact as _contact
 from . import hooks as _hooks
 from . import identity as _identity
 from . import lock as _lock
 from . import log as _log
 from . import task as _task
-from . import taskcode as _taskcode
 from . import taskview as _taskview
 from . import resolve as _resolve
 from . import scope as _scope
 from . import guard as _guard
 from . import tree as _tree
 from . import state as _state
-
-USAGE = """Usage: comms-graph <command>
-
-  claim <scope> --as <actor> [--intent "..."] [--task <id>]
-                                                take ground before you edit it
-        ... --steal <claim-id> --reason "..."    take it off somebody who is
-                                                not coming back
-  release <scope|claim-id> --as <actor> [--result "..."]   give it back
-        ... <claim-id> --force --reason "..."     free ground somebody else
-                                                 abandoned
-  board [--as <actor>]                          who holds what right now
-  check <path> | check --stdin-json             would an edit here collide?
-  check --staged [--as <actor>]                 would this COMMIT take
-                                                somebody else's claimed work?
-  hook session-start|pre-edit|session-end       Claude Code hooks (JSON on stdin)
-
-  task add|edge|done|review ...                 declare and move work
-  plan --from <file.json>                       a whole plan, atomically
-  next [--as <actor>]                           what you could start now
-  brief <task-id>                               what it is, and what came before
-  find <category> "..." [--ref kind:value]      something worth keeping
-  note "..."                                    a short FYI
-  doc [--list | <slug> [--edit]]                the repo's own wiki
-  lesson [--list | <slug> [--edit]]             knowledge across every repo
-
-  session start|join|end|retire|lead ...        named coordination windows
-  status [--since 24h]                          who is here, what is held
-  log [--type ...] [--since ...]                the history, filtered
-  hello [--label "..."]                         announce yourself
-  mcp                                           serve these as MCP tools
-  completion bash|zsh                           shell tab-completion
-  version
-  help
-  tasks [--out <file.html>]                     draw the task graph
-  ui [--port 7878]                              live board: both graphs, live claims
-
-  <scope> is a path, optionally anchored:
-      src/foo.py              the whole file
-      src/foo.py#parse        one symbol
-      src/foo.py#L20-48       a line range
-
-  Options:
-    --as <actor>     who you are. Else COMMS_ACTOR, else the name this Claude
-                     Code session already used here, else claude-<session>.
-    --intent "..."   one line on what you are about to do
-    --result "..."   one line on how it went (release only)
-    --root <path>    repo root (default: the git root above the cwd)
-    --graph <path>   graph.json (default: <root>/graphify-out/graph.json)
-
-  Exit status: 0 recorded, 1 blocked by somebody else's claim, 2 bad usage."""
+from . import verbs as _verbs
 
 # Exit codes. 1 is reserved for "somebody else holds this" so a wrapper script
 # can tell a real conflict from a typo without parsing text.
@@ -135,6 +84,10 @@ def _err(msg: str) -> None:
 #: Repository named by a global --repo/--root, before the verb. Module state
 #: rather than an environment write, and reset on every main() entry.
 _GLOBAL_ROOT: str | None = None
+
+#: Booleans of the verb being run, so `_parse_flags` does not hand a flag the
+#: positional that follows it. Set per call by `main`.
+_BOOLEANS: frozenset[str] = frozenset()
 
 
 def _repo_root(explicit: str | None) -> Path:
@@ -242,14 +195,16 @@ def _parse_flags(argv: list[str]) -> tuple[list[str], dict[str, str]]:
     i = 0
     while i < len(argv):
         arg = argv[i]
-        if arg.startswith("--"):
+        if _verbs.is_flag(arg):
             if "=" in arg:
                 key, value = arg[2:].split("=", 1)
                 flags[key] = value
                 i += 1
             else:
                 key = arg[2:]
-                value = argv[i + 1] if i + 1 < len(argv) and not argv[i + 1].startswith("--") else ""
+                value = ""
+                if key not in _BOOLEANS and i + 1 < len(argv) and not _verbs.is_flag(argv[i + 1]):
+                    value = argv[i + 1]
                 flags[key] = value
                 i += 2 if value else 1
         else:
@@ -616,6 +571,15 @@ def _rooted_scope(raw: str, root: Path) -> str:
     return rel_text + sep + anchor
 
 
+def _warn_missing_dir(scope_str: str, root: Path) -> None:
+    """One line when the claimed path's directory is not there: usually a typo."""
+    path_part = scope_str.split("#", 1)[0]
+    parent = (root / path_part).parent
+    if parent != root and not parent.exists():
+        _err(f"warning: {parent.relative_to(root)}/ does not exist under {root.name}; "
+             "claimed anyway (a new directory is fine, a typo is not).")
+
+
 def _single_scope_or_exit(positional: list[str], verb: str) -> str:
     """Take exactly one scope, and refuse the spellings that silently lost work.
 
@@ -764,6 +728,7 @@ def _cmd_claim_many(positional: list[str], flags: dict) -> int:
     scopes = []
     for raw in positional:
         scope_str = _rooted_scope(raw, root)
+        _warn_missing_dir(scope_str, root)
         scope = _parse_scope_or_exit(scope_str)
         key = str(scope)
         if key in seen:
@@ -783,7 +748,7 @@ def _cmd_claim_many(positional: list[str], flags: dict) -> int:
         if flags.get("task"):
             task_tag = _slug_or_exit(flags["task"])
             if task_tag not in st.tasks:
-                _err(f"error: no task called {task_tag!r} to tag these claims with")
+                _no_such_task(st, task_tag, "to tag these claims with")
                 return EXIT_USAGE
             # Same rule and same wording as the single-scope path: a task
             # belongs to one agent at a time. Batching must not be a way round it.
@@ -868,6 +833,7 @@ def _cmd_claim(argv: list[str]) -> int:
     intent = flags.get("intent", "")
     root = _repo_root(flags.get("root"))
     scope_str = _rooted_scope(scope_str, root)
+    _warn_missing_dir(scope_str, root)
     scope = _parse_scope_or_exit(scope_str)
     log_file, lock_file = _store(root)
     _warn_if_ephemeral(log_file)
@@ -884,11 +850,7 @@ def _cmd_claim(argv: list[str]) -> int:
                 # Silently ignoring an unknown tag would put us back where we
                 # started: the claim records, the task never shows a doer, and
                 # nothing says why.
-                _err(f"error: no task called {task_tag!r} to tag this claim with")
-                if st.tasks:
-                    _err("  Declared: " + ", ".join(sorted(st.tasks)[:8]))
-                else:
-                    _err("  Declare one first with `comms-graph task add <id>`.")
+                _no_such_task(st, task_tag, "to tag this claim with")
                 return EXIT_USAGE
             # ONE TASK, ONE AGENT: enforced here rather than counted.
             #
@@ -1057,7 +1019,7 @@ def _cmd_claim(argv: list[str]) -> int:
         print(f"  TAKEN FROM @{stolen_from_actor}: their claim {claim_data['steals']} is ended.")
         print("  Recorded as a steal under your name, with your reason. If they come")
         print("  back and re-claim it, they will be told the same way you were.")
-    advice = _advice(root, flags.get("graph"), scope, others)
+    advice = _advice(root, flags.get("graph"), scope, others) if "map" in flags else ""
     if advice:
         print(advice)
     return EXIT_OK
@@ -1178,6 +1140,8 @@ def _advice(root: Path, graph_flag: str | None, scope: _scope.Scope, others: lis
     for actor, scope_str, other_scope in others:
         res = _resolve.resolve(graph, other_scope, root)
         resolved_others.append((actor, scope_str, res))
+    from . import contact as _contact
+
     body = _contact.render(_contact.contact(graph, mine, resolved_others))
     return (stale + "\n" + body) if stale else body
 
@@ -1210,50 +1174,57 @@ def _cmd_release(argv: list[str]) -> int:
         if force:
             return _release_somebody_elses(
                 st, log_file, actor, target, flags.get("reason", "").strip())
-        mine = st.active_claims_by_actor(actor)
-        if not mine:
-            print(f"nothing to release: @{actor} holds no claims here")
-            return EXIT_OK
-        if not target:
-            chosen = mine
+        agent_session = _identity.host_session()
+        names = ({actor} | set(st.family_of(agent_session))
+                 if actor in st.family_of(agent_session) else {actor})
+        mine = sorted((c for c in st.claims.values() if c.actor in names), key=lambda c: c.ts)
+        targets = [p for p in positional if p]
+        if not targets:
+            if not mine:
+                print(f"nothing to release: @{actor} holds no claims here")
+                return EXIT_OK
+            chosen = mine[-1:] if "latest" in flags else mine
+            unmatched: list[str] = []
         else:
-            by_id = st.claim_by_id(target)
-            if by_id is not None and by_id.actor == actor:
-                chosen = [by_id]
+            chosen, unmatched = [], []
+            for target in targets:
+                found: list = []
+                by_id = st.claim_by_id(target)
+                if by_id is not None and by_id.actor in names:
+                    found = [by_id]
+                else:
+                    # Rooted the same way claim roots it, and for the same
+                    # reason: a claim taken at the repo root must be releasable
+                    # from a subdirectory. Only reached when the target was not a
+                    # claim id, so an id is never mangled by path resolution.
+                    # The canonical spelling AND the raw one: after a case-only
+                    # rename the frozen scope and the disk disagree, and the
+                    # holder must still be able to release her own claim.
+                    for spelling in (_rooted_scope(target, root), target):
+                        wanted = _parse_scope_or_exit(spelling)
+                        found = [c for c in mine if _scope.overlaps(c.scope, wanted)]
+                        if found:
+                            break
+                if not found:
+                    unmatched.append(target)
+                chosen.extend(c for c in found if c not in chosen)
+        if unmatched:
+            _err("error: @" + actor + " holds nothing matching "
+                 + ", ".join(repr(t) for t in unmatched))
+            if mine:
+                shown = ", ".join(str(c.scope) for c in mine[:8])
+                _err("  Held: " + shown + (f" (+{len(mine) - 8} more)" if len(mine) > 8 else ""))
             else:
-                # Rooted the same way claim roots it, and for the same reason: a
-                # claim taken at the repo root must be releasable from a
-                # subdirectory. Without this the two spellings of one file stop
-                # matching and an agent cannot give back ground it holds: the
-                # claim then sits there until it goes stale, blocking everybody.
-                # Only reached when the target was not a claim id, so an id is
-                # never mangled by path resolution.
-                # Try the canonicalised spelling AND the raw one. The scope was
-                # frozen into the log at claim time; the canonicaliser answers
-                # from the disk as it is NOW. After a case-only rename those two
-                # disagree, and the holder could not release her own claim:
-                # the refusal even printed "holds nothing matching
-                # 'src/Widget.py'  Held: src/Widget.py", naming the string it
-                # had just said matched nothing. Only the claim id worked, so
-                # the ground sat stranded on the board.
-                chosen = []
-                for spelling in (_rooted_scope(target, root), target):
-                    wanted = _parse_scope_or_exit(spelling)
-                    chosen = [c for c in mine if _scope.overlaps(c.scope, wanted)]
-                    if chosen:
-                        break
-        if not chosen:
-            _err(f"error: @{actor} holds nothing matching {target!r}")
-            _err("  Held: " + ", ".join(str(c.scope) for c in mine))
-            return EXIT_USAGE
-        data: dict = {"refs": [c.id for c in chosen]}
-        if flags.get("result"):
-            data["result"] = flags["result"]
-        _log.append(log_file, _tagged(st, actor, _log.TYPE_RELEASE, None, data))
+                _err(f"  @{actor} holds no claims here.")
+        if chosen:
+            data: dict = {"refs": [c.id for c in chosen]}
+            if flags.get("result"):
+                data["result"] = flags["result"]
+            _log.append(log_file, _tagged(st, actor, _log.TYPE_RELEASE, None, data))
 
     for claim in chosen:
-        print(f"RELEASED {claim.scope}  (was @{actor}, id {claim.id})")
-    return EXIT_OK
+        print(f"RELEASED {claim.scope}  (was @{claim.actor}, id {claim.id})")
+    return EXIT_CONFLICT if unmatched else EXIT_OK
 
 
 # ---------------------------------------------------------------------------
@@ -1266,7 +1237,7 @@ def _cmd_release(argv: list[str]) -> int:
 # tasks
 # ---------------------------------------------------------------------------
 
-_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
+_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 
 
 def _slug_or_exit(raw: str, what: str = "task id") -> str:
@@ -1276,14 +1247,32 @@ def _slug_or_exit(raw: str, what: str = "task id") -> str:
     shared their six-character prefix, so an agent asked to name one had nothing
     short to say and nothing memorable to repeat. A slug is what somebody can
     type into the next command without going back to look it up.
+
+    Case, spaces and underscores are normalized to hyphens rather than refused:
+    agents wrote `Fix_Login` and `fix login` and were told "not a slug".
     """
-    slug = (raw or "").strip().lower()
+    slug = re.sub(r"[\s_]+", "-", (raw or "").strip().lower())
     if not _SLUG_RE.match(slug):
-        _err(f"error: {what} {raw!r} is not a slug")
-        _err("  Lowercase letters, digits and hyphens, up to 32 characters, "
-             "starting with a letter or digit. For example: auth-api.")
+        _err(f"error: {what} {raw!r} cannot be turned into an id")
+        _err("  Letters, digits and hyphens, up to 64 characters, starting with a "
+             "letter or digit. For example: auth-api.")
         sys.exit(EXIT_USAGE)
     return slug
+
+
+def _no_such_task(st, slug: str, why: str = "") -> None:
+    """Say which tasks exist and the exact line that declares this one."""
+    import difflib
+
+    _err(f"error: no task called {slug!r}" + (f" {why}" if why else ""))
+    live = sorted(t.id for t in st.tasks.values() if t.phase != _task.PHASE_CLOSED)
+    close = difflib.get_close_matches(slug, sorted(st.tasks), n=1, cutoff=0.6)
+    if close:
+        _err(f"  Did you mean {close[0]}?")
+    if live:
+        more = f" (+{len(live) - 8} more)" if len(live) > 8 else ""
+        _err("  Open tasks: " + ", ".join(live[:8]) + more)
+    _err(f'  To declare it: comms-graph task add {slug} --title "..."')
 
 
 def _repeated(argv: list[str], name: str) -> list[str]:
@@ -1476,6 +1465,9 @@ def _cmd_check_staged(flags: dict) -> int:
     one file at a time turns one fix into five commits.
     """
     root = _repo_root(flags.get("root"))
+    if not (root / ".git").exists():
+        print(f"check --staged: {root} is not a git repository, so nothing is staged.")
+        return EXIT_OK
     git = shutil.which("git")
     if git is None:
         _err("check --staged: git is not installed, so the index cannot be read")
@@ -1687,21 +1679,14 @@ def _cmd_check_inner(argv: list[str]) -> int:
     if not positional:
         _err("error: check needs a path, or --stdin-json to read a hook payload")
         return EXIT_USAGE
-    if len(positional) > 1:
-        # Say what is actually wrong. It used to answer three paths with
-        # "check needs a path", which reads as "you gave none" and sent a
-        # reader back to --help to find a flag that was never missing.
-        _err(f"error: check takes one path at a time; you gave {len(positional)}.")
-        _err("  Loop over them, or claim them together and let the pre-edit hook")
-        _err("  check each one as you touch it:")
-        for one in positional[:4]:
-            _err(f"    comms-graph check {shlex.quote(one)}")
-        if len(positional) > 4:
-            _err(f"    ... and {len(positional) - 4} more")
-        return EXIT_USAGE
-    return _hooks.check_edit(Path(positional[0]).expanduser(),
-                             agent_session=_identity.host_session(), explicit=explicit,
-                             explicit_root=flags.get("root"), payload=None)
+    worst = EXIT_OK
+    for one in positional:
+        code = _hooks.check_edit(Path(one).expanduser(),
+                                 agent_session=_identity.host_session(), explicit=explicit,
+                                 explicit_root=flags.get("root"), payload=None)
+        if code == EXIT_BLOCK:
+            worst = EXIT_BLOCK
+    return worst
 
 
 def _cmd_tasks(argv: list[str]) -> int:
@@ -1741,25 +1726,6 @@ def _title_smells_technical(title: str) -> str:
     if re.search(r"\b(refactor|impl|util|helper|wrapper|endpoint|hook)\b", title, re.I):
         return "it is written in implementation words"
     return ""
-
-
-def _cmd_task(argv: list[str]) -> int:
-    verb = argv[0] if argv else ""
-    rest = argv[1:]
-    if verb == "add":
-        return _task_add(rest)
-    if verb == "edge":
-        return _task_edge(rest)
-    if verb == "done":
-        return _task_done(rest)
-    if verb == "review":
-        return _task_review(rest)
-    if verb in ("", "-h", "--help"):
-        print(TASK_USAGE)
-        return EXIT_OK if verb else EXIT_USAGE
-    _err(f"error: unknown task command {verb!r}")
-    _err(TASK_USAGE)
-    return EXIT_USAGE
 
 
 def _task_add(argv: list[str]) -> int:
@@ -1863,8 +1829,7 @@ def _task_edge(argv: list[str]) -> int:
         st = _read_state(log_file)
         for end in (from_, to):
             if end not in st.tasks:
-                _err(f"error: no task called {end!r}")
-                _err("  Declare it first with `comms-graph task add " + end + "`.")
+                _no_such_task(st, end)
                 return EXIT_USAGE
         # Refuse the edge that would close a loop rather than accept it and then
         # describe the wreckage: the fold survives a cycle, but a graph
@@ -1921,7 +1886,7 @@ def _task_done(argv: list[str]) -> int:
         st = _read_state(log_file)
         t = st.tasks.get(slug)
         if t is None:
-            _err(f"error: no task called {slug!r}")
+            _no_such_task(st, slug)
             return EXIT_USAGE
         # Say no here as well as in the fold. The fold is the authority: a
         # second writer must not be able to sneak past a rule by not asking:
@@ -1991,7 +1956,7 @@ def _task_review(argv: list[str]) -> int:
         st = _read_state(log_file)
         t = st.tasks.get(slug)
         if t is None:
-            _err(f"error: no task called {slug!r}")
+            _no_such_task(st, slug)
             return EXIT_USAGE
         if not t.did:
             _err(f"error: nothing is awaiting review on {slug}")
@@ -2205,11 +2170,9 @@ def _cmd_find(argv: list[str]) -> int:
 
 
 
-#: Notes and findings are one line somebody reads later, not the writeup.
-#: Measured on 469 real notes: median 171 characters, p90 194, longest 352. So
-#: the cap is not tight: nothing written normally has ever come close to it,
-#: and everything that hit it was a handoff being posted to the wrong verb.
-NOTE_MAX = 400
+#: Notes and findings are one line somebody reads later, not the writeup. Agents
+#: hit the old 400 cap 48 times, so it is now 1000.
+NOTE_MAX = 1000
 
 
 def _too_long(kind: str, text: str, cap: int) -> int:
@@ -2281,7 +2244,7 @@ def _cmd_note(argv: list[str]) -> int:
 
 def _cmd_next(argv: list[str]) -> int:
     _, flags = _parse_flags(argv)
-    actor = _actor(flags)
+    actor = _actor(flags, write=False)
     _, log_file, _lockf = _task_runtime(flags)
     st = _read_state(log_file)
     if not st.tasks:
@@ -2316,7 +2279,7 @@ def _cmd_next(argv: list[str]) -> int:
         for t in mine_to_review:
             print(f"  {t.id}  {t.title}".rstrip())
             print(f"    done by @{t.did}" + (f"; notes: {t.notes[-1]}" if t.notes else ""))
-            print(f"    comms-graph task review {t.id} --pass --as {actor}")
+            print(f"    comms-graph task review {t.id} --pass --as {actor or '<you>'}")
     if ready:
         print("READY: nothing upstream is outstanding:")
         for t in ready:
@@ -2346,9 +2309,7 @@ def _cmd_brief(argv: list[str]) -> int:
     st = _read_state(log_file)
     t = st.tasks.get(slug)
     if t is None:
-        _err(f"error: no task called {slug!r}")
-        if st.tasks:
-            _err("  Declared: " + ", ".join(sorted(st.tasks)[:8]))
+        _no_such_task(st, slug)
         return EXIT_USAGE
 
     print(f"{t.id}  {t.title}".rstrip())
@@ -2435,6 +2396,8 @@ def _cmd_brief(argv: list[str]) -> int:
             def _sof(d, k):
                 v = (d or {}).get(k)
                 return v if isinstance(v, str) else ""
+            from . import taskcode as _taskcode
+
             files, actors = _taskcode.files_from_log(_log.read(log_file), _sof)
             me = _actor(flags, write=False)
             links = _taskcode.link(graph, st.tasks, files, root, actors, me)
@@ -2481,155 +2444,6 @@ def _cmd_brief(argv: list[str]) -> int:
     return EXIT_OK
 
 
-def _cmd_plan(argv: list[str]) -> int:
-    _, flags = _parse_flags(argv)
-    source = flags.get("from")
-    if not source:
-        _err("error: plan needs --from <file.json>")
-        _err('  {"tasks": [{"id": "api", "title": "...", "checks": ["test"], "review": true}],')
-        _err('   "edges": [{"from": "api", "to": "ui", "kind": "interface", "provides": "..."}]}')
-        return EXIT_USAGE
-    actor = _actor(flags)
-    _, log_file, lock_file = _task_runtime(flags)
-    try:
-        raw = json.loads(Path(source).expanduser().read_text(encoding="utf-8"))
-    except OSError as exc:
-        _err(f"error: cannot read {source}: {exc.strerror}")
-        return EXIT_USAGE
-    except json.JSONDecodeError as exc:
-        _err(f"error: {source} is not valid JSON: {exc}")
-        return EXIT_USAGE
-
-    if not isinstance(raw, dict):
-        _err(f"error: {source} must contain a JSON object, not a "
-             f"{type(raw).__name__}")
-        _err('  Expected {"tasks": [...], "edges": [...]}.')
-        return EXIT_USAGE
-    _plan_state = _read_state(log_file)
-    _plan_greeting_holder = [_hello_if_unknown(_plan_state, actor)]
-    tasks = raw.get("tasks") or []
-    edges = raw.get("edges") or []
-    if not isinstance(tasks, list) or not isinstance(edges, list):
-        _err("error: 'tasks' and 'edges' must both be lists")
-        return EXIT_USAGE
-
-    # Validate the WHOLE plan before a single byte is written. A half-applied
-    # plan is worse than a refused one: the graph would claim a shape nobody
-    # designed, and the missing half is invisible.
-    declared: set[str] = set()
-    # Minted FIRST, before any task event exists, because fold() orders by
-    # timestamp. Every other command was fixed for this; the plan path was
-    # missed, and a real five-agent run caught it: the planner's hello carried
-    # a timestamp 426us LATER than the tasks it was appended ahead of, so the
-    # log's ids and timestamps disagreed about order.
-    events: list = []
-    for item in tasks:
-        if not isinstance(item, dict):
-            _err(f"error: every task must be an object, got {type(item).__name__}")
-            return EXIT_USAGE
-        slug = _slug_or_exit(str(item.get("id") or ""))
-        declared.add(slug)
-        data: dict = {"task": slug}
-        # A plan can ask for review per task, the same way `task add --review`
-        # does. Without this a decomposition could not express "this one needs
-        # checking" at all, which is exactly where it matters most.
-        if item.get("review"):
-            data["review"] = True
-        for key in ("title", "size", "ref"):
-            if item.get(key):
-                data[key] = str(item[key])
-        if item.get("checks"):
-            checks = item["checks"]
-            if isinstance(checks, str):
-                # A string is iterable, so this used to become one check per
-                # CHARACTER: "test" turned into t, e, s, t: four checks that
-                # can never pass, on a field whose entire job is to gate.
-                _err(f"error: task {slug!r} has checks={checks!r}; "
-                     "it must be a list, e.g. [\"test\"]")
-                return EXIT_USAGE
-            if not isinstance(checks, list):
-                _err(f"error: task {slug!r} has checks of type "
-                     f"{type(checks).__name__}; it must be a list")
-                return EXIT_USAGE
-            data["checks"] = [str(c) for c in checks]
-        events.append(_tagged(_plan_state, actor, _log.TYPE_TASK, None, data))
-
-    pending: list = []
-    for item in edges:
-        if not isinstance(item, dict):
-            _err(f"error: every edge must be an object, got {type(item).__name__}")
-            return EXIT_USAGE
-        from_ = _slug_or_exit(str(item.get("from") or ""), "edge 'from'")
-        to = _slug_or_exit(str(item.get("to") or ""), "edge 'to'")
-        for end in (from_, to):
-            if end not in declared:
-                _err(f"error: edge names {end!r}, which this plan does not declare")
-                return EXIT_USAGE
-        if from_ == to:
-            _err(f"error: {from_!r} cannot come after itself")
-            return EXIT_USAGE
-        kind = str(item.get("kind") or _task.EDGE_SEQUENCE).lower()
-        kind = _task._EDGE_ALIASES.get(kind, kind)
-        if kind not in (_task.EDGE_CONSUMES, _task.EDGE_SEQUENCE):
-            _err(f"error: edge kind {kind!r} is not one of consumes, sequence")
-            return EXIT_USAGE
-        if _task.would_cycle(pending, from_, to):
-            _err(f"error: this plan contains a dependency loop: {from_} -> {to} closes it")
-            return EXIT_USAGE
-        pending.append(_task.TaskEdge(from_=from_, to=to, kind=kind))
-        data = {"from": from_, "to": to, "kind": kind}
-        if item.get("provides"):
-            data["provides"] = str(item["provides"])
-        events.append(_tagged(_plan_state, actor, _log.TYPE_TASK_EDGE, None, data))
-
-    if not events:
-        print("nothing to do: the plan declares no tasks and no edges")
-        return EXIT_OK
-
-    with _lock.file_lock(lock_file) as handle:
-        broken = handle.compromised()
-        if broken:
-            _err(f"error: the coordination lock is no longer exclusive: {broken}")
-            return EXIT_ERROR
-        st = _read_state(log_file)
-        # A loop can also be closed against edges ALREADY in the log, not just
-        # against the ones in this file.
-        existing = list(st.task_edges)
-        for e in pending:
-            if _task.would_cycle(existing, e.from_, e.to):
-                _err(f"error: {e.from_} -> {e.to} would close a loop with edges already recorded")
-                return EXIT_USAGE
-            existing.append(e)
-        greeting = _plan_greeting_holder[0] if _plan_greeting_holder else None
-        if greeting is not None:
-            events.insert(0, greeting)
-        _log.append_batch(log_file, events)
-    print(f"PLAN recorded: {len(tasks)} task(s), {len(edges)} edge(s)")
-    print("  See what is startable with `comms-graph next`.")
-    return EXIT_OK
-
-
-TASK_USAGE = """Usage: comms-graph task <command>
-
-  add <id> --as <actor> [--title "..."] [--size S|M|L]   (a rough scale, not a gate)
-        --title is what people read on the board: plain English, no file or
-        function names, no jargon, short enough to say out loud. The id is
-        just what you type.
-                        [--review]        somebody else must check it to close
-                        [--probe]         a diagnostic; kept out of derived neighbours
-                        [--check <name>]... [--ref "tracker:PROJ-1234"]
-  edge <from> <to> --as <actor> [--kind consumes|sequence]
-                                [--provides "..."]      <to> comes AFTER <from>
-  done <id> --as <actor> [--check name=pass]... [--note "..."]
-  review <id> --as <actor> --pass|--fail [--evidence "..."]
-                        [--acknowledge-self-review]  last resort: sign off your
-                        own work, recorded as self-acknowledged, never verified
-
-  A task unblocks what follows it when it is VERIFIED, not when it is done,
-  and you cannot verify your own work."""
-
-
-
 def _release_somebody_elses(st, log_file, actor: str, target: str, reason: str) -> int:
     """`release <claim-id> --force --reason "..."`: end a claim that is not yours.
 
@@ -2666,21 +2480,6 @@ def _release_somebody_elses(st, log_file, actor: str, target: str, reason: str) 
     return EXIT_OK
 
 
-GUARD_USAGE = """Usage: comms-graph guard <command>
-
-  install [--chain]   put the commit check into this repo's git hooks, so it
-                      runs on every commit whether anybody remembers or not.
-                      --chain keeps a pre-commit hook that is already there and
-                      runs it first.
-  status              is it wired in, and where
-  uninstall           take it out, restoring any hook it displaced
-
-  Without it, `check --staged` only ever runs when somebody types it. Measured:
-  three separate incidents where the check would have refused the commit and
-  nobody ran it.
-"""
-
-
 def _cmd_guard(argv: list[str]) -> int:
     positional, flags = _parse_flags(argv)
     sub = positional[0] if positional else "status"
@@ -2707,8 +2506,6 @@ def _cmd_guard(argv: list[str]) -> int:
             (print if ok else _err)(line)
         return EXIT_OK if ok else EXIT_CONFLICT
 
-    _err(f"error: unknown guard command {sub!r}")
-    _err(GUARD_USAGE)
     return EXIT_BLOCK
 
 
@@ -2749,6 +2546,16 @@ def _cmd_board(argv: list[str]) -> int:
                 print(f"  {head or survey.unavailable}")
         if guard_line:
             print(guard_line)
+        return EXIT_OK
+    if "all" not in flags:
+        from . import compact as _compact
+
+        print("\n".join(_compact.view(st, log_file.parent, me)))
+        if head:
+            print(head)
+        if guard_line:
+            print(guard_line.strip())
+        print(_compact.all_hint("board"))
         return EXIT_OK
     print(f"active claims ({len(claims)}):")
     for claim in claims:
@@ -2907,121 +2714,126 @@ def _remember_seen(marker: Path, events) -> None:
         pass  # a board that cannot remember re-shows once; never fatal
 
 
+def _lazy(module: str, name: str):
+    """A handler that imports its module only when the verb runs.
+
+    `claim` and `check` are on the pre-edit path and must survive any other
+    module failing to import.
+    """
+    def call(argv: list[str]) -> int:
+        import importlib
+
+        return getattr(importlib.import_module("." + module, __package__), name)(argv)
+    return call
+
+
+def _help_verb(argv: list[str]) -> int:
+    positional, _ = _parse_flags(argv)
+    if not positional:
+        print(_verbs.global_usage())
+        return EXIT_OK
+    try:
+        call = _verbs.prepare([*positional, "--help"])
+    except _verbs.Refusal as refusal:
+        for line in refusal.lines:
+            _err(line)
+        return refusal.code
+    print(_verbs.verb_help(call.verb, call.path))
+    return EXIT_OK
+
+
+def _guard_verb(sub: str):
+    return lambda argv: _cmd_guard([sub, *argv])
+
+
+def _hook_verb(sub: str):
+    return lambda argv: _hooks.main([sub, *argv])
+
+
+def _session_verb(sub: str):
+    def call(argv: list[str]) -> int:
+        from . import session as _session
+        return _session.main([sub, *argv])
+    return call
+
+
+def _version_verb(argv: list[str]) -> int:
+    from . import hello as _hello
+    return _hello.cmd_version(argv)
+
+
+#: One handler per dispatchable path in ``verbs.leaves()`` that is not an alias.
+_HANDLERS = {
+    "claim": _cmd_claim,
+    "release": _cmd_release,
+    "board": _cmd_board,
+    "check": _cmd_check,
+    "task add": _task_add,
+    "task edge": _task_edge,
+    "task done": _task_done,
+    "task review": _task_review,
+    "next": _cmd_next,
+    "brief": _cmd_brief,
+    "tasks": _cmd_tasks,
+    "find": _cmd_find,
+    "note": _cmd_note,
+    "doc": _lazy("doc", "main"),
+    "status": _lazy("status", "status_main"),
+    "log": _lazy("status", "log_main"),
+    "hello": _lazy("hello", "cmd_hello"),
+    "mcp": _lazy("mcp", "main"),
+    "doctor": _lazy("doctor", "main"),
+    "whoami": _lazy("compact", "whoami_main"),
+    "claims": _lazy("compact", "claims_main"),
+    "ui": _cmd_ui,
+    "version": _version_verb,
+    "help": _help_verb,
+    "guard install": _guard_verb("install"),
+    "guard status": _guard_verb("status"),
+    "guard uninstall": _guard_verb("uninstall"),
+    "hook session-start": _hook_verb("session-start"),
+    "hook pre-edit": _hook_verb("pre-edit"),
+    "hook session-end": _hook_verb("session-end"),
+    "session start": _session_verb("start"),
+    "session join": _session_verb("join"),
+    "session end": _session_verb("end"),
+    "session retire": _session_verb("retire"),
+    "session lead": _session_verb("lead"),
+}
+
+
 def _run(argv: list[str]) -> int:
     """``argv`` is everything after ``comms-graph``."""
-    # A GLOBAL --repo/--root, before the verb. The Go build takes it there and
-    # the briefing documents `comms --repo /abs/path status` as the recovery
-    # when the working directory cannot be read, which on macOS is not exotic:
-    # a repo under Desktop, Documents or Downloads loses privacy access and
-    # every tool that calls getcwd() starts failing at once. Without this the
-    # recovery path simply does not exist in this build, and the one moment you
-    # need it is the moment you cannot cd anywhere either.
-    #
-    # `--repo` is the spelling to accept even though the per-verb flag is
-    # `--root`, because it is the one already in the briefing and in muscle
-    # memory. Rejecting it would be technically defensible and practically just
-    # a way to fail during an outage.
-    # Held in a module global rather than exported into os.environ. Writing the
-    # environment would have been fewer lines and is a trap: the value outlives
-    # the call, so anything sharing the process afterwards inherits a repository
-    # it never asked for. Caught by 64 unrelated tests failing together while
-    # each passed alone. Reset unconditionally on every entry, so one call can
-    # never colour the next.
-    global _GLOBAL_ROOT
+    # A global --repo/--root before the verb is held in a module global rather
+    # than exported into os.environ: the environment outlives the call and
+    # would hand the next one in the same process a repository it never asked
+    # for. Reset on every entry, so one call can never colour the next.
+    global _GLOBAL_ROOT, _BOOLEANS
     _GLOBAL_ROOT = None
-    # Same rule for the environment, normalised once so every reader downstream
-    # (including the ones that never call _actor) sees the canonical form.
+    _BOOLEANS = frozenset()
     env_actor = os.environ.get("COMMS_ACTOR")
     if env_actor and env_actor.strip() != env_actor.strip().lstrip("@").strip():
         os.environ["COMMS_ACTOR"] = env_actor.strip().lstrip("@").strip()
-    argv = list(argv)
-    while argv and argv[0] in ("--repo", "--root"):
-        if len(argv) < 2:
-            _err(f"error: {argv[0]} needs a path")
-            return EXIT_USAGE
-        _GLOBAL_ROOT = argv[1]
-        argv = argv[2:]
-
-    sub = argv[0] if argv else ""
-    rest = argv[1:]
-    if sub in ("", "-h", "--help", "help"):
-        print(USAGE)
-        return EXIT_OK if sub else EXIT_USAGE
-    # --help on a LEAF verb. Without this, every leaf ignored it: `task done
-    # --help` errored with "needs an id", and `board --help` / `tasks --help`
-    # ran the command: `tasks` wrote an HTML file. Asking how a verb works is
-    # the one thing that must never have a side effect, and for a tool whose
-    # users are agents it is the whole discovery path. Exact-match only, so a
-    # free-text --intent that mentions --help is unaffected.
-    if any(a in ("-h", "--help", "-?") for a in rest):
-        print(TASK_USAGE if sub == "task"
-              else GUARD_USAGE if sub == "guard" else USAGE)
-        return EXIT_OK
     try:
-        if sub == "claim":
-            return _cmd_claim(rest)
-        if sub == "release":
-            return _cmd_release(rest)
-        if sub == "board":
-            return _cmd_board(rest)
-        if sub == "task":
-            return _cmd_task(rest)
-        if sub == "next":
-            return _cmd_next(rest)
-        if sub == "brief":
-            return _cmd_brief(rest)
-        if sub == "tasks":
-            return _cmd_tasks(rest)
-        if sub == "check":
-            return _cmd_check(rest)
-        if sub == "guard":
-            return _cmd_guard(rest)
-        if sub == "ui":
-            return _cmd_ui(rest)
-        if sub == "plan":
-            return _cmd_plan(rest)
-        if sub == "find":
-            return _cmd_find(rest)
-        if sub == "note":
-            return _cmd_note(rest)
-        # Ported from the Go build, each in its own module. Imported lazily so
-        # a broken or missing one cannot stop `claim` and `check` from working
-        # because those two are on the pre-edit path and must survive anything.
-        if sub == "session":
-            from . import session as _session
-            return _session.main(rest)
-        if sub == "doc":
-            from . import doc as _doc
-            return _doc.main(rest)
-        if sub == "status":
-            from . import status as _status
-            return _status.status_main(rest)
-        if sub == "log":
-            from . import status as _status
-            return _status.log_main(rest)
-        if sub == "hello":
-            from . import hello as _hello
-            return _hello.cmd_hello(rest)
-        if sub == "version":
-            from . import hello as _hello
-            return _hello.cmd_version(rest)
-        if sub == "lesson":
-            from . import lesson as _lesson
-            return _lesson.main(rest)
-        if sub == "mcp":
-            from . import mcp as _mcp
-            return _mcp.main(rest)
-        if sub == "hook":
-            return _hooks.main(rest)
-        if sub == "completion":
-            from . import hello as _hello
-            return _hello.cmd_completion(rest)
+        call = _verbs.prepare(argv)
+    except _verbs.Refusal as refusal:
+        for line in refusal.lines:
+            _err(line)
+        return refusal.code
+    if call.root:
+        _GLOBAL_ROOT = call.root
+    if call.help:
+        print(_verbs.verb_help(call.verb, call.path))
+        return EXIT_OK
+    _BOOLEANS = _verbs.booleans(call.verb)
+    handler = _HANDLERS.get(call.path)
+    try:
+        return handler(call.argv)
     except _lock.LockError as exc:
         _err(f"error: could not take the comms lock: {exc}")
         return EXIT_USAGE
-    _err(f"error: unknown comms command {sub!r}")
-    _err(USAGE)
-    return EXIT_USAGE
+    finally:
+        _BOOLEANS = frozenset()
 
 
 def main(argv: list[str]) -> int:
@@ -3033,14 +2845,15 @@ def main(argv: list[str]) -> int:
     """
     code = _run(argv)
     try:
-        _, flags = _parse_flags(list(argv[1:]))
-        verb = argv[0] if argv else ""
+        call = _verbs.prepare(argv)
+        flags = _parse_flags(list(call.argv))[1]
+        verb = call.verb.name
         # Not on the hook path and not into machine-readable output. `check
         # --stdin-json` has a strict contract with Claude Code, and anything
         # --json is being parsed by something that did not ask for prose.
-        if verb in ("check",) and "stdin-json" in flags:
+        if verb == "check" and "stdin-json" in flags:
             return code
-        if "json" in flags or verb in ("mcp", "ui", "hook"):
+        if "json" in flags or verb in ("mcp", "ui", "hook", "help", "version", "doctor"):
             return code
         actor = _actor(flags, write=False)
         if actor:

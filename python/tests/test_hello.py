@@ -20,9 +20,11 @@ from contextlib import redirect_stderr, redirect_stdout
 
 import pytest
 
+from comms_graph import __version__
 from comms_graph import cli as ccli
 from comms_graph import hello as chello
 from comms_graph import log as clog
+from comms_graph import verbs as cverbs
 from comms_graph import state as cstate
 
 
@@ -52,7 +54,7 @@ def _run(repo, *args, session=None, env=None):
         os.environ.update(env or {})
         with redirect_stdout(out), redirect_stderr(err):
             try:
-                code = chello.main(list(args))
+                code = ccli.main(list(args))
             except SystemExit as exc:
                 code = exc.code if isinstance(exc.code, int) else 1
     finally:
@@ -102,7 +104,7 @@ def test_hello_lets_the_pre_edit_hook_recognise_the_actor(tmp_path, monkeypatch)
     code, out, err = _run(repo, "hello", "--as", "claude-dev", session="sess-1")
     assert code == 0, out + err
     st = _state_of(repo)
-    assert st.families["sess-1"].latest_actor == "claude-dev"
+    assert st.families["sess-1"].own_actor == "claude-dev"
 
 
 def test_an_explicit_hello_is_written_exactly_like_the_automatic_one(tmp_path, monkeypatch):
@@ -132,7 +134,8 @@ def test_an_explicit_hello_is_written_exactly_like_the_automatic_one(tmp_path, m
             else:
                 os.environ[key] = value
     assert automatic is not None
-    assert written[0].data == automatic.data
+    assert {k: v for k, v in written[0].data.items() if k != "primary"} == automatic.data
+    assert written[0].data["primary"] is True
 
 
 def test_saying_hello_again_updates_the_label(tmp_path, monkeypatch):
@@ -281,20 +284,8 @@ def test_version_prints_the_version_as_the_second_field(tmp_path, monkeypatch):
     assert code == 0
     fields = out.split()
     assert fields[0] == "comms-graph"
-    assert fields[1] and fields[1][0].isdigit() or fields[1] == "dev"
+    assert fields[1] == chello._version() == __version__
     assert len(out.strip().splitlines()) == 1, "one line, so it stays greppable"
-
-
-def test_version_from_a_source_checkout_says_dev_rather_than_failing(monkeypatch):
-    """IF THIS FAILS: running from a checkout: how everyone working ON comms runs
-    it: raises out of a command whose entire job is to answer a question."""
-    from importlib.metadata import PackageNotFoundError
-
-    def _missing(_name):
-        raise PackageNotFoundError(_name)
-
-    monkeypatch.setattr("importlib.metadata.version", _missing)
-    assert chello._version() == "dev"
 
 
 def test_version_refuses_arguments_instead_of_ignoring_them(tmp_path, monkeypatch):
@@ -312,7 +303,8 @@ def test_help_prints_the_same_usage_the_bare_command_does(tmp_path, monkeypatch)
     repo = _repo(tmp_path, monkeypatch)
     code, out, err = _run(repo, "help")
     assert code == 0
-    assert out.strip() == ccli.USAGE.strip()
+    assert out.strip() == cverbs.global_usage().strip()
+    assert _run(repo, "claim", "--help")[1].startswith("Usage: comms-graph claim")
 
 
 def test_an_unknown_verb_is_a_usage_error_not_a_silent_success(tmp_path, monkeypatch):

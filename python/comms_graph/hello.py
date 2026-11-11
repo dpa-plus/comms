@@ -1,9 +1,9 @@
-"""``hello``, ``version`` and ``help``: the three verbs that answer, not act.
+"""``hello`` and ``version``: the two verbs that answer, not act.
 
 Ported from the Go comms (``internal/subcmd/hello.go``, ``version.go``). They
-live in one module because none of them is big enough to be its own file and
-all three are things an agent runs BEFORE it has any state to coordinate: who
-am I, what am I running, what can I type.
+live in one module because neither is big enough to be its own file and
+both are things an agent runs BEFORE it has any state to coordinate: who am I,
+what am I running.
 
 ``hello`` is the one with a side effect, and the side effect is the point. The
 pre-edit hook that enforces claims is a separate process with no ``COMMS_ACTOR``
@@ -35,6 +35,7 @@ import socket
 import sys
 import unicodedata
 
+from . import __version__
 from . import cli as _cli
 from . import identity as _identity
 from . import lock as _lock
@@ -89,7 +90,7 @@ def _base_name(actor: str) -> str:
     return actor[:i] if i > 0 else actor
 
 
-def _identity_data(label: str, model: str, vendor: str) -> dict:
+def _identity_data(label: str, model: str, vendor: str, primary: bool = False) -> dict:
     """The hello payload. Must stay key-for-key what ``cli._hello_if_unknown`` writes.
 
     Two writers, one record: if this spelled the host session ``session_id``
@@ -113,6 +114,8 @@ def _identity_data(label: str, model: str, vendor: str) -> dict:
         data["model"] = model
     if vendor:
         data["vendor"] = vendor
+    if primary:
+        data["primary"] = True
     try:
         data["hostname"] = socket.gethostname()
     except Exception:
@@ -167,7 +170,9 @@ def cmd_hello(argv: list[str]) -> int:
         # asking to be registered NOW, and a re-run that changes only --label
         # would otherwise print success and record nothing.
         _log.append(log_file, _cli._event(actor, _log.TYPE_HELLO, None,
-                                          _identity_data(label, model, vendor)))
+                                          _identity_data(
+                                              label, model, vendor,
+                                              primary=bool(named or flags.get("as")))))
         base = _base_name(actor)
         # Counted as a SET of actor names that includes this one, not as a
         # number of hello events: an agent that says hello twice is still one
@@ -205,30 +210,14 @@ def cmd_hello(argv: list[str]) -> int:
 # version
 # ---------------------------------------------------------------------------
 
-#: Distribution names to ask, in order. The wheel is still published as
-#: `graphifyy` while the fork is called comms-graph, so asking for only one of
-#: them would print "dev" for real installs on one side of the rename or the
-#: other. Both are asked; the first that answers wins.
-_DIST_NAMES = ("comms-graph", "graphifyy")
-
 
 def _version() -> str:
-    """The installed version, or ``dev`` when there is no installed dist.
+    return __version__
 
-    Running from a source checkout is normal here and is not an error, so it
-    reports the same marker the Go build reports for a binary built without
-    version stamping rather than raising or printing "unknown".
-    """
-    from importlib.metadata import PackageNotFoundError, version as _dist_version
 
-    for name in _DIST_NAMES:
-        try:
-            found = _dist_version(name)
-        except PackageNotFoundError:
-            continue
-        if found:
-            return found
-    return "dev"
+def version_line() -> str:
+    return (f"comms-graph {_version()} (python {platform.python_version()}, "
+            f"{platform.system().lower()}/{platform.machine()})")
 
 
 def cmd_version(argv: list[str]) -> int:
@@ -236,137 +225,5 @@ def cmd_version(argv: list[str]) -> int:
     if positional:
         _cli._err(f"error: version takes no arguments, got {positional[0]!r}")
         return _cli.EXIT_USAGE
-    # One line, same shape as the Go build's: name, version, then the runtime
-    # facts a bug report needs. Version stays the second field in both builds so
-    # a script that cut it out of `comms version` still works against this one.
-    print(f"comms-graph {_version()} (python {platform.python_version()}, "
-          f"{platform.system().lower()}/{platform.machine()})")
+    print(version_line())
     return _cli.EXIT_OK
-
-
-# ---------------------------------------------------------------------------
-# help
-# ---------------------------------------------------------------------------
-
-
-def cmd_help(argv: list[str]) -> int:
-    # Deliberately prints cli.USAGE rather than a copy of it: two copies of the
-    # usage text means one of them is out of date, and for a tool whose users
-    # are agents the usage text IS the discovery path.
-    print(_cli.USAGE)
-    return _cli.EXIT_OK
-
-
-# ---------------------------------------------------------------------------
-# entry point
-# ---------------------------------------------------------------------------
-
-_VERBS = {"hello": cmd_hello, "version": cmd_version, "help": cmd_help}
-
-
-def main(argv: list[str]) -> int:
-    """Dispatch one of ``hello`` / ``version`` / ``help``.
-
-    ``argv[0]`` is the verb: this module holds three of them, so unlike a
-    single-verb module it has to be told which one was typed. A caller that has
-    already dispatched can skip this and call ``cmd_hello`` and friends directly.
-    """
-    verb = argv[0] if argv else ""
-    handler = _VERBS.get(verb)
-    if handler is None:
-        _cli._err(f"error: unknown comms command {verb!r}")
-        _cli._err(_cli.USAGE)
-        return _cli.EXIT_USAGE
-    # Asking how a verb works must never have a side effect: `hello --help`
-    # printing usage instead of writing an identity record is the whole point.
-    if any(a in ("-h", "--help", "-?") for a in argv[1:]):
-        print(_cli.USAGE)
-        return _cli.EXIT_OK
-    return handler(argv[1:])
-
-
-if __name__ == "__main__":  # pragma: no cover - parity with the other modules
-    sys.exit(main(sys.argv[1:]))
-
-
-# ---------------------------------------------------------------------------
-# completion
-# ---------------------------------------------------------------------------
-
-#: Every verb, and the sub-verbs worth completing. Kept here rather than parsed
-#: out of the usage text, because a completion that silently drifts from the
-#: real command list is worse than none: it teaches a verb that does not exist.
-_COMPLETION_VERBS = [
-    "claim", "release", "board", "check", "task", "plan", "next", "brief",
-    "tasks", "ui", "find", "note", "doc", "lesson", "session", "status",
-    "log", "hello", "mcp", "version", "help",
-]
-_COMPLETION_SUBS = {
-    "task": ["add", "edge", "done", "review"],
-    "session": ["start", "join", "end", "retire", "lead"],
-    "find": ["bug", "fix", "ship", "decision", "gotcha"],
-}
-
-_BASH = """# comms-graph completion for bash. Add to ~/.bashrc:
-#   eval "$(comms-graph completion bash)"
-_comms_graph() {{
-  local cur prev
-  cur="${{COMP_WORDS[COMP_CWORD]}}"
-  prev="${{COMP_WORDS[COMP_CWORD-1]}}"
-  case "$prev" in
-{cases}
-  esac
-  if [ "$COMP_CWORD" -eq 1 ]; then
-    COMPREPLY=( $(compgen -W "{verbs}" -- "$cur") )
-    return
-  fi
-  COMPREPLY=( $(compgen -f -- "$cur") )
-}}
-complete -F _comms_graph comms-graph
-"""
-
-_ZSH = """# comms-graph completion for zsh. Add to ~/.zshrc:
-#   eval "$(comms-graph completion zsh)"
-_comms_graph() {{
-  local -a verbs
-  verbs=({verbs})
-  if (( CURRENT == 2 )); then
-    _describe 'command' verbs
-    return
-  fi
-  case "${{words[2]}}" in
-{cases}
-  esac
-  _files
-}}
-compdef _comms_graph comms-graph
-"""
-
-
-def cmd_completion(argv: list[str]) -> int:
-    """Emit a shell completion script.
-
-    Bash and zsh only. Not because the others do not matter, but because these
-    two are what is on this machine and a completion nobody can run is a file
-    that goes stale without anyone noticing.
-    """
-    shell = (argv[0] if argv else "").strip().lower()
-    if shell in ("", "-h", "--help", "help"):
-        _cli._err("usage: comms-graph completion bash|zsh")
-        _cli._err("  Then: eval \"$(comms-graph completion zsh)\" in your shell rc.")
-        return _cli.EXIT_USAGE if shell else EXIT_USAGE
-    verbs = " ".join(_COMPLETION_VERBS)
-    if shell == "bash":
-        cases = "\n".join(
-            f'    {v}) COMPREPLY=( $(compgen -W "{" ".join(subs)}" -- "$cur") ); return ;;'
-            for v, subs in _COMPLETION_SUBS.items())
-        sys.stdout.write(_BASH.format(cases=cases, verbs=verbs))
-        return _cli.EXIT_OK
-    if shell == "zsh":
-        cases = "\n".join(
-            f'    {v}) _values \'sub\' {" ".join(subs)}; return ;;'
-            for v, subs in _COMPLETION_SUBS.items())
-        sys.stdout.write(_ZSH.format(cases=cases, verbs=verbs))
-        return _cli.EXIT_OK
-    _cli._err(f"error: no completion for {shell!r}; bash and zsh are supported")
-    return _cli.EXIT_USAGE
