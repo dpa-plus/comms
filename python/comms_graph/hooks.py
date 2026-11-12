@@ -228,19 +228,42 @@ def _settle_locked(root: Path, log_file: Path, scope, rel_text: str, actor: str,
 
 
 def _clean_in_git(root: Path, path: str) -> bool:
+    """Is ``path`` tracked and unmodified in every worktree of the repository?
+
+    All worktrees share one store, so the holder may be editing the file in a
+    checkout other than the caller's. A worktree that cannot be asked counts
+    as modified.
+    """
     git = shutil.which("git")
     if git is None:
         return False
+
+    def ask(*args: str, cwd: Path | str) -> subprocess.CompletedProcess:
+        return subprocess.run([git, "-C", str(cwd), *args], capture_output=True,
+                              text=True, timeout=5)
+
     try:
-        tracked = subprocess.run([git, "ls-files", "--error-unmatch", "--", path],
-                                 cwd=root, capture_output=True, timeout=5)
-        if tracked.returncode != 0:
+        listing = ask("worktree", "list", "--porcelain", cwd=root)
+        if listing.returncode != 0:
             return False
-        status = subprocess.run([git, "status", "--porcelain", "--", path],
-                                cwd=root, capture_output=True, timeout=5)
+        trees, bare = [], set()
+        for line in listing.stdout.splitlines():
+            if line.startswith("worktree "):
+                trees.append(line[len("worktree "):])
+            elif line == "bare" and trees:
+                bare.add(trees[-1])
+        trees = [t for t in trees if t not in bare]
+        if not trees:
+            return False
+        for tree in trees:
+            if ask("ls-files", "--error-unmatch", "--", path, cwd=tree).returncode != 0:
+                return False
+            status = ask("status", "--porcelain", "--", path, cwd=tree)
+            if status.returncode != 0 or status.stdout.strip():
+                return False
     except (OSError, subprocess.SubprocessError):
         return False
-    return status.returncode == 0 and not status.stdout.strip()
+    return True
 
 
 def give_way(st, root: Path, conflicts: list, actor: str,

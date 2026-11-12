@@ -316,3 +316,66 @@ def test_a_lock_the_hook_cannot_take_never_blocks_an_edit_of_a_free_file(tmp_pat
                               input=payload.encode(), capture_output=True, timeout=30)
     assert done.returncode == 0, done.stderr
     assert "src/a.py" not in _claims(repo)
+
+
+# ---------------------------------------------------------------------------
+# finding 2: worktrees share one store
+# ---------------------------------------------------------------------------
+
+
+def _linked_worktree(repo, tmp_path):
+    import subprocess
+
+    from .test_session_identity import GIT
+
+    linked = tmp_path / "linked"
+    subprocess.run([GIT, "worktree", "add", "-q", "-b", "linked", str(linked)],
+                   cwd=repo, check=True)
+    return linked
+
+
+def _old_auto_claim(repo, session, name, *, ago=timedelta(hours=1)):
+    from .test_session_identity import _append, _auto_name
+
+    return _append(repo, _auto_name(session), "claim",
+                   {"intent": "auto: edited", "auto": True, "agent_session": session},
+                   ago=ago, scope=[name])
+
+
+@pytest.mark.parametrize("holder_side", ["linked", "main"])
+def test_an_auto_claim_dirty_in_another_worktree_does_not_give_way(tmp_path, holder_side):
+    repo = _repo(tmp_path)
+    _start_store(repo)
+    linked = _linked_worktree(repo, tmp_path)
+    holder_tree, caller_tree = (linked, repo) if holder_side == "linked" else (repo, linked)
+    claim_id = _old_auto_claim(holder_tree, SESSION_A, "src/a.py")
+    _dirty(holder_tree, "src/a.py")
+
+    code, _, err = _edit(caller_tree, "src/a.py", SESSION_B)
+    assert code == 2, "the holder's change in the other worktree is not clean"
+    assert "BLOCKED" in err and claim_id in err
+    assert _claims(repo)["src/a.py"].id == claim_id
+
+
+def test_an_auto_claim_clean_in_every_worktree_gives_way(tmp_path):
+    repo = _repo(tmp_path)
+    _start_store(repo)
+    linked = _linked_worktree(repo, tmp_path)
+    _old_auto_claim(linked, SESSION_A, "src/a.py")
+
+    assert _edit(repo, "src/a.py", SESSION_B)[0] == 0
+    assert _claims(repo)["src/a.py"].agent_session == SESSION_B
+
+
+def test_a_worktree_that_cannot_be_asked_keeps_the_auto_claim(tmp_path):
+    import shutil
+
+    repo = _repo(tmp_path)
+    _start_store(repo)
+    linked = _linked_worktree(repo, tmp_path)
+    claim_id = _old_auto_claim(repo, SESSION_A, "src/a.py")
+    shutil.rmtree(linked)
+
+    code, _, err = _edit(repo, "src/a.py", SESSION_B)
+    assert code == 2, "a missing worktree might hold the holder's change"
+    assert claim_id in err
