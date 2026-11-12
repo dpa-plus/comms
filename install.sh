@@ -20,18 +20,19 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-if command -v python3.11 >/dev/null 2>&1; then PY=python3.11; else PY=python3; fi
-"$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' \
-  || { echo "error: Python 3.11 or newer is required ($PY is older)" >&2; exit 1; }
-
 mkdir -p "$HOME/.local/share" "$BIN"
 if [ ! -x "$VENV/bin/python" ]; then
   if command -v uv >/dev/null 2>&1; then
-    uv venv --quiet --python "$PY" "$VENV"
+    # uv finds or fetches Python 3.11 itself, so no system Python is needed.
+    uv venv --quiet --python 3.11 "$VENV"
   else
+    if command -v python3.11 >/dev/null 2>&1; then PY=python3.11; else PY=python3; fi
+    "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' \
+      || { echo "error: Python 3.11 or newer is required ($PY is older). Install uv or Python 3.11." >&2; exit 1; }
     "$PY" -m venv "$VENV"
   fi
 fi
+PY="$VENV/bin/python"
 
 pip_install() {
   if command -v uv >/dev/null 2>&1; then
