@@ -250,3 +250,69 @@ def test_a_batch_claim_takes_over_its_sessions_auto_claim(tmp_path):
     assert code == 0, out + err
     held = _claims(repo)
     assert held["src/a.py"].actor == "lead-x" and not held["src/a.py"].auto
+
+
+# ---------------------------------------------------------------------------
+# finding 1: two sessions racing for the same free file
+# ---------------------------------------------------------------------------
+
+
+def test_two_sessions_racing_for_one_free_file_never_both_edit(tmp_path):
+    import subprocess
+    import time
+
+    from .test_session_identity import GIT, _auto_name
+
+    repo = _repo(tmp_path)
+    _start_store(repo)
+    files = [f"src/race{i}.py" for i in range(20)]
+    for name in files:
+        (repo / name).write_text("x = 1\n")
+    subprocess.run([GIT, "add", "-A"], cwd=repo, check=True)
+    subprocess.run([GIT, "commit", "-qm", "race files"], cwd=repo, check=True)
+    for name in files:
+        _dirty(repo, name)
+
+    both = []
+    for name in files:
+        procs = [subprocess.Popen(["comms-graph", "hook", "pre-edit"], cwd=repo,
+                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE)
+                 for _ in (SESSION_A, SESSION_B)]
+        time.sleep(0.3)
+        for proc, session in zip(procs, (SESSION_A, SESSION_B)):
+            proc.stdin.write(json.dumps({
+                "session_id": session, "cwd": str(repo), "tool_name": "Edit",
+                "tool_input": {"file_path": str(repo / name)}}).encode())
+        for proc in procs:
+            proc.stdin.close()
+        results = [(proc.wait(timeout=30), proc.stderr.read().decode()) for proc in procs]
+        codes = [code for code, _ in results]
+        if codes == [0, 0]:
+            both.append(name)
+            continue
+        assert sorted(codes) == [0, 2], (name, results)
+        winner = (SESSION_A, SESSION_B)[codes.index(0)]
+        loser_err = results[codes.index(2)][1]
+        assert "BLOCKED" in loser_err and f"@{_auto_name(winner)}" in loser_err, loser_err
+
+    assert both == [], f"both sessions were allowed in {len(both)} of 20 trials"
+    claims = cstate.fold(_events(repo)).claims.values()
+    for name in files:
+        assert sum(1 for c in claims if str(c.scope) == name) == 1, name
+
+
+def test_a_lock_the_hook_cannot_take_never_blocks_an_edit_of_a_free_file(tmp_path):
+    import subprocess
+
+    from comms_graph import lock as clock
+
+    repo = _repo(tmp_path)
+    _start_store(repo)
+    payload = json.dumps({"session_id": SESSION_A, "cwd": str(repo), "tool_name": "Edit",
+                          "tool_input": {"file_path": str(repo / "src" / "a.py")}})
+    with clock.file_lock(clog.log_path(repo).parent / ".lock"):
+        done = subprocess.run(["comms-graph", "hook", "pre-edit"], cwd=repo,
+                              input=payload.encode(), capture_output=True, timeout=30)
+    assert done.returncode == 0, done.stderr
+    assert "src/a.py" not in _claims(repo)

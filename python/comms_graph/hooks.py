@@ -150,17 +150,29 @@ def check_edit(target: Path, *, agent_session: str, explicit: str,
     me = found.name if found is not None else ""
     scope = _scope.parse(rel_text)
     conflicts = _blocking(st, scope, rel_text, root, agent_session, me)
-    if conflicts:
-        conflicts = _yield_clean_auto_claims_locked(root, log_file, conflicts, me,
-                                                    agent_session)
-    if conflicts:
-        _cli._err(render_block(st, store, root, rel_text, conflicts[0],
-                               identified=bool(agent_session or me)))
-        return EXIT_BLOCK
-    if payload is not None and agent_session and me:
-        if not _held(st, scope, agent_session):
-            _auto_claim(root, log_file, scope, rel_text, me, agent_session, payload)
-    return EXIT_OK
+    claiming = (payload is not None and bool(agent_session and me)
+                and not _held(st, scope, agent_session))
+    if not conflicts and not claiming:
+        return EXIT_OK
+    if conflicts and not any(c.auto for c in conflicts):
+        return _answer(st, store, root, rel_text, conflicts, agent_session, me)
+    try:
+        st, conflicts = _settle_locked(root, log_file, scope, rel_text, me, agent_session,
+                                       payload if claiming else None)
+    except BaseException:  # noqa: BLE001: a write that fails never blocks an edit
+        pass
+    return _answer(st, store, root, rel_text, conflicts, agent_session, me)
+
+
+def _answer(st, store: Path, root: Path, rel_text: str, conflicts: list,
+            agent_session: str, me: str) -> int:
+    from . import cli as _cli
+
+    if not conflicts:
+        return EXIT_OK
+    _cli._err(render_block(st, store, root, rel_text, conflicts[0],
+                           identified=bool(agent_session or me)))
+    return EXIT_BLOCK
 
 
 def _held(st, scope, agent_session: str) -> bool:
@@ -180,21 +192,24 @@ def _blocking(st, scope, rel_text: str, root: Path, agent_session: str, me: str)
     return conflicts
 
 
-def _auto_claim(root: Path, log_file: Path, scope, rel_text: str, actor: str,
-                agent_session: str, payload: HookPayload) -> None:
-    """The only write on the edit path. Any failure leaves the edit allowed and silent."""
+def _settle_locked(root: Path, log_file: Path, scope, rel_text: str, actor: str,
+                   agent_session: str, payload: HookPayload | None) -> tuple:
+    """Decide again under the lock, and write what follows: the state and what blocks.
+
+    The lock-free read can be stale. A session that finds another session's
+    claim here was beaten to the file and is blocked. Raises when the lock or
+    the write fails, so the caller keeps its lock-free answer.
+    """
     from . import cli as _cli
 
-    try:
-        with _lock.file_lock(log_file.parent / ".lock", timeout=_HOOK_LOCK_TIMEOUT) as handle:
-            st = _cli._read_state(log_file)
-            if _blocking(st, scope, rel_text, root, agent_session, actor):
-                return
-            if _held(st, scope, agent_session):
-                return
-            if handle.compromised():
-                return
-            batch = []
+    with _lock.file_lock(log_file.parent / ".lock", timeout=_HOOK_LOCK_TIMEOUT) as handle:
+        st = _cli._read_state(log_file)
+        conflicts, batch = give_way(
+            st, root, _blocking(st, scope, rel_text, root, agent_session, actor),
+            actor, agent_session)
+        if conflicts:
+            return st, conflicts
+        if payload is not None and not _held(st, scope, agent_session):
             if actor not in st.family_of(agent_session):
                 batch.append(_cli._tagged(st, actor, _log.TYPE_HELLO, None,
                                           _identity.hello_data(agent_session)))
@@ -205,9 +220,11 @@ def _auto_claim(root: Path, log_file: Path, scope, rel_text: str, actor: str,
             if payload.agent_type:
                 data["agent_type"] = payload.agent_type
             batch.append(_cli._tagged(st, actor, _log.TYPE_CLAIM, [str(scope)], data))
+        if batch:
+            if handle.compromised():
+                raise _lock.LockError("the lock is no longer exclusive")
             _log.append_batch(log_file, batch)
-    except BaseException:  # noqa: BLE001: a convenience write never blocks an edit
-        return
+        return st, []
 
 
 def _clean_in_git(root: Path, path: str) -> bool:
@@ -254,24 +271,6 @@ def give_way(st, root: Path, conflicts: list, actor: str,
             "arbitrator": writer,
         }))
     return remaining, releases
-
-
-def _yield_clean_auto_claims_locked(root: Path, log_file: Path, conflicts: list,
-                                    actor: str, agent_session: str) -> list:
-    from . import cli as _cli
-
-    if not any(c.auto for c in conflicts):
-        return conflicts
-    try:
-        with _lock.file_lock(log_file.parent / ".lock", timeout=_HOOK_LOCK_TIMEOUT):
-            st = _cli._read_state(log_file)
-            current = [st.claims[c.id] for c in conflicts if c.id in st.claims]
-            remaining, releases = give_way(st, root, current, actor, agent_session)
-            if releases:
-                _log.append_batch(log_file, releases)
-            return remaining
-    except Exception:
-        return conflicts
 
 
 def _age(delta: timedelta) -> str:
