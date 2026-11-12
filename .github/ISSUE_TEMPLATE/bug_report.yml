@@ -11,8 +11,8 @@ body:
     id: version
     attributes:
       label: comms version
-      description: Output of `comms version`
-      placeholder: comms v0.1.0 (commit abc1234, built ..., go1.26 darwin/arm64)
+      description: Output of `comms-graph version`, and of `comms-graph doctor` if the install looks stale
+      placeholder: comms-graph 0.5.0 (python 3.11.9, darwin/arm64)
     validations:
       required: true
   - type: dropdown
@@ -41,5 +41,5 @@ body:
     id: context
     attributes:
       label: Relevant output
-      description: Optional — e.g. `comms status --json` or a log snippet (redacted).
+      description: Optional — e.g. `comms-graph status --json` or a log snippet (redacted).
       render: shell

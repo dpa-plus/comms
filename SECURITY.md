@@ -3,7 +3,7 @@
 ## Scope
 
 `comms` is a local-first coordination tool. The CLI reads and appends to a
-per-machine JSONL log under a file lock. The optional `comms ui` dashboard binds
+per-machine JSONL log under a file lock. The optional `comms-graph ui` dashboard binds
 an HTTP server to **`127.0.0.1` only** (loopback), with same-origin guards on its
 state-mutating endpoints. It is not designed to be exposed on a public interface;
 do not bind it to a routable address.

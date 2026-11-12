@@ -35,6 +35,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from . import __version__
 from . import lock as _lock
 from . import log as _log
 from . import state as _state
@@ -3451,6 +3452,7 @@ class Board:
         # request does not go out only to come back 403.
         snap["board_actor"] = _actor_name(os.environ.get("COMMS_ACTOR", ""))
         snap["frontend_build"] = self.frontend_build
+        snap["version"] = __version__
         return snap
 
     def _store_by_key(self, key: str):
@@ -3467,7 +3469,7 @@ class Board:
             # The store directory is named by the key, so the log is derivable
             # without trusting the root: a project whose directory has been
             # moved still has readable history.
-            log_file = _log.user_data_home() / "comms" / key / _log.LOG_FILENAME
+            log_file = Path(info["dir"]) / _log.LOG_FILENAME
             return (root, log_file) if log_file.exists() else None
         return None
 
@@ -3524,7 +3526,8 @@ class Board:
         derived files, and the store directory already holds the derived data
         for exactly this project and is already writable.
         """
-        d = _log.user_data_home() / "comms" / (key or _log.repo_hash(self.root)) / "render"
+        found = next((Path(i["dir"]) for i in _log.known_stores() if key and i["key"] == key), None)
+        d = (found or (_log.user_data_home() / "comms" / key if key else _log.store_dir(self.root))) / "render"
         d.mkdir(parents=True, exist_ok=True)
         return d
 

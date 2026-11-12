@@ -1,427 +1,403 @@
 # Protocol reference
 
+This page describes the log comms writes, how it identifies callers, where it
+stores data, the hook contract and the board's HTTP API.
+
 ## Event log format
 
-The log is JSONL: one event per line, append-only.
+The log is a JSON lines file with one event per line. comms only ever appends to it.
 
 ```jsonl
-{"ts":"2026-05-22T14:30:00Z","id":"01HZ...","actor":"claude-dev","type":"hello","data":{"base_name":"claude","label":"Claude Dev","hostname":"dev-macbook","tty":"/dev/ttys003"}}
-{"ts":"2026-05-22T14:32:01Z","id":"01HZ...","actor":"claude-3a1f","type":"claim","scope":["src/foo.ts#bar"],"data":{"intent":"fix N+1"}}
-{"ts":"2026-05-22T14:45:00Z","id":"01HZ...","actor":"claude-3a1f","type":"finding","data":{"category":"fix","summary":"N+1 resolved","refs":[{"kind":"path","value":"src/foo.ts"},{"kind":"commit","value":"abc1234"}]}}
-{"ts":"2026-05-22T14:46:00Z","id":"01HZ...","actor":"claude-3a1f","type":"release","data":{"refs":["01HZ..."],"result":"PR #321 merged"}}
+{"ts":"2026-11-11T19:26:31.62865Z","id":"01M7616Z6CAF9MA0X3EY6XNVGG","actor":"claude-4f9a1c","type":"hello","data":{"agent_session":"4f9a1c22-aaaa","hostname":"Mac","model":"claude-opus","vendor":"anthropic"}}
+{"ts":"2026-11-11T19:26:31.866268Z","id":"01M7616ZDT10X69FD8VV7NFP7G","actor":"claude-4f9a1c","type":"claim","scope":["src/new.ts"],"data":{"auto":true,"intent":"auto: edited"}}
+{"ts":"2026-11-11T19:26:44.650329Z","id":"01M7617BXACE3J2MJ2V3AT2T3Z","actor":"claude-billing","type":"finding","data":{"category":"gotcha","refs":[{"kind":"path","value":"src/crypto.ts"}],"summary":"META_TOKEN_ENC_KEY cannot change after the first deploy"}}
+{"ts":"2026-11-11T19:26:32.868603Z","id":"01M76170D44EDZ229ZRBK5XA56","actor":"claude-4f9a1c","type":"release","data":{"refs":["01M7616ZDT10X69FD8VV7NFP7G"],"result":"session ended"}}
 ```
 
-Common fields:
+| Field | Type | Notes |
+|---|---|---|
+| `ts` | string | RFC 3339 in UTC. |
+| `id` | string | ULID: 26 characters, time-ordered. |
+| `actor` | string | The name of the caller. See [Identity](#identity). |
+| `type` | string | `hello`, `claim`, `release`, `note`, `finding`, `task`, `task_edge`, `task_state` or `blocked`. |
+| `scope` | array | Set on `claim` only. |
+| `data` | object | Fields per type, below. Every field is optional unless noted. Readers ignore fields they do not know. |
 
-| Field   | Type   | Notes                                                              |
-| ------- | ------ | ------------------------------------------------------------------ |
-| `ts`    | string | RFC3339 UTC, always normalized to UTC regardless of caller TZ.     |
-| `id`    | string | ULID (26 chars, time-prefixed, monotonic).                         |
-| `actor` | string | Validated COMMS_ACTOR. Per-session: never per-user.               |
-| `type`  | string | One of: `hello`, `claim`, `release`, `note`, `finding`, `task`, `task_edge`, `task_state`. Readers skip types they do not know; writers never emit one. |
-| `scope` | array  | Optional. Only set on `claim` (and informational on `release`).    |
-| `data`  | object | Type-specific bag; all keys optional unless noted below.           |
+Any event can also carry `comms_session_id` and `comms_session_name` in `data`
+when its actor is in a named work window. See [Named work windows](#named-work-windows).
 
 ## Event types
 
 ### `hello`
-```json
-{"data": {"base_name": "claude", "label": "Claude Dev", "hostname": "dev-macbook", "tty": "/dev/ttys003"}}
-```
-Best-effort metadata; all fields may be empty. `label` is a friendly display
-name for status/UI only. The stable identity remains `actor`.
 
-Named comms sessions are created/joined by appending normal `hello` events with
-extra metadata:
+Ties an actor to a host agent session and records who it is.
 
 ```json
-{"data": {"base_name": "claude", "label": "Claude Dev", "hostname": "MacBook-Pro.local", "comms_session_start": true, "comms_session_id": "01HZ...", "comms_session_name": "dashboard fixes"}}
+{"data": {"agent_session": "4f9a1c22-aaaa", "label": "Billing fixes", "vendor": "anthropic", "model": "claude-opus", "hostname": "Mac"}}
 ```
 
-```json
-{"data": {"base_name": "codex", "label": "Codex Dev", "hostname": "MacBook-Pro.local", "comms_session_join": true, "comms_session_id": "01HZ...", "comms_session_name": "dashboard fixes"}}
-```
+| Field | Notes |
+|---|---|
+| `agent_session` | The host's session id (`CLAUDE_CODE_SESSION_ID`, or `session_id` in a hook payload). Absent when there is none, for example under Codex. |
+| `label` | A display name. From `--label` or `COMMS_LABEL`. |
+| `vendor` | Who made the model, for example `anthropic` or `openai`. From `--vendor` or `COMMS_VENDOR`. Used to tell an independent review from a same-family one. |
+| `model` | From `--model`, `COMMS_MODEL`, or the session-start payload. |
+| `hostname` | The machine name. |
+| `leader`, `base_name`, `tty` | Read for display. Written by older builds. |
 
-After an actor joins a named session, that actor's `claim`, `release`, `note`,
-and `finding` events are stamped with the same `comms_session_id` and
-`comms_session_name`. Untagged legacy events are still supported and are shown
-as a legacy/current window by the UI.
-
-An actor may be active in only one named session at a time. When the same actor
-starts or joins a different named session, comms first appends a release/retire
-audit event for that actor's prior-session claims, then appends the new `hello`.
-This keeps old claims and old session membership from following the actor into
-the new session.
+comms writes a hello on its own the first time a session uses a name. That happens at session
+start, on the first auto-claim, or on the first write under an auto-name.
 
 ### `claim`
+
 ```json
-{
-  "scope": ["src/foo.ts#bar"],
-  "data": {"intent": "fix N+1"}
-}
+{"scope": ["src/auth.ts"], "data": {"intent": "rework the session cookie", "task": "stay-signed-in"}}
 ```
-On an arbitrated steal, additional fields appear:
-```json
-{
-  "scope": ["src/foo.ts"],
-  "data": {
-    "intent": "alice gone",
-    "steals": "01HZK4...",
-    "steal_reason": "alice's session ended per eli",
-    "arbitrator": "eli"
-  }
-}
-```
-The reducer interprets `steals` as "the referenced claim becomes inactive at THIS event's timestamp". Single atomic event: no separate release record.
+
+| Field | Notes |
+|---|---|
+| `intent` | One line on what the holder is about to do. |
+| `task` | The task this claim works on. |
+| `agent_session` | The host session that made the claim. Absent on claims written before 0.5.0 and on calls made outside an agent session. |
+| `auto` | `true` when the pre-edit hook made the claim on a first edit. Its intent is `auto: edited`. |
+| `agent_id`, `agent_type` | On an auto-claim, copied from the hook payload when Claude Code sends them, which it does for a subagent. |
+| `steals` | The id of the claim this one takes over. |
+| `steal_reason` | Required with `steals`. |
+| `arbitrator` | Who approved the steal, when given. |
+
+A claim with several scopes in one call is written as one event per scope in one
+append. Either all of them are recorded or none.
+
+A steal is a single event. The fold ends the claim named in `steals` at the steal's
+timestamp, so there is no moment when neither or both claims are active.
 
 ### `release`
-```json
-{"data": {"refs": ["<claim-id>"], "result": "PR #321 merged"}}
-```
-Arbitrated release (a different actor closing someone else's claim) MUST include `reason`:
-```json
-{
-  "actor": "bob",
-  "data": {
-    "refs": ["<their-id>"],
-    "reason": "session ended",
-    "original_actor": "alice",
-    "arbitrator": "eli"
-  }
-}
-```
-
-The UI's **End Comms Session** button appends a normal `release` event with
-session-boundary metadata. For a named session it releases only claims tagged
-with that `comms_session_id` and removes only actors currently joined to it:
 
 ```json
-{
-  "data": {
-    "refs": ["<claim-id-in-that-session>"],
-    "comms_session_end": true,
-    "comms_session_id": "01HZ...",
-    "comms_session_name": "dashboard fixes",
-    "ended_actors": ["claude-3a1f", "codex-9b2c"],
-    "reason": "project work session done"
-  }
-}
+{"data": {"refs": ["01M7617ME73GTMTCYEYVYKKMJ4"], "result": "committed 4f2a9c1"}}
 ```
 
-For old untagged sessions, `comms_session_end=true` without a
-`comms_session_id` keeps the legacy behavior: all active claims are released and
-all active sessions are cleared. The physical `log.jsonl` remains one
-append-only file either way.
+| Field | Notes |
+|---|---|
+| `refs` | Required. The claim ids this event ends. |
+| `result` | How it went. comms writes these values itself: `session ended` (the session-end hook), `auto-claim: file is clean in git` (an auto-claim gave way), `auto-claim: superseded by a claim from the same session`, and `superseded by a new claim on the same ground`. |
+| `reason` | Why, on a forced release or a roster change. |
+| `original_actor` | The holder, when someone else ends the claim. |
+| `arbitrator` | Who ended it, when that is not the holder. |
+| `freed_from`, `via` | Written by the board's **Release** button. `via` is `board`. |
 
-Session roster admin is also encoded as normal `release` events. Retiring an
-actor removes it from active sessions and releases any claim refs listed, but
-does not delete historical rows:
+Roster changes are `release` events too:
 
-```json
-{
-  "actor": "claude-dev",
-  "data": {
-    "refs": ["<claim-held-by-old-actor>"],
-    "session_retire": true,
-    "retired_actor": "claude-7e4c",
-    "reason": "renamed to claude-dev"
-  }
-}
-```
-
-Leader transfer is append-only too. The reducer clears every active session's
-leader flag, then sets exactly one target actor:
-
-```json
-{
-  "actor": "human-eli",
-  "data": {
-    "leader_transfer": true,
-    "leader_actor": "claude-dev",
-    "reason": "user asked Claude Dev to lead"
-  }
-}
-```
+- `session_retire: true` with `retired_actor` removes an actor from the active
+  roster and ends the claims in `refs`.
+- `leader_transfer: true` with `leader_actor` moves the leader mark to one actor.
+- `comms_session_end: true` with `comms_session_id` ends a named work window and the
+  claims in it. Without a `comms_session_id`, an older form, it ends every active claim.
 
 ### `note`
+
 ```json
-{"data": {"body": "FYI iCloud delete-loop on charts/"}}
+{"data": {"body": "@claude-billing I need src/invoice.ts for the rounding fix, tell me when it is free"}}
 ```
-Body is ≤200 Unicode runes (scalar values).
+
+`body` holds at most 1000 characters. A note that names an actor with `@name` is
+shown to that actor once, after its next comms command. A session briefing also
+lists notes addressed to the session from the last 24 hours.
 
 ### `finding`
-```json
-{
-  "data": {
-    "category": "fix",
-    "summary": "leads sourced only from tracker overlay",
-    "refs": [
-      {"kind": "path", "value": "frontend/src/lib/aggregate.ts"},
-      {"kind": "commit", "value": "cece752"}
-    ]
-  }
-}
-```
-`category` is one of: `bug`, `fix`, `ship`, `decision`, `gotcha`.
 
-`refs[].kind` is free-form but conventional: `path`, `commit`, `pr`, `issue`, `doc`, `url`.
+```json
+{"data": {"category": "gotcha", "summary": "META_TOKEN_ENC_KEY cannot change after the first deploy", "refs": [{"kind": "path", "value": "src/crypto.ts"}]}}
+```
+
+`category` is `bug`, `fix`, `ship`, `decision` or `gotcha`. `summary` holds at most
+1000 characters. `refs[].kind` is free text. The usual kinds are `path`, `commit`,
+`pr`, `issue`, `doc` and `url`.
 
 ### `task`
 
-Declares a node of the work graph, or restates one that exists. A restatement
-edits the description only: re-titling verified work does not reopen it.
+Declares a task, or restates one. A restatement replaces the record. A field it
+leaves out keeps its old value, except `review`, which is turned off when absent.
 
 ```json
-{"data": {"task": "auth-api", "title": "Build session create / refresh / revoke",
-          "size": "L", "slots": 2, "checks": ["test", "types"], "ref": "tracker:PROJ-1234"}}
+{"data": {"task": "stay-signed-in", "title": "Let people stay signed in after a restart", "checks": ["test"], "review": true}}
 ```
 
-| Field    | Notes |
-| -------- | ----- |
-| `task`   | Slug: 2-32 chars, `[a-z][a-z0-9-]*`. Chosen to be SAID: quoted between agents, typed into a claim. Deliberately not a ULID: on a real store 99.5% of ULIDs share their 6-char short prefix. |
-| `title`  | Written as an instruction, not a label. Required on first declaration. |
-| `size`   | `S`, `M` or `L`. |
-| `slots`  | How many agents may work it at once. Default 1. |
-| `checks` | Names that must be reported passing before the task can be marked done. |
-| `ref`    | Opaque reference to wherever the real context lives, e.g. `tracker:PROJ-1234`. comms stores it and never resolves it. |
+| Field | Notes |
+|---|---|
+| `task` | Required. The id: lowercase letters, digits and hyphens, up to 64 characters. The CLI turns case, spaces and underscores into this form. |
+| `title` | One line in plain English for a person outside the code. |
+| `checks` | Names that must be reported `pass` before `done` is accepted. A check added after `done` sends the task back to be resubmitted. |
+| `review` | `true` when a different agent must verify the task before it closes. |
+| `size` | `S`, `M` or `L`. |
+| `ref` | A reference to context kept elsewhere, such as `tracker:PROJ-1234`. comms stores it and never follows it. |
 
 ### `task_edge`
 
-Records that `to` comes after `from`, and what `to` consumes from `from`.
-
 ```json
-{"data": {"from": "auth-api", "to": "login-ui", "kind": "interface",
-          "provides": "POST /session, POST /session/refresh - httpOnly cookie, no bearer token"}}
+{"data": {"from": "stay-signed-in", "to": "login-ui", "kind": "consumes", "provides": "sessions table, uuid keys"}}
 ```
 
-`kind` is one of `interface` (B calls a surface A provides), `artifact` (B uses a
-file or schema A produced) or `sequence` (ordering only, nothing flows).
-Unrecognized kinds degrade to `sequence`.
-
-The distinction decides what a rejection costs: reworking a task forces a
-recheck of successors that CONSUME from it, and leaves successors that merely
-follow it alone. `provides` is what travels to whoever picks up `to`.
-
-Edges are their own events so any agent can add one at the moment it discovers
-the dependency: the only moment it is actually known. An edge whose endpoints
-are not both declared is ignored by the reducer; `comms plan` and `comms task
-edge` reject it up front.
+`kind` is `consumes` (`to` uses something `from` produces) or `sequence` (order
+only). The older kinds `interface` and `artifact` fold to `consumes`. Any other kind
+folds to `sequence`. Reworking a task puts the tasks that consume from it back in
+question and leaves the tasks that only follow it alone. An edge whose two tasks are
+not both declared is ignored, and `task edge` refuses it.
 
 ### `task_state`
 
-Moves a task along its two steps.
-
 ```json
-{"data": {"task": "auth-api", "state": "done",
-          "checks": {"test": "pass", "types": "pass"},
-          "notes": ["Refresh rotation is single-use: replaying a spent token revokes the family."]}}
+{"data": {"task": "stay-signed-in", "state": "done", "checks": {"test": "pass"}, "notes": ["Cookie is httpOnly, because the security review asks about XSS."]}}
 ```
 
 ```json
-{"data": {"task": "auth-api", "state": "rejected", "findings": [
-  {"claim": "revoke will table-scan", "evidence": "EXPLAIN shows Seq Scan on refresh_tokens"}]}}
+{"data": {"task": "login-ui", "state": "rejected", "findings": [{"what": "POST /session/refresh twice returns 200 both times"}]}}
 ```
 
-`state` is `done`, `verified` or `rejected`. The reducer REFUSES a transition
-rather than trusting the writer, and keeps the refusal:
+`state` is `done`, `verified` or `rejected`. The fold checks each transition and
+records a refusal instead of trusting the writer:
 
-- `done`: refused unless every declared check is reported `pass`.
-- `verified` / `rejected`: refused when the actor is the agent who did the work.
-  A role suffix does not help: `claude-dev/review` is recognized as `claude-dev`.
-- `rejected` clears the doer and returns the task to open work. The graph is not
-  redrawn; the findings travel with it.
+- `done` is refused unless every declared check is reported `pass`. Without
+  `review`, `done` closes the task.
+- `verified` is refused when the actor did the work. Two names count as the same
+  agent when they match after normalizing case, look-alike characters and a role
+  suffix, or when they share an agent session. With `acknowledged_self_review: true`
+  it is recorded and marked `self-acknowledged`.
+- `rejected` returns the task to open work. The author may reject its own work.
 
-`notes` are the handover: the decisions the doer made and why. They are what a
-verifier reads, and what `comms brief` passes along the edges to whoever picks up
-the tasks that come after.
+`notes` on `done` are the author's decisions and reasons, passed on by `comms brief`.
+`notes` on `verified` say how the reviewer checked. A verification is recorded as
+`independent` when the two actors' vendors differ, `same-family` when they match,
+and `unknown` when either hello has no vendor.
 
-### Derived task state
+### `blocked`
 
-Nothing below is ever written into an event. All of it is computed by replaying
-the log, so the picture cannot contradict the data:
+Records a claim, a `done` or a review that comms turned down.
 
-| Phase    | Meaning |
-| -------- | ------- |
-| `ready`  | Every dependency is verified and nobody has claimed it. |
-| `doing`  | At least one agent holds a file claim tagged to this task. |
-| `review` | Finished, waiting for a second pair of eyes. |
-| `closed` | Verified. **Only now does it unblock its successors.** |
-| `blocked`| At least one dependency is not verified yet. |
-| `cycle`  | Reachable from itself. Surfaced rather than hidden; the reducer still terminates. |
+```json
+{"data": {"scope": "src/auth.ts", "intent": "take it", "holder": "claude-billing", "holder_scope": "src/auth.ts"}}
+```
 
-A task unblocks what comes after it when it is VERIFIED, not when it is merely
-finished. That is what keeps review on the critical path.
+A refusal on a task carries `task`, `attempted` and `reason` instead of the scope
+fields.
 
-Who is on a task is read off live claims tagged with `data.task`, so releasing a
-file takes the agent off the task with no separate bookkeeping step.
+## Derived task phase
 
-A verification also records whether it was `independent` (the verifier's `vendor`
-differs from the doer's, taken from their `hello` events) or `same-family`.
-"Verified" and "verified by something with the same blind spots" are different
-claims and the protocol does not blur them.
+The fold computes the phase from the log. It is never written.
+
+| Phase | Meaning |
+|---|---|
+| `ready` | Every task it depends on is closed, and nobody holds a claim tagged to it. |
+| `doing` | At least one agent holds a claim tagged to it. |
+| `review` | Done, waiting for a different agent to verify it. |
+| `closed` | Done without review, or verified. Only now are the tasks after it unblocked. |
+| `blocked` | A task it depends on is not closed. |
+| `cycle` | It depends on itself through its edges. The fold still finishes. |
+
+Who works on a task is read from live claims tagged with its id, so releasing the
+file takes the agent off the task.
+
+## Identity
+
+Every verb resolves the actor in this order:
+
+1. `--as <name>`.
+2. `COMMS_ACTOR`.
+3. The session's own name in this repository's log, when `CLAUDE_CODE_SESSION_ID`
+   is set. See [Session families](#session-families).
+4. An auto-name, `<prefix>-<first 6 characters of the session id>`, lengthened
+   when another session already uses that name. The prefix is
+   `claude` when `COMMS_VENDOR` is `anthropic` or unset, `codex` when it is
+   `openai`, and the vendor itself otherwise. comms records a hello the first time
+   the auto-name writes.
+5. Otherwise a write fails with a one-line error. A read runs without an actor.
+
+The hooks ignore a generic `COMMS_ACTOR` and use the session's own name instead.
+
+A leading `@` is dropped. A write under a generic name is refused unless
+`COMMS_ALLOW_GENERIC_ACTOR=1`. The generic names include `claude`, `codex`,
+`agent`, `user` and `me`.
+
+### Session families
+
+A session family is every actor whose hello carries the same `agent_session`.
+
+The session's own name, used in step 3 above, is the first actor the session was
+tied to. A later `hello --as` adds a name to the family and does not change it, so a
+subagent cannot rename its parent.
+
+Ownership depends on the path:
+
+- **The edit check** (`hook pre-edit`, `check <path>`). A claim is the caller's when
+  its `agent_session` equals the caller's session. A claim written without one takes
+  the session its holder was tied to at that moment. If there was none, the claim is
+  the caller's when its holder is in the caller's family. Two sessions that share
+  a name therefore still block each other.
+- **The command line** (`claim`, `release`, `status`). A claim is the caller's when
+  it is held under the caller's name. A claim under another name conflicts, even
+  from the same session, so parallel subagents with their own names keep off each
+  other's files. The one exception is the session's own auto-claim, which a hand
+  claim replaces.
+- **The review gate** treats two actors of one family as the same agent.
+
+### Liveness markers
+
+The pre-edit and session-start hooks touch `<store>/alive/<agent session>` on every
+call. Only the file's modification time changes, and nothing is appended to the log.
+A holder's last sign of life is the later of its last event and the markers of its
+sessions. `status` marks a claim STALE, and its holder LIKELY DEAD, when the claim
+is older than the stale threshold (1 hour, set with `--stale-after`) and its holder
+has been silent that long. A refused edit prints the exact `--steal` command once
+the holder has been silent for an hour.
 
 ## Scope grammar
 
 ```
 scope  := path ('#' anchor)?
-path   := POSIX path, optionally globbed with * or **
-anchor := L<n>-<m>          (line range, inclusive, n ≤ m, both ≥ 1)
-        | <symbol-name>      (NFC-normalized opaque identifier)
+path   := POSIX path relative to the repository root, optionally with * or **
+anchor := L<n>-<m>       a line range, inclusive, 1 <= n <= m
+        | <symbol>       an opaque symbol name
 ```
 
-Use `\#` to escape a literal `#` in a filename.
+Write `\#` for a literal `#` in a file name.
 
-### Path normalization
+Before storage and comparison, a scope is normalized: an absolute path or one that
+leaves the repository is refused, backslashes become slashes, `.` and `..` segments
+are resolved, and a leading `./` is dropped.
 
-Before storage or comparison, scopes are normalized:
+Two scopes overlap when both of these hold:
 
-1. Reject absolute paths (`/etc/passwd`).
-2. Reject paths that normalize outside the repo root (`../escape`).
-3. Convert backslashes to forward slashes.
-4. `filepath.Clean` to collapse `.` and `..`.
-5. Strip leading `./`.
+1. Their paths could match a common path. The comparison works segment by segment
+   on the strings: `**` matches zero or more segments and `*` matches one. The disk
+   is never read.
+2. Their anchors overlap. Two line ranges overlap when they intersect. Two symbols
+   overlap when they are equal. A line range and a symbol always overlap. A scope
+   with no anchor overlaps every anchor.
 
-Canonical form is POSIX, repo-relative, no `.` or `..` segments.
+## Storage
 
-### Overlap detection
+| Path | Contents |
+|---|---|
+| `<data home>/comms/<repo-hash>/log.jsonl` | The log. |
+| `<data home>/comms/<repo-hash>/.lock` | The `flock` target for every write. |
+| `<data home>/comms/<repo-hash>/repo-path.txt` | The repository path this store belongs to. |
+| `<data home>/comms/<repo-hash>/alive/` | Liveness markers, one per agent session. |
+| `<data home>/comms/<repo-hash>/seen/` | Which addressed notes each actor has been shown. |
+| `<repo>/.comms/docs/*.md` | Pages written with `comms doc`. Committed with the repository. |
 
-Two scopes overlap if and only if BOTH:
+The data home is the first of these that applies:
 
-1. Their **path globs** could match a common path: segment-aware string intersection. `**` matches zero or more segments; `*` matches exactly one.
-2. Their **anchors** overlap, per:
-   - Both line ranges → numeric intersection (closed intervals).
-   - Both symbols → case-sensitive equality.
-   - Mixed (line + symbol) → pessimistic overlap.
-   - Either whole-file (no `#` anchor) → always overlap.
+1. `COMMS_HOME`, when it is an absolute path.
+2. `~/Library/Application Support` on macOS.
+3. `XDG_DATA_HOME`, when absolute, else `~/.local/share`, on Linux and the BSDs.
 
-The path overlap is computed purely as a string operation: `comms` never globs against the real filesystem.
+Any other platform is an error.
 
-## Repo identity
+`<repo-hash>` is the first 12 hex characters of the SHA-256 of the coordination
+root, with symbolic links resolved. The coordination root is the repository root,
+or the main repository's root for a git worktree, so all worktrees share one store.
+Moving or renaming a repository gives it a new store and leaves the old one behind.
 
-`<repo-hash>` = first 12 hex chars of `sha256(filepath.EvalSymlinks(git rev-parse --show-toplevel))`.
+A repository whose root is under the system temp folder or `/tmp` keeps its store
+in `<temp>/comms-stores/<repo-hash>/` instead of the data home.
 
-If cwd discovery fails, pass `--repo /absolute/repo/path` or set
-`COMMS_REPO=/absolute/repo/path`. Explicit repo paths are resolved by walking up
-to `.git` without calling `os.Getwd()` or spawning `git`, so they keep working
-when a desktop app process hits a macOS TCC/getcwd failure on a protected
-Desktop/Documents/Downloads path. Two repos that resolve to the same path get
-the same hash; renaming or moving a repo creates a new hash and orphans the old
-log.
+The repository root comes from `--root`, then a global `--repo`, then `COMMS_REPO`,
+then the nearest directory above the current one that contains `.git`. An explicit
+path is used as given and the current directory is never read.
 
 ## Concurrency
 
-Every mutating command acquires an exclusive `flock(2)` on `<logdir>/.lock` before reading the log + appending. The lock releases when the process exits: including `kill -9`. We never spawn child processes while holding the lock (since the child would inherit the FD and deadlock).
+Every write takes an exclusive `flock` on the store's `.lock`, reads the log, checks
+the rules, appends and releases. The kernel releases the lock when the process
+exits, including on `kill -9`. Before appending, a writer cuts off an unterminated
+last line left by a writer that crashed, so the new event does not fuse with it.
+Reads take no lock.
 
-## UI API
+## Hooks
 
-`comms ui` serves a read-mostly local dashboard over HTTP. The backend exposes:
+Each hook reads Claude Code's hook JSON on stdin.
 
-By default `comms ui` serves a unified view across all repo log directories under
-the comms data directory (scope to one with `--repo`). It does not merge files on
-disk; it prefixes project/session labels in the response.
+| Hook | Claude Code event | Exit codes |
+|---|---|---|
+| `hook session-start` | `SessionStart` | Always 0. Prints a briefing of at most 900 characters in a repository with a store, and nothing elsewhere. |
+| `hook pre-edit` | `PreToolUse` for `Edit\|Write\|NotebookEdit` | 2 blocks the edit and the reason goes to stderr. 0 allows it. |
+| `hook session-end` | `SessionEnd` | Always 0. Releases the auto-claims this session made, in every repository it edited, with result `session ended`. |
 
-| Endpoint                   | Method | Purpose                                                           |
-| -------------------------- | ------ | ----------------------------------------------------------------- |
-| `/api/status`              | GET    | Current project snapshot, active state, archives, continuous event history, and action metadata. |
-| `/api/comms-session/start` | POST   | Body `name`; append a `hello` event with `comms_session_start=true` and a new named session ID. Requires `COMMS_ACTOR`. |
-| `/api/comms-session/end`   | POST   | Body `session_id` or `name`; append a `release` event with `comms_session_end=true` for that named session. Requires `COMMS_ACTOR`. |
-| `/api/claim/release`       | POST   | Append a normal `release` event for one active claim. Body: `claim_id`, optional `result`/`reason`. Requires `COMMS_ACTOR`. |
-| `/api/claim/release-all`   | POST   | Release every active claim held by one actor: one `release` event per claim, appended as a single batch under one lock hold. Body: `actor`, optional `repo_hash`/`result`/`reason`. Requires `COMMS_ACTOR`. |
-| `/api/session/retire`      | POST   | Append a `release` event with `session_retire=true`; releases that actor's claims. Requires `COMMS_ACTOR`. |
-| `/api/session/lead`        | POST   | Append a `release` event with `leader_transfer=true`. Requires `COMMS_ACTOR`. |
+`hook pre-edit` reads `tool_input.file_path` or `tool_input.notebook_path`. It
+exits 2 when:
 
-`/api/status` includes an `actions` array so agents or UI clients can discover
-what the backend currently allows:
+- another session holds an overlapping claim and that claim does not give way,
+- the payload is empty or not JSON, or
+- the log exists but cannot be reached or read.
+
+It exits 0 when the file is outside a repository, when the repository has no store,
+and when the payload names no file. On an allowed first edit of a file the session
+does not hold yet, it appends an auto-claim, taking the lock for at most one second.
+It checks again under the lock: if another session claimed the file in the meantime,
+the edit is blocked. If the lock cannot be taken or the write fails, the hook reads
+the log once more without the lock: a claim another session recorded in the meantime
+blocks, and otherwise the edit is allowed.
+
+An auto-claim that blocks someone gives way when it is at least five minutes old and
+its file is tracked with no change in `git status --porcelain`, in every worktree of
+the repository. A worktree that cannot be asked keeps the claim. The release is
+recorded with result `auto-claim: file is clean in git`.
+
+`check --stdin-json` is the older name for `hook pre-edit` without the auto-claim,
+with the same exit codes.
+
+## CLI exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Done. |
+| 1 | Refused: a claim conflict, a commit that `check --staged` would block, or a named scope with nothing to release. |
+| 2 | A usage error, or an edit that `check` or `hook pre-edit` blocks. |
+
+## Board HTTP API
+
+`comms ui` serves the board on `127.0.0.1:7878` by default (`--host`, `--port`). Every
+GET takes an optional `store=<repo-hash>` to pick a project. Without it, the board
+shows the repository it was started in.
+
+| Endpoint | Method | Returns |
+|---|---|---|
+| `/` | GET | The board page. |
+| `/api/status` | GET | One project's snapshot as JSON. |
+| `/events` | GET | Server-Sent Events. Each frame is a full snapshot plus a `stamp`. |
+| `/api/history` | GET | One page of history: `{"events": [...], "next_before": "<id>"}`. Takes `actor`, `task` and `before` (an event id). At most 60 rows per page, newest first. |
+| `/map.html` | GET | The code map page. |
+| `/tasks.html` | GET | The task graph page. |
+| `/api/release` | POST | Ends one claim held by someone else. |
+
+`/api/status` has these top-level fields: `version` (the installed comms version),
+`root`, `store_key`, `generated`, `board_actor`, `frontend_build`, `projects`,
+`projects_hidden`, `claims`, `roster`, `tasks`, `task_edges`, `findings`, `notes`,
+`blocked_events`, `feed`, `counts`, `dirty`, `guard`, `alerts`,
+`code_map_available` and `map_age_seconds`. A snapshot that cannot read the log
+returns only `error` and `generated`.
+
+`/events` checks for a change every half second and sends a frame when the log or
+the code map changes, or after 10 seconds without a change.
+
+`/api/release` takes a JSON body:
 
 ```json
-{
-  "actions": [
-    {"id": "start_comms_session", "label": "Start Comms Session", "method": "POST", "path": "/api/comms-session/start", "enabled": true},
-    {"id": "end_comms_session", "label": "End Comms Session", "method": "POST", "path": "/api/comms-session/end", "enabled": false, "reason": "no active comms session to end"},
-    {"id": "release_claim", "label": "Release Claim", "method": "POST", "path": "/api/claim/release", "enabled": true},
-    {"id": "release_actor_claims", "label": "Release All Claims", "method": "POST", "path": "/api/claim/release-all", "enabled": true},
-    {"id": "retire_session_actor", "label": "Retire Session Actor", "method": "POST", "path": "/api/session/retire", "enabled": true},
-    {"id": "transfer_leader", "label": "Transfer Leader", "method": "POST", "path": "/api/session/lead", "enabled": true},
-    {"id": "select_session_log", "label": "View Continuous History", "enabled": true}
-  ]
-}
+{"id": "01M7616MYDDPCQK2VWX32PYDPC", "reason": "holder gone since yesterday", "store": "8fa6cffde3bb", "actor": "human-you"}
 ```
 
-Top-level `events` is the canonical dashboard history. In single-repo mode it
-contains every event from that repository's append-only JSONL, including events
-from inactive, unended, archived, and legacy sessions. In unified mode it merges
-all valid repository histories newest-first. Every row includes `repo_hash`,
-`repo_name`, `session_id`, and `session_name` when available, so filtering never
-loses repository-qualified identity.
+`actor` defaults to the board's `COMMS_ACTOR`. The answer is 200 with
+`{"ok": true, "released": ..., "was": ..., "scope": ...}`, or an error object with
+403 (no actor), 400 (no id, no reason, or the caller's own claim) or 404 (no active
+claim with that id). Any other POST path returns 404.
 
-Session views (`current_session`, `active_comms_sessions[]`, `comms_sessions[]`,
-and their per-project equivalents under `project_sessions[]`) carry their
-summary counts (`event_count`, `claim_count`, `finding_count`, `note_count`)
-but no longer carry an `events` array. Since History became one continuous list,
-a per-session copy was a duplicate of rows already present at the top level and
-roughly a fifth of the payload. Selecting a project or typing in the event filter
-only filters the canonical top-level array; no JSONL file is merged, rewritten,
-or truncated.
+## Reading a damaged log
 
-### Incremental history over SSE
-
-`/api/status`, and the first frame a newly connected `/api/events` client
-receives: always carry the complete history. Every later SSE frame carries only
-the rows appended since the previous frame and sets `events_delta: true`; the
-client merges them by event `id` into the log it already holds, so its filter
-still runs over every row. This keeps a push proportional to what changed rather
-than to the size of the whole append-only log.
-
-| Field           | Type | Notes                                                                              |
-| --------------- | ---- | ---------------------------------------------------------------------------------- |
-| `events_total`  | int  | Total history rows the snapshot covers, including rows a delta frame trimmed.      |
-| `events_delta`  | bool | Present and `true` only on a trimmed frame. Absent means `events` is complete.     |
-
-The delta boundary is inclusive: rows sharing the watermark timestamp are
-repeated rather than risked, since the client merges by `id`. Frame delivery
-coalesces, so a client that has not drained the previous frame has it replaced,
-so `events_total` is the recovery mechanism: a client holding fewer rows than
-`events_total` refetches `/api/status` once and is whole again.
-
-`/api/status` also includes `task_board`: the work graph for the selected
-project, already laid out. Nodes carry `x`/`y`/`w`/`h` and edges carry a `d` path
-string, so the page draws rather than computes. It is populated per project:
-the all-projects view has none, because a dependency between two repositories is
-not something comms models. `too_large` is set instead of a layout once a graph
-passes the point where a picture stops being comprehension.
-
-`/api/status` also includes `lessons`, the list of global lesson slugs loaded
-from the user's comms data directory.
-
-## Global lessons
-
-`comms lesson` is the global counterpart to project-local `comms doc`.
-
-| Command                      | Purpose                                      |
-| ---------------------------- | -------------------------------------------- |
-| `comms lesson --list`        | List curated global lesson slugs.            |
-| `comms lesson <slug>`        | Print one lesson.                            |
-| `comms lesson <slug> --edit` | Edit/create one lesson under a sidecar flock. |
-
-Storage:
-
-```text
-~/Library/Application Support/comms/global/lessons/*.md
-```
-
-Lessons are not JSONL events and are not tied to a repo hash. They are
-cross-project operating knowledge for agents, so they should be added rarely:
-only when the user explicitly asks or approves a leader's proposed lesson.
-
-## Recovery rules for `comms` reading the log
-
-| Input                                  | Behavior                                                                  |
-| -------------------------------------- | ------------------------------------------------------------------------- |
-| Missing file                           | Treat as empty log; no error.                                             |
-| Blank lines (zero bytes or whitespace) | Silently skipped.                                                         |
-| Trailing unterminated final line       | Stderr warning, skipped; subsequent reads succeed.                        |
-| Unrecognized event `type`              | Skipped; one stderr warning per read naming the count. A newer `comms` wrote it. |
-| Malformed JSON before EOF              | Exit 2 (`ErrCorrupt`). Pre-EOF corruption is treated as unrecoverable.    |
-| Invalid UTF-8                          | Exit 2.                                                                   |
-| Line > 1 MiB                           | Exit 2 (defensive ceiling).                                               |
-| Duplicate event ID                     | First occurrence wins; later duplicates dropped silently (iCloud canary). |
+| Input | Behavior |
+|---|---|
+| Missing file | An empty log. |
+| Blank line | Skipped. |
+| Unterminated last line | Skipped with one warning on stderr. |
+| Unknown event `type` | Skipped. One warning per read gives the count. |
+| Duplicate event id | The first copy wins. Later copies are dropped. |
+| Malformed JSON before the end, invalid UTF-8, a missing or zone-less `ts`, or a line over 1 MiB | The read fails with an error that names the line. The pre-edit hook then blocks edits in that repository. |

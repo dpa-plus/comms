@@ -26,6 +26,7 @@ from pathlib import Path
 
 import pytest
 
+from comms_graph import cli
 from comms_graph import log as clog
 from comms_graph import status as cstatus
 
@@ -131,7 +132,7 @@ def test_status_since_24h_is_the_invocation_the_session_hook_makes(tmp_path, mon
         _ev("claim", "claude-dev", scope=["a.py"], data={"intent": "fix the parser"}),
     ])
 
-    code, out = _run(repo, "status", "--since", "24h")
+    code, out = _run(repo, "status", "--all", "--since", "24h")
 
     assert code == 0, out
     assert "ACTIVE SESSIONS" in out and "ACTIVE CLAIMS" in out
@@ -145,7 +146,7 @@ def test_an_empty_store_reports_an_empty_board_not_an_error(tmp_path, monkeypatc
     nothing to report, and that is a 0 with `(none)`, not an error."""
     repo = _repo(tmp_path, monkeypatch)
 
-    code, out = _run(repo, "status")
+    code, out = _run(repo, "status", "--all")
 
     assert code == 0, out
     assert out.count("(none)") >= 2
@@ -165,7 +166,7 @@ def test_a_claim_held_past_the_stale_window_is_flagged_and_its_holder_named_dead
             data={"intent": "half a refactor"}),
     ])
 
-    code, out = _run(repo, "status")
+    code, out = _run(repo, "status", "--all")
 
     assert code == 0, out
     assert "STALE" in out, "a six-hour-old claim must not read like a fresh one"
@@ -187,7 +188,7 @@ def test_a_silent_holder_stays_on_the_roster_even_though_the_window_dropped_it(
         _ev("hello", "alive"),
     ])
 
-    code, out = _run(repo, "status")
+    code, out = _run(repo, "status", "--all")
 
     roster = out.split("ACTIVE CLAIMS")[0]
     assert "@crashed" in roster
@@ -238,7 +239,7 @@ def test_collisions_prevented_is_reported_all_time(tmp_path, monkeypatch):
             data={"scope": "a.py", "holder": "alice", "intent": "also mine"}),
     ])
 
-    code, out = _run(repo, "status", "--since", "24h")
+    code, out = _run(repo, "status", "--all", "--since", "24h")
 
     assert code == 0, out
     assert "COLLISIONS PREVENTED: 1 all time" in out, (
@@ -257,7 +258,7 @@ def test_a_task_refusal_is_not_rendered_as_an_editing_collision(tmp_path, monkey
                                      "reason": "self-review"}),
     ])
 
-    code, out = _run(repo, "status")
+    code, out = _run(repo, "status", "--all")
 
     assert code == 0, out
     assert "stopped from editing" not in out
@@ -273,7 +274,7 @@ def test_findings_and_notes_outside_the_window_are_not_shown(tmp_path, monkeypat
         _ev("note", "new", data={"body": "just now"}),
     ])
 
-    code, out = _run(repo, "status", "--since", "24h")
+    code, out = _run(repo, "status", "--all", "--since", "24h")
 
     assert "just now" in out
     assert "ancient history" not in out
@@ -530,7 +531,7 @@ def test_a_truncated_final_line_still_reports_everything_before_it(
     with open(path, "a") as fh:
         fh.write('{"ts":"2026-05-22T14:30:00Z","id":"01H","actor":"dev","ty')
 
-    code, out = _run(repo, verb)
+    code, out = _run(repo, verb, "--all") if verb == "status" else _run(repo, verb)
 
     assert code == 0, out
     assert "real work" in out
@@ -576,19 +577,31 @@ def test_a_read_surface_does_not_create_the_store(verb, tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("verb", ["status", "log"])
-def test_a_window_the_go_build_would_reject_is_rejected_here_too(
-    verb, tmp_path, monkeypatch
-):
-    """IF THIS FAILS: the two builds accept different windows over one shared
-    log. `--since 7d` works here and dies on the Go build, so a script copied
-    between them breaks for whoever inherited it, and quietly accepting it as
-    something else would show the wrong window under the right label."""
+def test_days_and_weeks_are_units_and_nonsense_is_refused(verb, tmp_path, monkeypatch):
+    """IF THIS FAILS: `--since 7d`, which agents type, is refused again."""
     repo = _repo(tmp_path, monkeypatch)
 
-    code, out = _run(repo, verb, "--since", "7d")
-
+    assert _run(repo, verb, "--since", "7d")[0] == 0
+    assert _run(repo, verb, "--since", "2w")[0] == 0
+    code, out = _run(repo, verb, "--since", "7 days")
     assert code == 2, out
-    assert "168h" in out, "the error has to name the spelling that works"
+    assert "7d" in out, "the error has to name a spelling that works"
+
+
+def test_log_limit_keeps_the_newest_events(tmp_path, monkeypatch):
+    """IF THIS FAILS: `log --limit` is refused or prints everything."""
+    repo = _repo(tmp_path, monkeypatch)
+    for word in ("one", "two", "three"):
+        was = os.getcwd()
+        os.chdir(repo)
+        try:
+            with redirect_stdout(io.StringIO()):
+                assert cli.main(["note", word, "--as", "writer-a"]) == 0
+        finally:
+            os.chdir(was)
+    code, out = _run(repo, "log", "--type", "note", "--limit", "2")
+    assert code == 0 and "three" in out and "two" in out and "one" not in out, out
+    assert _run(repo, "log", "--limit", "0")[0] == 2
 
 
 @pytest.mark.parametrize("verb", ["status", "log"])

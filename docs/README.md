@@ -1,11 +1,12 @@
-# comms: docs index
+# comms documentation
 
-- [`README.md`](../README.md): top-level overview + quick start.
-- [`INSTALL.md`](INSTALL.md): full install + integration steps.
-- [`PROTOCOL.md`](PROTOCOL.md): event log format, scope grammar, recovery rules.
-- [`DASHBOARD.md`](DASHBOARD.md): the board in full, plus what upgrading does to a running session.
-- [`DESIGN.md`](DESIGN.md): why these decisions, what was cut, what's out of scope.
+- [`README.md`](../README.md): what comms is, how to install it, and the commands.
+- [`INSTALL.md`](INSTALL.md): install, `comms doctor`, the commit guard, Codex setup, upgrade and uninstall.
+- [`DASHBOARD.md`](DASHBOARD.md): the board, running it at login, and what an upgrade does to it.
+- [`DESIGN.md`](DESIGN.md): why comms is built this way, and what changed in 0.5.0.
+- [`PROTOCOL.md`](PROTOCOL.md): the log format, identity, storage, the hook contract and the board's HTTP API.
 
-The Claude Code skill lives at [`../skills/using-comms/SKILL.md`](../skills/using-comms/SKILL.md).
-The per-repo Codex integration template is [`../examples/AGENTS.md.template`](../examples/AGENTS.md.template).
-The Claude Code hooks snippet is [`../examples/settings.json.snippet`](../examples/settings.json.snippet).
+The agent skill ships inside the package at
+[`python/comms_graph/data/using-comms/SKILL.md`](../python/comms_graph/data/using-comms/SKILL.md).
+`comms doctor --fix` copies it for Claude Code and Codex. The per-repository
+instructions for Codex are in [`examples/AGENTS.md.template`](../examples/AGENTS.md.template).

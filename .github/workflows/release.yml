@@ -7,21 +7,29 @@ on:
 permissions:
   contents: write # create the GitHub Release and upload artifacts
 
+# Folge-Pushes warten auf den laufenden Lauf (Build/Deploy nie abbrechen).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  goreleaser:
+  release:
+    name: release (wheel, sdist, install.sh)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
-          fetch-depth: 0 # GoReleaser needs full history + tags for the changelog
-      - uses: actions/setup-go@v7
-        with:
-          go-version: '1.25.13' # patched go.mod floor; CI also tests patched Go 1.26
-          cache: true
-      - uses: goreleaser/goreleaser-action@v7
-        with:
-          distribution: goreleaser
-          version: '~> v2'
-          args: release --clean
+          python-version: '3.11'
+      - name: tag matches __version__
+        run: python scripts/check_release_tag.py "$GITHUB_REF_NAME"
+      - name: build wheel and sdist
+        working-directory: python
+        run: |
+          python -m pip install build
+          python -m build --outdir dist .
+      - name: publish the release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "$GITHUB_REF_NAME" --generate-notes python/dist/* install.sh

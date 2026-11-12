@@ -6,8 +6,66 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-11
+
+comms is one build now, and it no longer depends on an agent remembering to
+introduce itself or to claim first. This release was shaped by replaying how
+agents used the tool: 26,349 calls from their transcripts and 53,599 logged
+events. Upgrading has one step, `sh install.sh`, described in
+`docs/INSTALL.md`.
+
+### Changed
+
+- **One build.** The Go binary is retired. `comms` and `comms-graph` are the
+  same Python program, installed by `install.sh` from the wheel attached to
+  each release. The log format is unchanged, so every existing log still loads.
+  Agents made 13 calls to the Go build in the month before this release, and
+  the two builds had drifted apart in eight behaviors.
+- **Identity comes from the session.** An agent no longer needs `hello`,
+  `COMMS_ACTOR` or `--as`. Its session gets a name on first use, and later
+  calls resolve to it. `--as` still wins when given. A claim records the
+  session that made it, so a session is never blocked by its own claim under
+  any name, and two sessions that share a name still block each other. Before this, the
+  session-start hook failed on every recorded run and half of the early hook
+  blocks were an agent blocked by itself.
+- **The first edit claims the file.** `hook pre-edit` records a claim the first
+  time a session edits a free file through Edit, Write or NotebookEdit. Claims
+  made this way are released at session end in every repository the session
+  edited, when the same session claims the
+  file by hand, or when someone else wants the file, the claim is more than
+  five minutes old, and the file has nothing uncommitted in any worktree. When
+  two sessions edit one free file at the same moment, one gets the claim and
+  the other is blocked. Claiming before the first edit had stayed at about 65%
+  across model generations.
+- `status` and `board` print a short view by default: your claims, who else
+  holds how many files, notes to you. `--all` prints everything and `--json`
+  is unchanged.
+- A claim is marked STALE only when it is old and its holder has also been
+  silent for the threshold. A block on a silent holder prints the exact
+  command that takes the file over.
+- The skill ships inside the package and is 112 lines, down from 831. It loads
+  when the session briefing says comms is on, and it covers what agents still
+  have to do themselves: claim before a shell write, name subagents, release,
+  stop at a refusal.
+
 ### Added
 
+- `comms hook session-start`, `hook pre-edit` and `hook session-end` for
+  Claude Code. Session start prints a briefing of at most 900 characters in a
+  repository that uses comms and nothing anywhere else.
+- `comms doctor` checks the install: both commands on `PATH` at this version,
+  the three hooks, the skill copies for Claude and Codex, the board service,
+  the data home and the commit guard. Each failing check prints the command
+  that fixes it, and `doctor --fix` applies what it can.
+- `install.sh`, a real version (`comms version`, `--version`), and a release
+  workflow that refuses a tag that differs from the package version.
+- Commands accept what agents type: global flags before the verb, `task list`,
+  `task show`, `claims`, `whoami`, `findings`, several paths on `check` and
+  `release`, task ids up to 64 characters in any case, and notes up to 1000
+  characters. A mistake is answered in a few lines that name the valid form.
+  `<verb> --help` prints that verb with every flag it takes.
+- `COMMS_HOME` moves the data home. A repository under a temp directory keeps
+  its store under that temp directory.
 - Graph-first work view with readable task names, owners and holds. Open work is
   shown first; completed work, search, zoom, keyboard selection and a list
   alternative are available without leaving the board.
@@ -21,6 +79,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `release <path>` for a path the caller does not hold now fails instead of
+  printing success.
+- An unknown flag is refused. `claim x --reason y` used to drop the flag and
+  exit 0.
+- `check --staged` no longer leaks a git usage error when the coordination
+  root is not a git repository.
+- On Linux the edit check no longer lists every directory on the path. It cost
+  3 ms per edit in a 4000-entry directory.
+- Tests can no longer write the real data home. 251 of the 258 store folders
+  on the author's machine were test leftovers.
 - Live graph updates preserve search text, keyboard focus, selection and scroll.
 - Multi-word task search retains spaces and leaves no unrelated task selected
   when there are no matches.
@@ -31,6 +99,166 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   remain unchanged.
 - History retains legacy release references, all affected holders and both ends
   of task dependencies. Resubmitted work no longer inherits an old checked label.
+
+### Removed
+
+- The Go build and its release archives.
+- `lesson`, `plan` and `completion`. None was called after September 2026, and
+  no lesson was ever written.
+
+## [0.4.0] - 2026-11-11
+
+A minor bump, and one with an install step: the dashboard is now served by the
+Python build. `comms ui` still works, but it hands over to `comms-graph ui`, so
+anyone running the dashboard needs the `comms-graph` package installed alongside
+this release. Without it, `comms ui` says how to install it and exits.
+
+The Python build is new in this release. Entries that name it describe how it
+behaves now; the fixes made to it while it was being built are not listed
+separately.
+
+### Added
+
+- A Python build of comms in `python/`, installed as its own package with the
+  console script `comms-graph`. It is the same coordination model as the Go
+  binary, built on graphify's code graph, so a claim can warn that the ground
+  you are taking is coupled to ground somebody else holds. The two builds share
+  one store and read each other's events, so they can run side by side. The
+  `comms` name stays with the Go binary.
+- `comms-graph` answers every verb `comms` does, including `session`, `doc`,
+  `status`, `log`, `hello`, `lesson`, `mcp`, `version` and `completion
+  bash|zsh`, plus `board` and `tasks`, which the Go build has no equivalent for.
+  Every event it writes is stamped with the actor's session, as the Go build
+  does, so `session end` releases its claims and the archive counts add up. It
+  also takes a global `--repo` flag or `COMMS_REPO`, and claims several scopes
+  atomically: every scope is validated before anything is written.
+- `comms-graph guard install [--chain]`, `guard status` and `guard uninstall`
+  wire `check --staged` into git as a pre-commit hook, so the commit check runs
+  without anybody remembering to type it. The hook is written where git actually
+  looks (`git rev-parse --git-path hooks`, which covers `core.hooksPath` and
+  worktrees), carries the absolute path of the binary that installed it because
+  hooks do not inherit a shell's `PATH`, and is made executable. It refuses to
+  overwrite a hook comms did not write; `--chain` moves that hook aside, runs it
+  first and keeps its veto, and `uninstall` puts it back. If the guard cannot
+  run, the commit is refused and the message names the command that removes the
+  hook. `board` and the dashboard say when a repo has a coordination log and no
+  guard.
+- `comms-graph` reads `git status`, so undeclared work no longer reads as
+  safety. Each changed path is attributed from the log: held by a live claim,
+  released by somebody, or claimed by nobody. It never guesses an author.
+  `board` shows the working tree beside the claims and no longer prints "no
+  active claims in this repo" on its own when the tree is dirty; the dashboard
+  lists files changed on disk that nobody holds, including files somebody
+  released and left uncommitted; and `check --staged` names staged paths nobody
+  claimed and refuses a staged deletion of another actor's ground. That deletion
+  is the only unattributed change it blocks.
+- `comms-graph check --staged` handles an amend. The index says nothing about
+  HEAD, and an amend rewrites HEAD, so on its own an empty index would wave
+  through an amend of a commit a peer had made seconds earlier. The check now
+  looks at the commit being amended and refuses when it touches ground somebody
+  else holds, naming that commit and saying there is nothing of yours to
+  unstage. Amending your own commit, or amending in a repo nobody coordinates
+  in, still works.
+- In `comms-graph`, a note that names somebody reaches them. A note containing
+  `@their-actor` is printed to that actor on their next command of any kind,
+  once. The name must match exactly, so a note to `@claude` does not reach
+  `@claude-dev`, while a role suffix still receives (`claude-dev/review` is
+  `claude-dev`). The commit guard restates any such note under two hours old,
+  because a commit is the last point at which taking a fix along is free.
+  Delivery never changes an exit code and stays silent on `check --stdin-json`
+  and `--json`.
+- The board can release a claim: the one write the server does, through the same
+  lock and the same event `release --force` appends. It refuses without an
+  actor, without a reason, or on anything but an exact claim id. Work in
+  progress is grouped by agent, quietest first, with one **Free all N** button
+  per agent.
+- The board draws the code map and the task graph for the selected project. Only
+  tasks joined by an edge are drawn as a graph; tasks nothing waits on are cards
+  underneath, carrying the title, the state in words and the id. A task opens on
+  a click and shows its declared checks against their results and the files
+  tagged to it, with who holds each.
+- `comms-graph task add --review` asks for a review; `task add --probe` marks a
+  task made only to reproduce something, so it is not counted as a neighbour of
+  real work.
+- Claim rows say how long the claim has been held (`for 12m`). The roster shows
+  agents active in the last hour plus anyone holding a claim, with the rest one
+  click away.
+- CI runs the Python suite on Linux and macOS under Python 3.11 and 3.12, and
+  installs the built wheel into a clean environment to catch packaging and
+  entry-point breaks.
+
+### Changed
+
+- `comms ui` is a launcher. It finds `comms-graph`, translates the flags and
+  replaces its own process rather than spawning a child, so Ctrl-C, the exit
+  status and any supervisor still reach the process serving the page. `--addr
+  host:port` is split into the two flags `comms-graph` takes; `--demo`, `--all`,
+  `--open` and `--stale-after` are accepted and ignored rather than rejected;
+  `comms --repo X ui` still means what it says. The launchd template is updated
+  to match.
+- In the Python build review is opt-in: a task without `--review` closes on
+  `done`, and closed-without-review unblocks what comes after it just as
+  verified does. One task has one agent: claiming ground for a task somebody
+  else is holding is refused. `interface` and `artifact` edges are one kind,
+  `consumes`, against `sequence`; both old spellings still fold to it, so
+  existing logs read unchanged.
+- `--size` on `task add` is described as a rough sense of scale, not a gate.
+  Nothing ever refused a claim on an L task.
+- `brief` returns a task's `--ref` as given. It special-cased one tracker's
+  scheme and printed the command that resolves it, which contradicted the
+  protocol; examples now use a generic `tracker:PROJ-1234`.
+- `check --staged` in the Python build exits 1 on a conflict, 2 when it cannot
+  find out, lists every blocked path, and prints a recovery command that runs:
+  `git rm --cached -f` before the first commit and `git restore --staged` after,
+  with a literal pathspec so a glob character cannot unstage somebody else's
+  files. It identifies the committer from the session's hello, so an agent's own
+  claims no longer block its own commit inside a git hook. `@name` and `name`
+  are the same actor on every verb.
+- In `comms-graph`, a claim no longer prints three lines about the missing code
+  map when nobody else holds anything; when somebody does and the map cannot
+  answer, that is one line. One `claim a b c` renders as one row in `log` and in
+  the dashboard feed instead of one row per path. The log still records an event
+  per scope and `log --json` is unchanged.
+- In `comms-graph`, an over-long note says how far over it is, where it would
+  cut, which verbs take a long body, and hands back a version that fits, cut at
+  a word. `check` given several paths says how many it got and prints the loop.
+  The positional form of `task add` warns, after writing and never blocking,
+  when a title reads as technical.
+- In `comms-graph brief`, "your own earlier work" means the caller's, not the
+  task owner's, and the caller's own tasks are demoted below a stranger's rather
+  than dropped.
+- The board is written for somebody who does not read code: the feed leads with
+  the reason rather than the path, file lists under each agent and the list of
+  changed files fold behind their counts, the Work panel shows a task's phase as
+  a bar so the title gets the row, titles wrap to two lines, and closed work
+  folds behind one "N closed" line. The projects rail hides deleted and
+  throwaway stores and says how many it set aside.
+- Em dashes are gone from every string and document a person reads, in both
+  builds.
+- The README is cut to what a first-time reader needs, with Quick start near the
+  top. Dashboard reference and the long-form design notes moved to
+  `docs/DASHBOARD.md` and `docs/DESIGN.md`.
+- The `using-comms` skill says what to do when an edit is refused (do not route
+  around the hook), to record how a review was checked, to write task titles in
+  plain English for people, and, when blocked, to hand the holder the change in
+  a note.
+
+### Fixed
+
+- `comms check` resolved the repository from the process's working directory
+  rather than the file, so the pre-edit hook failed to find a repository on
+  every edit whenever the session started outside one, including for files
+  plainly inside one. It now walks up from the file to the nearest directory
+  that exists. A path that is in no repository at all is allowed, since there is
+  nothing to coordinate; a repository that can be named but not read still
+  blocks.
+
+### Removed
+
+- The Go dashboard: `ui.go`, its Server-Sent Events stream and its Work graph
+  panel, 7,133 lines in all, and the `fsnotify` dependency with it. Two
+  dashboards read the same log and drew different pictures, and every
+  improvement had to be built twice. `comms ui` now launches the Python board.
 
 ## [0.3.0] - 2026-08-20
 
@@ -247,7 +475,9 @@ First public release.
 - A `using-comms` skill for Claude/Codex agents and a launchd login-service
   template (`contrib/launchd/`) for running the dashboard on macOS.
 
-[Unreleased]: https://github.com/dpa-plus/comms/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/dpa-plus/comms/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/dpa-plus/comms/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/dpa-plus/comms/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/dpa-plus/comms/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/dpa-plus/comms/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/dpa-plus/comms/releases/tag/v0.1.0

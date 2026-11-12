@@ -1,24 +1,21 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  Run the unified `comms ui` dashboard as a macOS login service.
+  Run the `comms-graph ui` board as a macOS login service.
 
-  RunAtLoad + KeepAlive => it starts at login and is restarted if it ever exits,
-  so the dashboard on http://127.0.0.1:7878 is always up and always execs the
-  binary at the path below. New Python source installs refresh automatically;
-  kickstart once when first upgrading an older process that has no watcher.
+  RunAtLoad + KeepAlive: it starts at login and is restarted if it exits, so
+  http://127.0.0.1:7878 is always up. `comms-graph doctor` (see its help) can write
+  this file for you with the right path; this template is for doing it by hand.
 
   Set ProgramArguments[0] to your comms-graph (`which comms-graph`).
-      `comms ui` also works and hands over to the same board, but pointing
-      straight at it means launchd supervises the process that serves
-  (`which comms`). Install + load instructions are in the README
-  ("Run the dashboard as a login service").
 
-  COMMS_ACTOR identifies YOU, the operator, so the dashboard's write actions
-  (Release, Remove/retire, End session) are enabled — without it the UI is
-  read-only and those buttons stay hidden. Change it to your own operator name
-  (e.g. human-jane); only the bare reserved names eli/claude/codex/agent/user
-  are rejected.
+  After upgrading, `comms-graph doctor` with its fix flag restarts the job when the board
+  reports an older version than the install.
+
+  COMMS_ACTOR identifies YOU, the operator, so the board's write actions
+  (Release, Remove/retire, End session) are enabled. Without it the board is
+  read-only. Change it to your own operator name (e.g. human-jane); the generic
+  names eli/claude/codex/agent/user are rejected.
 -->
 <plist version="1.0">
 <dict>
