@@ -5,14 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "comms-graph"
 dynamic = ["version"]
-description = "comms rebuilt on graphify: claims, a task graph with a review gate, and a board for the person watching"
+description = "Keeps coding agents that share a repository off each other's files, with a board for the person watching"
 # 3.11, not 3.10: the packaging test reads pyproject with `tomllib`, which is
 # 3.11+. Claiming a floor no job ever exercises is how a version claim quietly
 # stops being true.
 requires-python = ">=3.11"
 # graphify is used for three things and nothing else: loading a code map,
 # rendering it to HTML, and the output-directory convention. Everything about
-# coordination — the log, the fold, the lock, the review gate, the hook — is in
+# coordination — the log, the fold, the lock, the hook — is in
 # this package. Pinned to a floor rather than an exact version because those
 # three are stable surface; if that stops being true, pin it hard.
 #

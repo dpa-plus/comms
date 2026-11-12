@@ -3,7 +3,7 @@
 Nothing imports this module and no CLI verb reaches it. Unlike ``commands.py``
 and ``tools.py`` it is not superseded: it is the harness that decided whether the
 contact warning is honest enough to enable on a given repository, and its
-results are what ``the README (the task graph and the code map)`` cites. It earns its place as the record of
+results are what ``the README (the code map)`` cites. It earns its place as the record of
 how those numbers were obtained, and is run by hand when that question is asked
 again.
 
@@ -270,7 +270,7 @@ class ClaimSet:
     graph_path: str
     whole: Resolution
     #: Scope strings for single-symbol claims: the small, specific shape
-    #: the README (the task graph and the code map) says the warning needs to be honest.
+    #: the README (the code map) says the warning needs to be honest.
     symbol_scopes: list[str] = field(default_factory=list)
     #: True when contact() itself refuses a whole-file claim on this file as too
     #: broad. Determined by asking contact(), not by re-deriving its cap here.

@@ -111,8 +111,9 @@ Run the installer again. It reinstalls the package even when the version number
 has not changed, relinks the commands, and runs `doctor --fix`, which also updates
 the hooks, the skill copies and a running board service.
 
-The log format does not change between versions, so claims, tasks and history
-carry over. An agent picks up the new version on its next command.
+The log format does not change between versions, so claims, notes and history
+carry over. A log written by 0.5 or earlier also holds tasks and findings. 0.6.0
+skips them and `comms log` still lists them. An agent picks up the new version on its next command.
 
 ## Uninstall
 

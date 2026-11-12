@@ -285,16 +285,17 @@ shows the repository it was started in.
 | `/` | GET | The board page. |
 | `/api/status` | GET | One project's snapshot as JSON. |
 | `/events` | GET | Server-Sent Events. Each frame is a full snapshot plus a `stamp`. |
-| `/api/history` | GET | One page of history: `{"events": [...], "next_before": "<id>"}`. Takes `actor`, `task` and `before` (an event id). At most 60 rows per page, newest first. |
+| `/api/history` | GET | One page of history: `{"events": [...], "next_before": "<id>"}`. Takes `actor` and `before` (an event id). At most 60 rows per page, newest first. Leaves out the retired types. |
 | `/map.html` | GET | The code map page. |
-| `/tasks.html` | GET | The task graph page. |
 | `/api/release` | POST | Ends one claim held by someone else. |
 
 `/api/status` has these top-level fields: `version` (the installed comms version),
 `root`, `store_key`, `generated`, `board_actor`, `frontend_build`, `projects`,
-`projects_hidden`, `claims`, `roster`, `tasks`, `task_edges`, `findings`, `notes`,
-`blocked_events`, `feed`, `counts`, `dirty`, `guard`, `alerts`,
-`code_map_available` and `map_age_seconds`. A snapshot that cannot read the log
+`projects_hidden`, `claims`, `roster`, `notes`, `blocked_events`, `feed`, `counts`,
+`dirty`, `guard`, `alerts` and `map_age_seconds`. Each claim carries `id`, `actor`,
+`scope`, `intent`, `auto`, `ts`, `idle_seconds`, `quiet`, `stolen_from` and
+`steal_reason`. Each roster entry carries `actor`, `label`, `vendor`, `model`,
+`host`, `identified`, `last_seen` and `holding`. A snapshot that cannot read the log
 returns only `error` and `generated`.
 
 `/events` checks for a change every half second and sends a frame when the log or

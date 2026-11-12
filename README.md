@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/hero.png" alt="comms. Agents that do not collide. One append-only log: who holds which file, what work exists, and what it touches in the code." width="100%">
+<img src="assets/hero.png" alt="comms. Agents that do not collide. One append-only log of who holds which file." width="100%">
 
 [![CI](https://github.com/dpa-plus/comms/actions/workflows/ci.yml/badge.svg)](https://github.com/dpa-plus/comms/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/dpa-plus/comms?include_prereleases&logo=github&color=6ea2ff)](https://github.com/dpa-plus/comms/releases)
@@ -58,14 +58,14 @@ Codex has no hooks, so a Codex agent does all of it by hand, with `--as` on ever
 
 ## The board
 
-<p align="center">
-  <img src="assets/dashboard.png" alt="The comms board: the activity stream, who is holding which files, the task list with the files each task touches, and every project on the machine down the left." width="900">
-</p>
-
-The board is a page at `http://127.0.0.1:7878` for the person watching. It shows
-every project on the machine, the open tasks by their plain-English titles, who
-holds which files, and which changed files nobody claimed. comms reads `git status`
-for that last part and never guesses who made an unclaimed change.
+The board is a page at `http://127.0.0.1:7878` for the person watching. It opens
+on who holds which files. Each agent that holds something gets a group with its
+name, label and model, how long ago it was last active, and a mark when it has
+been silent for over an hour. Under the agent, each file it holds shows the
+agent's intent and how long the file has been held. Below that are the changed
+files nobody holds and the recent claims, releases, notes and refusals. comms
+reads `git status` for the changed files and never guesses who made an
+unclaimed change. Every project on the machine is listed on the left.
 
 It only reads, with one exception: **Release** frees a claim another agent holds.
 It asks for your name and a reason, and records both in the log. More in
@@ -92,7 +92,7 @@ reason to look, never as a verdict.
 comms is not a server. It is a command that appends one line to a file and exits.
 
 Each repository has one log, `log.jsonl`, outside the repository and outside
-iCloud. Every claim, release, note and task is one JSON line in it, and nothing
+iCloud. Every claim, release and note is one JSON line in it, and nothing
 is ever rewritten. Every view, the board included, is read back from that file.
 A write takes a file lock (`flock`) first, so two agents claiming at the same
 moment cannot both win.
