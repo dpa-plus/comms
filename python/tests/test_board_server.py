@@ -484,16 +484,13 @@ def test_the_page_script_actually_parses(board):
 def test_the_page_draws_every_array_the_snapshot_carries(board):
     """IF THIS FAILS: data is collected on every push and rendered nowhere.
 
-    Every one of these was in the payload and undrawn at some point: findings
-    for the whole life of the board, and the feed, the claim id and the
-    verification evidence until the page was rebuilt around them.
+    Every one of these was in the payload and undrawn at some point.
     """
     repo, log_file, base = board
     _, body = _get(base + "/")
-    for name in ("alerts", "claims", "roster", "tasks", "feed", "notes", "projects"):
+    for name in ("alerts", "claims", "roster", "feed", "notes", "projects"):
         assert "D." + name in body or "d." + name in body, f"the page never reads {name}"
-    # the reported checks reach the page on the EVENT that reported them
-    for token in ("quiet", "identified", "e.checks", "c.id", "band"):
+    for token in ("quiet", "identified", "c.auto", "c.id", "band", "who.model"):
         assert token in body, f"the page never reads {token}"
 
 
@@ -512,7 +509,7 @@ def test_the_graphs_cost_nothing_until_somebody_asks_for_them(board):
     frame = body[body.index('id="dagFrame"'):][:140]
     assert "src=" not in frame, ("a graph loads on every page view: " + frame)
     assert "/map.html" in body and "/tasks.html" not in body
-    assert 'id="gMap"' in body
+    assert 'id="gMap"' in body and 'id="gTasks"' not in body
 
 
 def _exercise_graph_clicks(board, initial_search, actions):

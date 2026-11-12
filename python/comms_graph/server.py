@@ -315,14 +315,14 @@ _PAGE = """<!doctype html>
 <style>
 
 /* ============================================================
-   comms / activity-first
-   One live stream is the product. Everything else is a rail.
+   comms / who holds which files
+   The holds are the product. Everything else is a rail.
    Palette: warm paper + warm charcoal. Colour is SEMANTIC only:
      blue  = current / in progress   (also the brand accent)
-     amber = needs a human           (awaiting-review)
-     red   = blocked / stale / error
-     green = done
-     grey  = inert information       (notes, ready, archive)
+     amber = needs a human           (a silent holder)
+     red   = refused / error
+     green = released
+     grey  = inert information       (notes, archive)
    ============================================================ */
 
 /* ---- LIGHT (default) ---- */
@@ -448,7 +448,6 @@ body {
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
 }
-.num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
 .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 [hidden] { display: none !important; }
 ::selection { background: var(--accent-wash); }
@@ -512,7 +511,6 @@ body {
   font-size: 11px; font-weight: 650; letter-spacing: .02em;
   white-space: nowrap;
 }
-.alarm.warn { background: var(--amber-wash); color: var(--amber); border-color: var(--amber-line); }
 .alarm b { font-weight: 700; }
 
 button, .btn {
@@ -531,18 +529,6 @@ button:focus-visible { outline: none; box-shadow: var(--ring); }
 button.ghost { border-color: transparent; background: transparent; }
 button.ghost:hover { background: var(--surface-2); border-color: var(--line); }
 button.icon { width: 26px; padding: 0; justify-content: center; }
-button.danger:hover { color: var(--red); border-color: var(--red-line); background: var(--red-wash); }
-
-.seg {
-  display: inline-flex; border: 1px solid var(--line-2); border-radius: 4px; overflow: hidden; height: 26px;
-}
-.seg button {
-  border: 0; border-radius: 0; height: 24px; background: transparent;
-  border-left: 1px solid var(--line); font-size: 11px; padding: 0 9px;
-}
-.seg button:first-child { border-left: 0; }
-.seg button[aria-pressed="true"] { background: var(--accent-wash); color: var(--accent); font-weight: 650; }
-.seg button:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
 
 /* ---------- shell ---------- */
 .shell {
@@ -582,7 +568,7 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
   white-space: nowrap;
 }
 .card-hd .count {
-  font-size: 11px; color: var(--ink-4);
+  font-size: 11px; color: var(--ink-2);
   padding: 1px 5px; border-radius: 3px; background: var(--surface-2);
 }
 /* overflow-y is not decoration. min-height:0 alone lets a flex child be
@@ -594,7 +580,7 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 .card-ft {
   flex: none; border-top: 1px solid var(--line-hair);
   padding: var(--sp-1) var(--sp-2);
-  font-size: 11px; color: var(--ink-4);
+  font-size: 11px; color: var(--ink-3);
 }
 
 /* ---------- left rail: projects ---------- */
@@ -615,33 +601,8 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 }
 .search input::placeholder { color: var(--ink-4); }
 .search input:focus { outline: none; border-color: var(--accent-line); background: var(--surface); box-shadow: inset 0 0 0 1px var(--accent-line); }
-.search .gl {
-  position: absolute; left: 8px; top: 50%; transform: translateY(-50%);
-  width: 11px; height: 11px; border: 1.5px solid var(--ink-4); border-radius: 99px;
-  pointer-events: none;
-}
-.search .gl::after {
-  content: ""; position: absolute; right: -4px; bottom: -3px;
-  width: 5px; height: 1.5px; background: var(--ink-4); transform: rotate(45deg);
-}
 
 .plist { padding: 0 var(--sp-h) var(--sp-1); }
-.grp {
-  display: flex; align-items: center; gap: 6px;
-  padding: var(--sp-2) var(--sp-1) var(--sp-h);
-  font-size: 10px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
-  color: var(--ink-4);
-  cursor: default; user-select: none;
-}
-.grp.click { cursor: pointer; }
-.grp.click:hover { color: var(--ink-2); }
-.grp .caret {
-  width: 0; height: 0; border-left: 4px solid currentColor;
-  border-top: 3.5px solid transparent; border-bottom: 3.5px solid transparent;
-  transition: transform .12s ease; transform-origin: 25% 50%;
-}
-.grp[data-open="1"] .caret { transform: rotate(90deg); }
-.grp .n { margin-left: auto; letter-spacing: 0; font-weight: 600; }
 
 .prow {
   display: grid;
@@ -654,22 +615,12 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
   color: var(--ink-2);
 }
 .prow:hover { background: var(--surface-2); }
-.prow .bar { height: 18px; border-radius: 0 2px 2px 0; background: transparent; }
 .prow[aria-selected="true"] { background: var(--accent-wash); color: var(--ink); }
-.prow[aria-selected="true"] .bar { background: var(--accent); }
 .prow[aria-selected="true"] .pname { font-weight: 650; }
 .pname {
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-size: 12.5px;
 }
-.pname.hash { font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); letter-spacing: -0.01em; }
-.prow[aria-selected="true"] .pname.hash { color: var(--ink-2); }
-.psub { font-size: 10.5px; color: var(--ink-4); }
-.pmeta { display: flex; align-items: center; gap: 6px; flex: none; }
-.pcount { font-size: 10.5px; color: var(--ink-4); }
-.pdot { width: 5px; height: 5px; border-radius: 99px; background: var(--line-2); flex: none; }
-.pdot.hot { background: var(--accent); }
-.pdot.warm { background: var(--ink-3); }
 .prow.all {
   border-bottom: 1px solid var(--line-hair);
   border-radius: 4px 4px 0 0;
@@ -696,18 +647,6 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
   display: flex; flex-direction: column; gap: 6px;
 }
 .now.idle { border-left-color: var(--line-2); }
-.now-hd {
-  display: flex; align-items: baseline; gap: var(--sp-1);
-  font-size: 10.5px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-3);
-}
-.now-hd .k { color: var(--ink-4); letter-spacing: 0; font-weight: 500; text-transform: none; font-size: 11px; }
-.now-hd input {
-  margin-left: auto; height: 22px; width: 150px;
-  background: var(--surface-2); border: 1px solid var(--line); border-radius: 3px;
-  color: var(--ink); font: inherit; font-size: 11px; padding: 0 7px;
-  text-transform: none; letter-spacing: 0; font-weight: 400;
-}
-.now-hd input:focus { outline: none; border-color: var(--accent-line); box-shadow: inset 0 0 0 1px var(--accent-line); }
 .claims { display: flex; flex-direction: column; }
 .claim {
   display: grid;
@@ -726,8 +665,6 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 .claim .path bdi { direction: ltr; }
 .claim .held { font-size: 11px; color: var(--ink-3); text-align: right; }
 .claim .why { font-size: 11px; color: var(--ink-4); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.now-empty { font-size: 12px; color: var(--ink-3); }
-.now-empty b { color: var(--ink-2); font-weight: 600; }
 
 /* stream card */
 .stream .card { flex: 1 1 auto; }
@@ -742,7 +679,6 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 .chip[aria-pressed="true"] { background: var(--surface-3); color: var(--ink); font-weight: 600; }
 .chip .k { font-size: 10.5px; color: var(--ink-4); }
 .chip[aria-pressed="true"] .k { color: var(--ink-3); }
-.chip .sw { width: 6px; height: 6px; border-radius: 1px; flex: none; }
 
 .newpill {
   position: absolute; left: 50%; transform: translateX(-50%);
@@ -779,7 +715,7 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 .ev:hover { background: var(--surface-2); }
 .ev .t {
   font-family: var(--mono); font-variant-numeric: tabular-nums;
-  font-size: 10.5px; color: var(--ink-4);
+  font-size: 10.5px; color: var(--ink-3);
   padding: 7px 0 7px 0; text-align: left; white-space: nowrap;
 }
 .ev:hover .t { color: var(--ink-3); }
@@ -802,11 +738,6 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 .g-claim i     { background: var(--accent); border-radius: 1px; }
 .g-release i   { background: transparent; border: 1.5px solid var(--green); border-radius: 1px; }
 .g-note i      { background: transparent; border: 1.5px solid var(--ink-4); border-radius: 99px; }
-.g-task i      { background: var(--accent); transform: rotate(45deg); }
-.g-task-blocked i { background: var(--red); transform: rotate(45deg); }
-.g-task-review i  { background: var(--amber); transform: rotate(45deg); }
-.g-task-closed i  { background: var(--green); transform: rotate(45deg); }
-.g-session i   { background: var(--ink-3); width: 7px; height: 3px; top: 4px; }
 .g-agent i     { background: var(--ink-3); border-radius: 99px; }
 .g-stale i     { background: var(--red); border-radius: 99px; }
 
@@ -815,16 +746,14 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 .ev .verb { font-weight: 650; }
 .ev .verb.a { color: var(--accent); }
 .ev .verb.g { color: var(--green); }
-.ev .verb.w { color: var(--amber); }
 .ev .verb.r { color: var(--red); }
 .ev .path {
   font-family: var(--mono); font-size: 11.5px; color: var(--ink-2);
   max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.ev .l2 { font-size: 11px; color: var(--ink-4); margin-top: 1px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ev .l2 { font-size: 11px; color: var(--ink-3); margin-top: 1px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .ev .l2 .dot { width: 2px; height: 2px; border-radius: 99px; background: var(--ink-4); flex: none; }
 .ev .actor { color: var(--ink-3); font-weight: 600; }
-.ev .proj { font-family: var(--mono); font-size: 10.5px; }
 .ev .quote {
   margin-top: 5px; padding: 5px var(--sp-1) 5px 9px;
   border-left: 2px solid var(--line-2);
@@ -834,23 +763,6 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 }
 .ev.k-note .quote { border-left-color: var(--line-2); }
 .ev .quote code { font-family: var(--mono); font-size: 11px; background: var(--surface-3); padding: 0 3px; border-radius: 2px; }
-.sev {
-  font-size: 9.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
-  padding: 0 4px; line-height: 14px; border-radius: 2px; flex: none;
-}
-.sev.high { background: var(--red-wash); color: var(--red); }
-.sev.med  { background: var(--amber-wash); color: var(--amber); }
-.sev.low  { background: var(--surface-3); color: var(--ink-3); }
-
-.state {
-  font-size: 10.5px; font-weight: 600; padding: 0 5px; line-height: 16px; border-radius: 2px;
-  border: 1px solid var(--line); color: var(--ink-3); background: var(--surface-2); flex: none;
-}
-.state.doing    { color: var(--accent); border-color: var(--accent-line); background: var(--accent-wash); }
-.state.blocked  { color: var(--red);    border-color: var(--red-line);    background: var(--red-wash); }
-.state.review   { color: var(--amber);  border-color: var(--amber-line);  background: var(--amber-wash); }
-.state.closed   { color: var(--green);  border-color: var(--green-line);  background: var(--green-wash); }
-.arrow { color: var(--ink-4); font-size: 11px; }
 
 /* empty states */
 .empty {
@@ -858,26 +770,12 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
   display: flex; flex-direction: column; gap: var(--sp-1);
   max-width: 440px;
 }
-.empty .ttl { font-size: 13px; font-weight: 650; color: var(--ink-2); }
 .empty p { margin: 0; font-size: 12px; color: var(--ink-4); line-height: 1.6; }
 .empty ul { margin: var(--sp-h) 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
 .empty li { font-size: 11.5px; color: var(--ink-4); display: flex; align-items: center; gap: 8px; }
-.empty li .sw { width: 7px; height: 7px; flex: none; }
-.empty .dashes {
-  height: 1px; width: 120px;
-  background: repeating-linear-gradient(90deg, var(--line-2) 0 4px, transparent 4px 9px);
-  margin-bottom: var(--sp-h);
-}
-.empty-sm {
-  padding: var(--sp-2);
-  font-size: 11.5px; color: var(--ink-4); line-height: 1.55;
-}
-.empty-sm b { color: var(--ink-3); font-weight: 600; display: block; margin-bottom: 2px; font-size: 12px; }
 
 /* ---------- right rail ---------- */
 .rail-right { display: flex; flex-direction: column; gap: var(--sp-2); min-height: 0; }
-.rail-right .card.flexy { flex: 1 1 auto; }
-.rail-right .card.fixed { flex: 0 0 auto; }
 
 /* roster */
 .agent {
@@ -896,26 +794,6 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
   display: flex; align-items: center; justify-content: center;
   position: relative; flex: none;
 }
-.av.lead { background: var(--accent-wash); color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent-line); }
-.av .pip {
-  position: absolute; right: -2px; bottom: -2px; width: 7px; height: 7px; border-radius: 99px;
-  background: var(--green); box-shadow: 0 0 0 2px var(--surface);
-}
-.agent:hover .av .pip { box-shadow: 0 0 0 2px var(--surface-2); }
-.av .pip.warm { background: var(--ink-4); }
-.av .pip.cold { background: var(--red); }
-.aname { min-width: 0; }
-.aname .n { font-size: 12.5px; font-weight: 600; display: flex; align-items: center; gap: 5px; }
-.aname .n em {
-  font-style: normal; font-size: 9px; font-weight: 700; letter-spacing: .06em;
-  color: var(--accent); background: var(--accent-wash); border-radius: 2px; padding: 0 4px; line-height: 13px;
-}
-.aname .h {
-  font-family: var(--mono); font-size: 10.5px; color: var(--ink-4);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.asil { font-size: 11px; color: var(--ink-3); text-align: right; white-space: nowrap; }
-.asil.cold { color: var(--red); font-weight: 600; }
 .agent .x {
   width: 22px; height: 22px; border: 0; background: transparent; border-radius: 3px;
   color: var(--ink-4); opacity: 0; padding: 0; justify-content: center;
@@ -923,31 +801,12 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 .agent:hover .x, .agent .x:focus-visible { opacity: 1; }
 .agent .x:hover { background: var(--red-wash); color: var(--red); }
 
-/* tasks */
-.tally { display: flex; align-items: stretch; gap: 1px; padding: var(--sp-1) var(--sp-2) 0; }
-.tally div {
-  flex: 1 1 0; min-width: 0;
-  display: flex; flex-direction: column; gap: 3px;
-  padding-top: 4px;
-  border-top: 2px solid var(--line-2);
-}
-.tally .v { font-size: 14px; font-weight: 650; letter-spacing: -0.01em; }
-.tally .l { font-size: 9.5px; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-4); }
-.tally .t-doing   { border-top-color: var(--accent); }
-.tally .t-blocked { border-top-color: var(--red); }
-.tally .t-review  { border-top-color: var(--amber); }
-.tally .t-closed  { border-top-color: var(--green); }
-.tally .t-ready   { border-top-color: var(--line-2); }
-
 .needs { padding: var(--sp-1) var(--sp-2) var(--sp-1); display: flex; flex-direction: column; gap: 5px; }
 .need {
   display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--sp-1);
   align-items: baseline; font-size: 12px; cursor: pointer;
 }
-.need:hover .nt { color: var(--accent); }
 .need .id { font-family: var(--mono); font-size: 10.5px; color: var(--ink-4); }
-.need .nt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
-.need .nb { font-size: 10.5px; color: var(--ink-4); }
 
 /* mini DAG */
 .dagwrap {
@@ -958,49 +817,20 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
   -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent 100%);
   mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent 100%);
 }
-.dag { position: relative; width: 560px; height: 208px; }
-.dag svg { position: absolute; inset: 0; overflow: visible; }
 .node {
   position: absolute; width: 122px; height: 40px;
   background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 4px;
   padding: 4px 6px; display: flex; flex-direction: column; justify-content: center; gap: 1px;
   overflow: hidden;
 }
-.node .nid { font-family: var(--mono); font-size: 9.5px; color: var(--ink-4); }
-.node .ntx { font-size: 11px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.node.s-doing   { border-color: var(--accent-line); background: var(--accent-wash); }
-.node.s-doing .ntx { color: var(--ink); }
-.node.s-blocked { border-color: var(--red-line); background: var(--red-wash); }
-.node.s-review  { border-color: var(--amber-line); background: var(--amber-wash); }
-.node.s-closed  { border-color: var(--green-line); background: var(--green-wash); opacity: .8; }
-.node.s-ready   { border-style: dashed; }
-
-/* session */
-.sess { padding: var(--sp-1) var(--sp-2) var(--sp-2); }
-.sess .nm { font-size: 13px; font-weight: 650; letter-spacing: -0.01em; display: flex; align-items: center; gap: 6px; }
-.sess .nm .pulse { width: 6px; height: 6px; border-radius: 99px; background: var(--green); flex: none; }
-.sess .meta { font-size: 11px; color: var(--ink-4); margin-top: 2px; }
 .kv { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-1); margin-top: var(--sp-1); }
 .kv div { display: flex; flex-direction: column; }
-.kv .v { font-size: 15px; font-weight: 650; letter-spacing: -0.02em; line-height: 1.2; }
-.kv .l { font-size: 9.5px; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-4); }
-.arch { border-top: 1px solid var(--line-hair); }
-.arch-hd {
-  display: flex; align-items: center; gap: 6px; cursor: pointer;
-  padding: var(--sp-1) var(--sp-2);
-  font-size: 10.5px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-4);
-}
-.arch-hd:hover { color: var(--ink-2); }
-.arch-hd .caret { width: 0; height: 0; border-left: 4px solid currentColor; border-top: 3.5px solid transparent; border-bottom: 3.5px solid transparent; transition: transform .12s ease; }
-.arch-hd[data-open="1"] .caret { transform: rotate(90deg); }
-.arch-hd .n { margin-left: auto; letter-spacing: 0; font-weight: 600; }
 .arow {
   display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-1);
   padding: 5px var(--sp-2); align-items: baseline;
 }
 .arow:hover { background: var(--surface-2); }
 .arow .an { font-size: 12px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.arow .ar { font-size: 10.5px; color: var(--ink-4); white-space: nowrap; }
 .arow .why { grid-column: 1 / -1; font-size: 10.5px; color: var(--ink-4); }
 .arow .why .r { color: var(--ink-3); }
 
@@ -1015,7 +845,7 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 
 .foot {
   display: flex; align-items: center; gap: var(--sp-1);
-  font-size: 10.5px; color: var(--ink-4);
+  font-size: 10.5px; color: var(--ink-3);
 }
 
 /* ---------------------------------------------------------------------
@@ -1027,14 +857,10 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 
 .grow { flex: 1 1 auto; min-width: 0; }
 .amber { color: var(--amber); }
-
-/* topbar alarms */
-.calm { color: var(--ink-4); font-size: 12px; }
 .alarm { font-size: 12px; padding: 2px var(--sp-1); border-radius: 5px;
   border: 1px solid var(--line); background: var(--surface-2); color: var(--ink-2);
   white-space: nowrap; max-width: 46ch; overflow: hidden; text-overflow: ellipsis; }
 .alarm.r { color: var(--red); background: var(--red-wash); border-color: var(--red-line); }
-.alarm.w { color: var(--amber); background: var(--amber-wash); border-color: var(--amber-line); }
 .alarm.b { color: var(--accent); background: var(--accent-wash); border-color: var(--accent-line); }
 
 /* projects rail */
@@ -1067,7 +893,7 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 .nowband { border-bottom: 1px solid var(--line); background: var(--surface-2); }
 .nowband-hd { display: flex; align-items: baseline; gap: var(--sp-1);
   padding: var(--sp-1) var(--sp-2) var(--sp-h);
-  font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-4); }
+  font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
 .nowband-hd .count { color: var(--ink-3); text-transform: none; letter-spacing: 0; font-size: 11.5px; }
 .nowband-empty { padding: var(--sp-h) var(--sp-2) var(--sp-2); color: var(--ink-4); font-size: 12.5px; }
 /* The one empty state that is not a shrug: no claims WITH a dirty tree is a
@@ -1076,9 +902,9 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 .loosehd { border-top: 1px solid var(--line); }
 .afiles.loose { padding-bottom: var(--sp-h); }
 .afiles.loose .afrow { justify-content: flex-start; gap: var(--sp-2); }
-.afiles.loose .how { color: var(--ink-4); font-size: 11.5px; }
+.afiles.loose .how { color: var(--ink-3); font-size: 11.5px; }
 .afiles.loose .how.amber { color: var(--amber); }
-.afiles.loose .who { color: var(--ink-4); font-size: 11px; margin-left: auto; }
+.afiles.loose .who { color: var(--ink-3); font-size: 11px; margin-left: auto; }
 /* Aligned, not scattered. The paths were ragged across the full width with the
    state column floating wherever each name happened to end. */
 .afiles.loose .afrow { display: grid; grid-template-columns: minmax(0, 1fr) auto;
@@ -1097,25 +923,12 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 .guardwarn { padding: var(--sp-h) var(--sp-2); border-top: 1px solid var(--line);
   color: var(--amber); font-size: 11.5px; }
 .guardwarn .mono { color: var(--ink-4); }
-/* A count that opens the detail behind it. Styled as text, because it is a
-   number first and an affordance second. */
-.acount.filestoggle, .count.loosetoggle {
-  background: none; border: 0; padding: 0; font: inherit; cursor: pointer;
-  color: var(--ink-4); border-bottom: 1px dotted var(--line-2); }
-.acount.filestoggle:hover, .count.loosetoggle:hover { color: var(--ink); }
 .why { color: var(--ink); }
 .alsopaths { display: none; }
 .alsopaths { color: var(--ink-4); font-size: 11px; margin: 1px 0 0;
   overflow-wrap: anywhere; }
-.hrow { display: flex; align-items: baseline; gap: var(--sp-1);
-  padding: 3px var(--sp-2); font-size: 12.5px; }
-.hrow:last-child { padding-bottom: var(--sp-1); }
-.hrow.quiet { background: var(--amber-wash); }
 .hactor { color: var(--accent); flex: none; }
-.hpath { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hintent { color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.htask { color: var(--ink-4); flex: none; }
-.hid { color: var(--ink-4); font-size: 10.5px; flex: none; opacity: .75; }
 /* Grouped by agent: one row per agent, its files quiet underneath. */
 .arow { display: flex; align-items: baseline; gap: var(--sp-1);
   padding: var(--sp-1) var(--sp-2) 3px; font-size: 12.5px; }
@@ -1124,29 +937,26 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 .afiles { padding: 0 0 var(--sp-1) 0; }
 .afrow { display: flex; align-items: baseline; gap: var(--sp-1);
   padding: 1px var(--sp-2) 1px calc(var(--sp-2) * 2); font-size: 11.5px; }
-.afpath { color: var(--ink-4); overflow: hidden; text-overflow: ellipsis;
+.afpath { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; flex: 1 1 auto; }
-.afrel { flex: none; font-size: 10px; padding: 0 5px; color: var(--ink-4);
-  border-color: transparent; opacity: 0; transition: opacity .12s; }
-.afrow:hover .afrel { opacity: 1; }
+.afrel { flex: none; font-size: 10px; padding: 0 5px; color: var(--ink-3);
+  border-color: transparent; }
+.afiles:not(.loose) .afpath { flex: 0 1 auto; max-width: 45%; }
+.afrow .hintent { flex: 1 1 auto; }
+.arow .rage, .afrow .rage { flex: none; color: var(--ink-3); font-size: 10.5px; }
+.arow.quiet .rage { color: var(--amber); }
+.arow.quiet .hintent, .arow.quiet .acount { color: var(--ink-2); }
+@media (max-width: 720px) {
+  .arow, .afrow { flex-wrap: wrap; }
+  .arow .hintent, .afrow .hintent { white-space: normal; }
+  .afiles:not(.loose) .afpath { flex-basis: 100%; max-width: none; white-space: normal; overflow-wrap: anywhere; }
+}
+.stream .activity-card { flex: 0 1 auto; max-height: 32%; }
+.activity-card .card-bd { padding: 0 var(--sp-2) var(--sp-1); }
 .afrel:hover { color: var(--red); border-color: var(--red-line); }
 .arow .rel { flex: none; font-size: 10.5px; padding: 0 7px; color: var(--ink-3);
   border-color: var(--line-2); }
 .arow .rel:hover { color: var(--red); border-color: var(--red-line); background: var(--red-wash); }
-/* Visible without hovering. Hover-to-reveal was the first version and it fails
-   the actual complaint: "I don't see where I can release their claims": since
-   an affordance you have to find by accident is one you do not know exists.
-   Understated instead of hidden: quiet until you look at it, red when you mean
-   it. */
-.hrow .rel { flex: none; font-size: 10.5px; padding: 0 6px; color: var(--ink-4);
-  border-color: var(--line-hair); transition: color .12s, border-color .12s; }
-.hrow:hover .rel { color: var(--ink-3); border-color: var(--line-2); }
-.hrow .rel:hover { color: var(--red); border-color: var(--red-line); background: var(--red-wash); }
-
-/* stream buckets */
-.bhd { display: flex; align-items: center; gap: var(--sp-1);
-  font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-4);
-  padding: var(--sp-2) var(--sp-2) var(--sp-h); }
 .k- { }
 
 /* roster */
@@ -1156,74 +966,7 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 .av { flex: none; width: 20px; height: 20px; border-radius: 5px; display: grid; place-items: center;
   background: var(--surface-3); color: var(--ink-2); font-size: 10px; font-family: var(--mono); }
 .rname { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rage { color: var(--ink-4); font-size: 11px; flex: none; }
-
-/* work tally */
-.tbar { display: flex; height: 4px; border-radius: 2px; overflow: hidden;
-  margin: var(--sp-2) var(--sp-2) var(--sp-1); background: var(--surface-3); }
-.tbar > span { display: block; }
-.seg-doing { background: var(--amber); }
-.seg-blocked { background: var(--ink-4); }
-.seg-review { background: var(--accent); }
-.seg-ready { background: var(--green); }
-.seg-closed { background: var(--line-2); }
-.tally { display: flex; padding: 0 var(--sp-2) var(--sp-1); gap: var(--sp-1); }
-.tcell { flex: 1 1 0; min-width: 0; border-top: 2px solid var(--line); padding-top: 5px; }
-.tcell.c-doing   { border-top-color: var(--amber); }
-.tcell.c-review  { border-top-color: var(--accent); }
-.tcell.c-blocked { border-top-color: var(--red); }
-.tcell.c-ready   { border-top-color: var(--green); }
-.tcell.c-closed  { border-top-color: var(--line-2); }
-/* A count of zero is not news, and at full contrast it competed with the ones
-   that are. */
-.tcell.zero { border-top-color: var(--line-hair); }
-.tcell.zero .tn { color: var(--ink-4); }
-.tn { font-size: 15px; color: var(--ink); }
-.tl { font-size: 9.5px; letter-spacing: .06em; color: var(--ink-4); }
-.stuck { border-top: 1px solid var(--line-hair); padding: var(--sp-1) var(--sp-2); }
-
-/* the task list, and one task in full */
-.tlist { border-top: 1px solid var(--line-hair); }
-/* The title gets the row. The phase is a 3px bar down the left edge, because a
-   chip spelling out "CLOSED" cost about a third of the width and pushed the one
-   thing anybody reads into an ellipsis at twenty characters. */
-.trow { padding: 7px var(--sp-2) 7px calc(var(--sp-2) + 5px); position: relative;
-  border-bottom: 1px solid var(--line-hair); cursor: pointer; }
-.trow::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0;
-  width: 3px; background: var(--line-2); }
-.trow:last-child { border-bottom: 0; }
-.trow:hover { background: var(--surface-2); }
-.trow.p-doing::before   { background: var(--amber); }
-.trow.p-review::before  { background: var(--accent); }
-.trow.p-blocked::before,
-.trow.p-cycle::before   { background: var(--red); }
-.trow.p-ready::before   { background: var(--green); }
-.trow.p-closed::before  { background: var(--line); }
-.trow.p-closed .ttitle  { color: var(--ink-3); }
-/* Two lines, then clamp. Truncating mid-word at one line made every task on a
-   real board indistinguishable from every other. */
-.ttitle { color: var(--ink); line-height: 1.35; display: -webkit-box;
-  -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.tmeta { display: flex; gap: var(--sp-1); align-items: baseline; margin-top: 2px; }
-.tfiles { color: var(--ink-4); font-size: 11px; }
-/* Closed work folds away: it is history, and on a real project it was 23 rows
-   burying the 3 that could still be acted on. */
-.tfold { display: flex; justify-content: space-between; align-items: baseline;
-  padding: 7px var(--sp-2); cursor: pointer; color: var(--ink-4);
-  font-size: 11.5px; border-bottom: 1px solid var(--line-hair); }
-.tfold:hover { background: var(--surface-2); }
-.tfoldc { color: var(--accent); }
-.swhy { color: var(--amber); font-size: 11px; }
-/* Still used by the task DETAIL header, where there is one task and room to
-   spell the phase out. It was only ever wrong in a list. */
-.tphase { flex: none; font-size: 9.5px; letter-spacing: .05em; text-transform: uppercase;
-  padding: 1px 6px; border-radius: 3px; border: 1px solid var(--line);
-  color: var(--ink-4); }
-.tphase.p-doing { color: var(--amber); border-color: var(--amber-line); background: var(--amber-wash); }
-.tphase.p-review { color: var(--accent); border-color: var(--accent-line); background: var(--accent-wash); }
-.tphase.p-blocked, .tphase.p-cycle { color: var(--red); border-color: var(--red-line); background: var(--red-wash); }
-.tphase.p-ready { color: var(--green); border-color: var(--green); background: transparent; }
-.allgood { padding: var(--sp-1) var(--sp-2) var(--sp-2); color: var(--green); font-size: 12.5px; }
+.rage { color: var(--ink-3); font-size: 11px; flex: none; }
 
 /* this repo */
 .sroot { padding: var(--sp-2) var(--sp-2) var(--sp-1); color: var(--ink-3); font-size: 11px;
@@ -1259,98 +1002,11 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 .work-heading p { margin: 0; color: var(--ink-3); }
 .work-toolbar { display: flex; gap: 6px; margin-top: 16px; }
 .work-toolbar button { height: 32px; padding: 0 12px; }
-#tasks { padding: 4px 20px 24px; overflow-y: auto; }
-.work-group h2 { font-size: 13px; font-weight: 600; color: var(--ink-3); margin: 22px 0 9px; }
-.work-group h2 span { margin-left: 7px; color: var(--ink-4); }
-.trow { display: block; width: 100%; height: auto; text-align: left;
-  padding: 15px 16px; border: 1px solid var(--line); border-radius: 8px; margin: 8px 0; }
-.trow:last-child { border-bottom: 1px solid var(--line); }
-.trow::before { width: 3px; top: 14px; bottom: 14px; border-radius: 3px; }
-.ttitle { display: block; overflow: visible; font-size: 15px; line-height: 1.45; font-weight: 550; }
-.tmeta { flex-wrap: wrap; gap: 5px 12px; margin-top: 8px; font-size: 12px; font-weight: 400; color: var(--ink-3); }
-.tmeta .owner { color: var(--ink-2); }
-.tmeta .tfiles { font: inherit; }
-.work-note { margin: 8px 0 0; color: var(--ink-3); font-size: 12px; font-weight: 400; }
-
-/* The work graph is deliberately static.  Positions come from a stable order
-   in the page state; there is no physics pass to make the picture jump on each
-   live update.  Only this viewport scrolls, so a wide scene cannot make the
-   mobile page itself overflow. */
-#tasks { min-width: 0; }
-.graph-shell { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
-.graph-controls { display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
-  position: sticky; top: 0; z-index: 8; padding: 12px 0 8px; background: var(--surface); }
-.graph-search { flex: 1 1 210px; min-width: 120px; height: 34px; border: 1px solid var(--line);
-  border-radius: 7px; padding: 0 10px; background: var(--bg); color: var(--ink); font: inherit; }
-.graph-controls button { height: 32px; padding: 0 10px; }
-.graph-zoom { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
-.graph-controls .pressed { color: var(--accent); border-color: var(--accent-line); background: var(--accent-wash); }
-.graph-count { color: var(--ink-4); font-size: 11.5px; white-space: nowrap; }
-.graph-key { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 15px;
-  color: var(--ink-3); font-size: 11.5px; }
-.graph-key span { display: inline-flex; align-items: center; gap: 6px; }
-.graph-key i { width: 24px; height: 0; border-top: 2px solid var(--ink-3); }
-.graph-key i.dep { position: relative; }
-.graph-key i.dep::after { content: ""; position: absolute; right: -1px; top: -4px;
-  border-left: 6px solid var(--ink-3); border-top: 3px solid transparent; border-bottom: 3px solid transparent; }
-.graph-key i.rel { border-top-style: dashed; border-top-color: var(--accent); }
-.graph-focus { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  min-height: 34px; padding: 8px 10px; border: 1px solid var(--line-hair);
-  border-radius: 8px; background: var(--surface-2); color: var(--ink-3); font-size: 12px; }
-.graph-focus strong { color: var(--ink); font-weight: 600; }
-.graph-focus button { height: 28px; padding: 0 9px; }
-.graph-viewport { width: 100%; min-width: 0; min-height: 360px; max-height: calc(100vh - 330px);
-  overflow: auto; overscroll-behavior: contain; border: 1px solid var(--line-hair);
-  border-radius: 9px; background: var(--bg); }
-.graph-camera { position: relative; }
-.graph-scene { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
-.graph-scene > svg { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
-.graph-edge { fill: none; vector-effect: non-scaling-stroke; }
-.graph-edge.dependency { stroke: var(--ink-3); stroke-width: 1.6; }
-.graph-arrow { fill: var(--ink-3); }
-.graph-edge.related { stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 5 5; opacity: .75; }
-.graph-edge.dim { opacity: .2; }
-.graph-node { position: absolute; width: 260px; min-height: 84px; display: grid;
-  grid-template-columns: 40px minmax(0, 1fr); align-items: center; column-gap: 10px;
-  padding: 7px 8px; text-align: left; border: 0; border-radius: 10px;
-  color: var(--ink); background: transparent; }
-.graph-node:hover .graph-label, .graph-node:focus-visible .graph-label { background: var(--surface-2); }
-.graph-node:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.graph-node.selected .graph-orb { box-shadow: 0 0 0 4px var(--accent-wash), 0 0 0 5px var(--accent-line); }
-.graph-node.connected:not(.selected) .graph-orb { box-shadow: 0 0 0 3px var(--surface-3); }
-.graph-orb { width: 34px; height: 34px; border-radius: 50%; border: 2px solid var(--line-2);
-  background: var(--surface); display: grid; place-items: center; color: var(--ink-3);
-  font-size: 10px; font-weight: 700; text-transform: uppercase; }
-.graph-node.p-doing .graph-orb { color: var(--amber); border-color: var(--amber); background: var(--amber-wash); }
-.graph-node.p-review .graph-orb { color: var(--accent); border-color: var(--accent); background: var(--accent-wash); }
-.graph-node.p-blocked .graph-orb, .graph-node.p-cycle .graph-orb { color: var(--red); border-color: var(--red); background: var(--red-wash); }
-.graph-node.p-ready .graph-orb { color: var(--green); border-color: var(--green); }
-.graph-node.p-closed .graph-orb { color: var(--green); border-color: var(--green); background: var(--green-wash); }
-.graph-label { min-width: 0; padding: 5px 6px; border-radius: 6px; background: var(--bg); }
-.graph-title { display: block; white-space: normal; overflow-wrap: anywhere;
-  font-size: 14px; line-height: 1.3; font-weight: 600; }
-.graph-meta { display: flex; flex-wrap: wrap; gap: 3px 8px; margin-top: 5px;
-  color: var(--ink-4); font-size: 10.5px; line-height: 1.25; }
-.graph-meta .status { color: var(--ink-3); font-weight: 600; }
-.graph-list { display: flex; flex-direction: column; gap: 6px; }
-.graph-list .graph-list-row { width: 100%; height: auto; display: flex; align-items: center;
-  gap: 10px; padding: 10px 12px; text-align: left; border: 1px solid var(--line);
-  border-radius: 8px; }
-.graph-list .graph-list-row .graph-title { flex: 1; }
-.graph-empty { padding: 36px 12px; color: var(--ink-4); line-height: 1.55; }
 .rail-right { display: flex; flex-direction: column; overflow-y: auto; gap: 18px; }
 .rail-right > .card { flex: none; }
 .rail-right > .card:first-child { max-height: none; }
-.nowband { border: 0; padding: 0 14px 14px; max-height: none; }
-.nowband-hd { padding-top: 14px; }
-.arow { display: flex; flex-wrap: wrap; gap: 6px 10px; padding: 15px 0; }
-.arow .hactor { width: calc(100% - 68px); font: inherit; font-weight: 550; overflow-wrap: anywhere; }
-.arow .hintent { width: 100%; flex: auto; white-space: normal; overflow: visible; line-height: 1.5; color: var(--ink-3); }
-.arow .htask { display: none; }
-.arow .grow { display: none; }
-.arow .rage { margin-right: auto; }
-.afrow { flex-wrap: wrap; }
-.afpath { overflow-wrap: anywhere; white-space: normal; }
+.nowband { border: 0; background: none; }
+.arow .hactor { font: inherit; font-weight: 550; }
 .rrow { flex-wrap: wrap; padding: 12px 15px; }
 .rname { overflow-wrap: anywhere; white-space: normal; }
 .agent-history { margin-left: auto; }
@@ -1368,19 +1024,6 @@ body:has(#connectionNotice:not([hidden])) .shell { height: calc(100vh - 100px); 
 .attention p { margin: 0; color: var(--ink-2); }
 .project-details { padding: 12px 14px; color: var(--ink-3); }
 .project-details summary { cursor: pointer; }
-.tdetwrap { inset: 0; padding-left: max(20px, calc(100vw - 680px)); background: #0005; }
-.tdet-title { font-size: 18px; }
-.tdet-id { display: none; }
-.tdetbox { width: 100%; max-width: none; }
-#tdet { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-.tdet-hd { display: flex; align-items: flex-start; gap: 10px; padding: 20px; border-bottom: 1px solid var(--line); }
-.tdet-title { flex: 1; line-height: 1.4; }
-.tdet-bd { padding: 20px; overflow-y: auto; }
-.tdet-state { font-size: 15px; margin-bottom: 12px; }
-.tdet-sec { margin: 24px 0 10px; font-size: 12px; color: var(--ink-3); font-weight: 600; }
-.tdet-checks { display: flex; flex-wrap: wrap; gap: 8px; }
-.chk { padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; }
-.chk.ok { color: var(--green); } .chk.bad { color: var(--red); }
 .tdet-note { color: var(--ink-3); line-height: 1.6; overflow-wrap: anywhere; }
 .release-wrap { position: fixed; inset: 0; z-index: 80; padding: 20px; background: #0008; display: grid; place-items: center; }
 .release-wrap[hidden] { display: none; }
@@ -1392,12 +1035,6 @@ body:has(#connectionNotice:not([hidden])) .shell { height: calc(100vh - 100px); 
 .release-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
 #releaseScope { overflow-wrap: anywhere; }
 #releaseError { color: var(--red); margin-top: 12px; }
-.technical-details { margin-top: 24px; border-top: 1px solid var(--line); padding-top: 16px; }
-.technical-details summary { cursor: pointer; color: var(--ink-2); }
-.tfrow { display: flex; flex-wrap: wrap; gap: 6px 12px; padding: 10px 0; border-bottom: 1px solid var(--line-hair); }
-.tfpath { width: 100%; overflow-wrap: anywhere; font-size: 12px; }
-.tfactor, .tfstate, .tvia { font-size: 12px; color: var(--ink-3); }
-.tmeet { cursor: pointer; } .tmeet:hover { background: var(--surface-2); }
 @media (max-width: 1100px) {
   .shell { grid-template-columns: 170px minmax(0, 1fr); overflow-y: auto; align-content: start; }
   .stream { min-height: 480px; }
@@ -1411,14 +1048,10 @@ body:has(#connectionNotice:not([hidden])) .shell { height: calc(100vh - 100px); 
   .stream { flex: none; min-height: 480px; }
   .work-heading { padding: 18px 16px 12px; }
   .work-heading h1 { font-size: 22px; }
-  #tasks { padding: 0 14px 20px; }
-  .graph-controls { top: 0; }
-  .graph-viewport { min-height: 420px; max-height: 72vh; }
   .topbar { padding: 0 15px; }
   .topbar .sep { display: none; }
   #clock { display: none; }
   .history-wrap { padding: 10px; }
-  .tdetwrap { padding: 10px; }
 }
 @media (prefers-reduced-motion: reduce) { .livedot { animation: none; } }
 </style>
@@ -1449,22 +1082,24 @@ body:has(#connectionNotice:not([hidden])) .shell { height: calc(100vh - 100px); 
   <section class="stream">
     <div class="card">
       <div class="work-heading">
-        <h1 id="projectTitle">Your work</h1>
-        <p>What is moving forward, and who is on it.</p>
+        <h1 id="projectTitle">Who holds which files</h1>
         <div class="work-toolbar">
           <button id="historyBtn">History</button>
-          <button id="dagBtn" class="ghost">Connections</button>
+          <button id="dagBtn" class="ghost">Code map</button>
         </div>
       </div>
       <div id="alarms"></div>
-      <div class="card-bd" id="tasks"><div class="empty">Loading work…</div></div>
+      <div class="card-bd"><div id="nowBand"><div class="empty">Loading claims…</div></div></div>
+    </div>
+    <div class="card activity-card">
+      <div class="card-hd"><span>Recent activity</span><span class="count" id="activityCount"></span></div>
+      <div class="card-bd" id="activity"></div>
     </div>
   </section>
 
   <aside class="rail-right">
     <div class="card">
       <div class="card-hd"><span>Team</span><span class="count" id="rosterCount"></span></div>
-      <div id="nowBand"></div>
       <div class="card-bd" id="roster"></div>
     </div>
     <div class="card">
@@ -1479,7 +1114,7 @@ body:has(#connectionNotice:not([hidden])) .shell { height: calc(100vh - 100px); 
   <div class="card history-card">
     <div class="card-hd"><span>History</span><span id="historyScope" class="history-scope"></span>
       <div class="grow"></div><button class="ghost" id="historyClose">Close</button></div>
-    <div class="history-controls"><div class="chips" id="chips"></div><button class="ghost" id="historyAll">All agents and tasks</button></div>
+    <div class="history-controls"><div class="chips" id="chips"></div><button class="ghost" id="historyAll">All agents</button></div>
     <div class="card-bd streamwrap"><div class="scroll" id="streamScroll"><div id="streamList"></div></div>
       <div class="newpill" id="newPill" hidden></div></div>
     <div class="card-ft"><span id="evCount"></span> events shown <span id="historyStatus" role="status"></span>
@@ -1500,16 +1135,13 @@ body:has(#connectionNotice:not([hidden])) .shell { height: calc(100vh - 100px); 
   </form>
 </section>
 
-<div class="dagwrap tdetwrap" id="tdetWrap" hidden role="dialog" aria-modal="true" aria-label="Task details">
-    <div class="dagbox tdetbox"><div id="tdet"></div></div>
-  </div>
-  <div class="dagwrap" id="dagWrap" hidden>
+<div class="dagwrap" id="dagWrap" hidden>
   <div class="dagbox">
     <div class="dagbar">
       <button class="ghost gtab on" id="gMap" data-src="/map.html">Code map</button>
       <div class="grow"></div><button id="dagClose" class="ghost">Close</button>
     </div>
-    <iframe id="dagFrame" title="graph"></iframe>
+    <iframe id="dagFrame" title="Code map"></iframe>
   </div>
 </div>
 <script>
@@ -1522,19 +1154,9 @@ var RELOAD_REQUESTED = false;
 var LAST_SNAPSHOT_AT = 0;
 var LOAD_STARTED_AT = Date.now();
 var HISTORY_SCOPE = null;
-var OPEN_TASK = null;
-var OPEN_FILES = {};
 var HISTORY_EVENTS = null;
 var HISTORY_BEFORE = "";
 var HISTORY_REQUEST = 0;
-var GRAPH_RELATED_LIMIT = 12;
-var GRAPH_STATE = freshGraphState("");
-
-function freshGraphState(projectKey) {
-  return {projectKey: projectKey || "", showCompleted: false, query: "", view: "graph",
-          zoom: 1, left: 0, top: 0, selected: null, relatedExpanded: false,
-          order: [], rank: {}, sceneWidth: 0, sceneHeight: 0};
-}
 
 function el(id) { return document.getElementById(id); }
 function esc(s) {
@@ -1608,132 +1230,97 @@ function currentStore() {
   return m ? decodeURIComponent(m[1]) : "";
 }
 
-function renderNow() {
+function rosterEntry(actor) {
+  return (D.roster || []).filter(function (a) { return a.actor === actor; })[0] || {};
+}
+
+/* An auto-claim is the edit check taking the file on first touch. Its stored
+   intent is internal text, so it reads as what the agent is doing. */
+function intentText(c) {
+  return c.auto ? "editing" : (c.intent || "");
+}
+
+function renderHolds() {
   var cs = D.claims || [];
-  var h = '<div class="nowband">';
-  h += '<div class="nowband-hd"><span>Holding work</span><span class="count">' +
-       (cs.length ? cs.length + (cs.length === 1 ? " file claimed" : " files claimed") : "") + "</span></div>";
   var dirt = D.dirty || {};
   // NO REPOSITORY IS NOT A FAILED READ. Run across every project (the login
   // service does, from /), there is no working tree to have an opinion about,
   // and reporting "the working tree could not be read: not a git repository"
-  // plus "commit guard: not known" is two lines of alarm about the absence of a
-  // question. The principle is never to render "could not look" as "all clear";
-  // it is not to invent a problem where there is no subject.
+  // is alarm about the absence of a question.
   var noRepoHere = dirt.readable === false &&
                    /not a git repository/i.test(dirt.unavailable || "");
   if (noRepoHere) { dirt = {}; }
+  var h = '<div class="nowband">';
   if (!cs.length) {
-    // "Nobody is holding any ground" is only reassuring if the tree agrees, and
-    // it was measured NOT agreeing: no claims on the board while fifteen files
-    // were changed on disk. Say which of the two situations this is.
+    // "Nobody is holding anything" is only reassuring if the tree agrees.
     if (dirt.readable === false) {
-      h += '<div class="nowband-empty">Nobody is holding any ground right now, and ' +
+      h += '<div class="nowband-empty">Nobody holds a file right now, and ' +
            'the working tree could not be read (' + esc(dirt.unavailable || "no reason given") +
            '), so this is not the same as quiet.</div>';
     } else if (dirt.total) {
-      h += '<div class="nowband-empty amber">Nobody is holding any ground, but ' +
+      h += '<div class="nowband-empty amber">Nobody holds a file, but ' +
            dirt.total + (dirt.total === 1 ? " file has" : " files have") +
-           ' uncommitted changes. Nothing here is claimed, which is not the same as ' +
-           'nothing happening.</div>';
+           ' uncommitted changes.</div>';
     } else if (noRepoHere) {
-      h += '<div class="nowband-empty">Nobody is holding any ground. This view spans ' +
-           'every project, so there is no single working tree to check; open one on ' +
+      h += '<div class="nowband-empty">Nobody holds a file. This view spans ' +
+           'every project, so there is no single working tree to check. Open one on ' +
            'the left to see what is changed in it.</div>';
     } else {
-      h += '<div class="nowband-empty">Nobody is holding any ground, and there are ' +
+      h += '<div class="nowband-empty">Nobody holds a file, and there are ' +
            'no uncommitted changes.</div>';
     }
   } else {
-    // BY AGENT, not by file. One agent holding eight files produced eight
-    // near-identical rows: same name, same truncated intent, same task, eight
-    // opaque claim ids: and the question somebody actually arrives with is not
-    // "which files" but "is that agent still alive, and if not, free its
-    // ground". A list of files cannot be acted on. A list of agents can.
+    // BY AGENT, not by file: the question somebody arrives with is "is that
+    // agent still alive, and if not, free its files". Whoever has gone quiet
+    // sorts first, because that is the one that needs a person.
     var byActor = {};
     cs.forEach(function (c) { (byActor[c.actor] = byActor[c.actor] || []).push(c); });
     Object.keys(byActor).sort(function (a, b) {
-      // Whoever has gone quiet first: that is the one that needs a person.
       var qa = byActor[a].some(function (c) { return c.quiet; }) ? 0 : 1;
       var qb = byActor[b].some(function (c) { return c.quiet; }) ? 0 : 1;
       return qa - qb || byActor[b].length - byActor[a].length;
     }).forEach(function (actor) {
       var held = byActor[actor];
+      var who = rosterEntry(actor);
       var quiet = held.some(function (c) { return c.quiet; });
-      var idle = Math.max.apply(null, held.map(function (c) { return c.idle_seconds || 0; }));
-      // Since WHEN, which the row never said. "active" answers whether they are
-      // alive; the question in front of a board is how long this has been going
-      // on, and a claim taken four hours ago reads very differently from one
-      // taken four minutes ago even when both are active.
-      var oldest = Math.min.apply(null, held.map(function (c) {
-        var t = Date.parse(c.ts || "");
-        return isFinite(t) ? t : Date.now();
-      }));
-      var heldFor = Math.max(0, Math.round((Date.now() - oldest) / 1000));
-      var intents = [], tasks = [];
-      held.forEach(function (c) {
-        if (c.intent && intents.indexOf(c.intent) === -1) { intents.push(c.intent); }
-        if (c.task && tasks.indexOf(c.task) === -1) { tasks.push(c.task); }
-      });
+      var idle = Math.min.apply(null, held.map(function (c) { return c.idle_seconds || 0; }));
+      var about = [who.label, who.model].filter(Boolean).join(" · ");
       h += '<div class="arow' + (quiet ? " quiet" : "") + '">';
       h += '<button class="hactor ghost agent-history" data-history-actor="' + esc(actor) + '">@' + esc(actor) + "</button>";
-      // The count is the magnitude, which is what a person needs; the paths are
-      // code detail and are one click away rather than always on screen.
-      h += '<button class="acount mono filestoggle" data-actor="' + esc(actor) + '">' +
-           held.length + (held.length === 1 ? " file" : " files") + "</button>";
-      if (tasks.length) { h += '<span class="htask mono">' + esc(tasks.join(", ")) + "</span>"; }
-      var taskTitles = tasks.map(function (id) {
-        var task = (D.tasks || []).filter(function (t) { return t.id === id; })[0];
-        return task ? task.title : id;
-      });
-      h += '<span class="hintent">' + esc((taskTitles.length ? taskTitles : intents).join(" · ")) + "</span>";
+      if (about) { h += '<span class="hintent">' + esc(about) + "</span>"; }
       h += '<span class="grow"></span>';
+      h += '<span class="acount">' + held.length + (held.length === 1 ? " file" : " files") + "</span>";
       h += '<span class="rage mono' + (quiet ? " amber" : "") + '">' +
-           (quiet ? "No report for " + ago(idle) : "Reported " + ago(idle) + " ago") + "</span>";
-      h += '<button class="ghost filestoggle" data-actor="' + esc(actor) + '">Review holds</button>';
+           (quiet ? "Silent for " + ago(idle) : "Active " + ago(idle) + " ago") + "</span>";
       h += "</div>";
-      // The files, quiet underneath: available without being in the way. The
-      // claim id moves to the row's tooltip: it is a handle for the CLI, not
-      // something a person reads.
-      h += '<div class="afiles"' + (OPEN_FILES[actor] ? "" : " hidden") + '>';
+      h += '<div class="afiles">';
       held.forEach(function (c) {
+        var since = Date.parse(c.ts || "");
+        var heldFor = isFinite(since) ? ago((Date.now() - since) / 1000) : "";
         h += '<div class="afrow" title="claim ' + esc(c.id) + '">' +
              '<span class="mono afpath">' + esc(shortPath(c.scope)) + "</span>" +
+             '<span class="hintent">' + esc(intentText(c)) + "</span>" +
+             '<span class="rage mono">' + (heldFor ? "held " + heldFor : "") + "</span>" +
              '<button class="ghost rel afrel" data-id="' + esc(c.id) + '" data-scope="' +
-             esc(c.scope) + '" data-actor="' + esc(actor) + '">Release hold</button></div>';
+             esc(c.scope) + '" data-actor="' + esc(actor) + '">Release</button></div>';
       });
       h += "</div>";
     });
   }
-  // Changed on disk with nothing in the log about it. This is the half of the
-  // picture no agent has to remember to emit, so it is the half that survives a
-  // context compaction, a run of shell heredoc edits, or an agent that simply
-  // never claimed anything.
-  // Everything dirty that NO LIVE CLAIM covers. Filtering to the wholly
-  // unattributed would have hidden the other half of the problem: a file
-  // somebody released and left uncommitted appears under neither "working now"
-  // nor "claimed by nobody", so it fell out of the board entirely.
+  // Everything dirty that NO LIVE CLAIM covers: the half of the picture no
+  // agent has to remember to report. Edits to tracked files are listed;
+  // untracked paths are usually build output, so they are summed up in one row.
   var loose = (dirt.files || []).filter(function (f) { return f.basis !== "held"; });
   if (loose.length) {
-    // EDITS TO TRACKED FILES ARE THE SIGNAL. Untracked paths are usually build
-    // output (graphify-out/, output/, a tool's cache directory) and git reports
-    // a whole untracked directory as one entry, so they are not edits anybody
-    // made to code. Six of them buried the single row that mattered: a
-    // translation file changed, and released by the agent that had it.
     var edited = loose.filter(function (f) { return f.how.indexOf("new, not in git") !== 0; });
     var fresh  = loose.filter(function (f) { return f.how.indexOf("new, not in git") === 0; });
-
     h += '<div class="nowband-hd loosehd"><span>Changed on disk, nobody holding it</span>' +
-         '<button class="count loosetoggle">' + loose.length + " of " + dirt.total +
-         "</button></div>";
-    h += '<div class="afiles loose" hidden>';
+         '<span class="count">' + loose.length + " of " + dirt.total + "</span></div>";
+    h += '<div class="afiles loose">';
     edited.slice(0, 25).forEach(function (f) {
       h += '<div class="afrow">' +
            '<span class="mono afpath">' + esc(shortPath(f.path)) + "</span>" +
            '<span class="how' + (f.deleted ? " amber" : "") + '">' + esc(f.how) + "</span>" +
-           // Only when the log HAS something to say. Repeating "claimed by
-           // nobody" on every row restated the heading six times and left no
-           // room for the one row that named an actor.
            (f.actor ? '<span class="who mono">@' + esc(f.actor) + " let go of it</span>" : "") +
            "</div>";
     });
@@ -1755,8 +1342,6 @@ function renderNow() {
   // somebody commits over a live claim. Say which this repo is.
   var g = noRepoHere ? {} : (D.guard || {});
   if (g.installed === false) {
-    // describe() already carries the command, so appending it again printed it
-    // twice on one line.
     h += '<div class="guardwarn">' + esc(g.text || "") + "</div>";
   }
   h += "</div>";
@@ -1764,23 +1349,6 @@ function renderNow() {
   bindHistoryButtons(el("nowBand"));
   Array.prototype.forEach.call(el("nowBand").querySelectorAll(".rel"), function (b) {
     b.onclick = function () { releaseClaim(b); };
-  });
-  var lt = el("nowBand").querySelector(".loosetoggle");
-  if (lt) {
-    lt.onclick = function () {
-      var box = el("nowBand").querySelector(".afiles.loose");
-      if (box) { box.hidden = !box.hidden; }
-    };
-  }
-  Array.prototype.forEach.call(el("nowBand").querySelectorAll(".filestoggle"), function (b) {
-    b.onclick = function (ev) {
-      ev.stopPropagation();
-      var box = b.parentNode.nextSibling;
-      if (box && box.classList && box.classList.contains("afiles")) {
-        box.hidden = !box.hidden;
-        OPEN_FILES[b.getAttribute("data-actor")] = !box.hidden;
-      }
-    };
   });
 }
 
@@ -1870,15 +1438,12 @@ function submitRelease(e) {
 /* ---------- the stream ------------------------------------------------- */
 
 var KINDS = [
-  ["all", "All"], ["claim", "Claims"],
-  ["note", "Notes"], ["task", "Tasks"], ["session", "Session"]
+  ["all", "All"], ["claim", "Claims"], ["note", "Notes"], ["session", "Session"]
 ];
 function matchKind(e) {
   if (HISTORY_SCOPE && HISTORY_SCOPE.kind === "actor" && e.actor !== HISTORY_SCOPE.value && e.original_actor !== HISTORY_SCOPE.value && (e.original_actors || []).indexOf(HISTORY_SCOPE.value) < 0) return false;
-  if (HISTORY_SCOPE && HISTORY_SCOPE.kind === "task" && e.task !== HISTORY_SCOPE.value && (e.tasks || []).indexOf(HISTORY_SCOPE.value) < 0) return false;
   if (FILTER === "all") return true;
   if (FILTER === "claim") return e.type === "claim" || e.type === "release";
-  if (FILTER === "task") return e.type === "task" || e.type === "task_edge" || e.type === "task_state";
   if (FILTER === "session") return e.type === "hello" || e.type === "blocked";
   return e.type === FILTER;
 }
@@ -1944,19 +1509,7 @@ function glyphClass(e) {
   if (e.type === "release") return "g-release";
   if (e.type === "note") return "g-note";
   if (e.type === "hello") return "g-agent";
-  if (e.type === "blocked") return "g-stale";
-  if (e.type === "task_state") {
-    if (e.state === "verified") return "g-task-closed";
-    if (e.state === "rejected") return "g-task-blocked";
-    return "g-task-review";
-  }
-  return "g-task";
-}
-function stateChip(v) {
-  var cls = v === "doing" ? "doing" : v === "blocked" ? "blocked"
-          : v === "review" ? "review" : v === "closed" ? "closed" : "";
-  var label = v === "review" ? "awaiting-review" : v;
-  return '<span class="state ' + cls + '">' + esc(label) + "</span>";
+  return "g-stale";
 }
 function eventRow(e, isLast) {
   // `last` stops the timeline spine running past the final row of a group.
@@ -1978,7 +1531,7 @@ function eventRow(e, isLast) {
     // code nothing at all, while "Nachlauf-Timer sauber" tells them what
     // happened. The paths stay, quieter, because they are what an agent greps.
     var many = (e.scopes && e.scopes.length > 1) ? e.scopes : null;
-    var why = e.intent || e.result || "";
+    var why = e.auto ? "editing" : (e.intent || e.result || "");
     if (why) {
       s += '<span class="why">' + esc(why) + "</span>";
     } else {
@@ -1986,7 +1539,6 @@ function eventRow(e, isLast) {
     }
     s += "</div>";
     s += '<div class="l2"><span class="actor">@' + esc(e.actor) + "</span>";
-    if (e.task) { s += '<span class="dot"></span><span class="proj mono">' + esc(e.task) + "</span>"; }
     if (why) {
       s += '<span class="dot"></span><span class="path mono">' +
            esc(shortPath(many ? many[0] : e.scope)) +
@@ -1999,28 +1551,6 @@ function eventRow(e, isLast) {
            "</div>";
     }
 
-  } else if (e.type === "task_edge") {
-    s += '<div class="l1"><span class="verb">linked tasks</span></div>';
-    s += '<div class="quote">' + esc(e.from) + " → " + esc(e.to) + "</div>";
-    s += '<div class="l2"><span class="actor">@' + esc(e.actor) + '</span><span>' + esc(e.kind) + "</span></div>";
-  } else if (e.type === "task_state") {
-    s += '<div class="l1"><span class="verb mono">' + esc(e.task) + "</span></div>";
-    s += '<div class="l2">' + stateChip(e.state || "doing");
-    s += '<span class="dot"></span><span class="actor">@' + esc(e.actor) + "</span>";
-    // Self-reported, and shown as such: these are the doer's claims about
-    // their own work, which is exactly why somebody else has to verify it.
-    var cr = e.checks || {};
-    Object.keys(cr).forEach(function (k) {
-      var ok = String(cr[k]).toLowerCase() === "pass";
-      s += '<span class="sev ' + (ok ? "low" : "high") + '">' + esc(k) + " " + esc(cr[k]) + "</span>";
-    });
-    s += "</div>";
-
-  } else if (e.type === "task" || e.type === "task_edge") {
-    s += '<div class="l1"><span class="verb">' + (e.type === "task" ? "declared" : "ordered") + "</span>";
-    s += '<span class="mono">' + esc(e.task || "") + "</span></div>";
-    s += '<div class="l2"><span class="actor">@' + esc(e.actor) + "</span></div>";
-
   } else if (e.type === "note") {
     s += '<div class="l1"><span class="verb">note</span></div>';
     s += '<div class="quote">' + esc(e.body || "") + "</div>";
@@ -2028,7 +1558,7 @@ function eventRow(e, isLast) {
 
   } else if (e.type === "blocked") {
     s += '<div class="l1"><span class="verb r">refused</span>';
-    s += '<span class="path mono">' + esc(shortPath(e.scope || e.task)) + "</span></div>";
+    s += '<span class="path mono">' + esc(shortPath(e.scope)) + "</span></div>";
     s += '<div class="l2"><span class="actor">@' + esc(e.actor) + "</span>";
     if (e.reason) { s += '<span class="dot"></span><span>' + esc(e.reason) + "</span>"; }
     s += "</div>";
@@ -2106,7 +1636,7 @@ function renderRoster() {
   function idleOf(a) { return a.last_seen ? (Date.now() - Date.parse(a.last_seen)) / 1000 : 1e9; }
   var here = r.filter(function (a) { return idleOf(a) < 3600 || a.holding; });
   var rest = r.filter(function (a) { return here.indexOf(a) === -1; });
-  var shown = (rosterAll ? here.concat(rest) : here).filter(function (a) { return !a.holding; });
+  var shown = rosterAll ? here.concat(rest) : here;
 
   el("rosterCount").textContent = here.length;
   var h = "";
@@ -2136,596 +1666,6 @@ function renderRoster() {
   if (t) { t.onclick = function () { rosterAll = !rosterAll; renderRoster(); }; }
 }
 
-/* ---------- work -------------------------------------------------------- */
-
-function readableTaskTitle(t) {
-  var title = String(t && t.title || "").trim();
-  if (!title) return "Untitled task";
-  // Only remove the conventional tracker prefix when a plain-English title
-  // remains.  IDs and paths are never promoted into invented summaries.
-  return title.replace(/^[A-Z]{2,8}[0-9]{1,5}[ ]*[-:–—][ ]+/, "");
-}
-
-function taskStatus(task) {
-  var phase = task && typeof task === "object" ? task.phase : task;
-  if (phase === "closed" && task && typeof task === "object") {
-    return task.verified_by ? "Completed · checked" : "Finished · verification not recorded";
-  }
-  return ({doing: "In progress", review: "Checking", blocked: "Waiting",
-           cycle: "Needs attention", ready: "Up next", closed: "Completed"})[phase] || "Recorded";
-}
-
-function taskOwners(t) {
-  return (t.doers || []).length ? t.doers : t.did ? [t.did] : [];
-}
-
-function graphTask(id) {
-  return (D.tasks || []).filter(function (t) { return t.id === id; })[0] || null;
-}
-
-function graphDeclaredEdges() {
-  var known = {};
-  (D.tasks || []).forEach(function (t) { known[t.id] = true; });
-  var seen = {};
-  return (D.task_edges || []).filter(function (edge) {
-    if (!edge || !known[edge.from] || !known[edge.to] || edge.from === edge.to) return false;
-    var key = edge.from + "\u0000" + edge.to;
-    if (seen[key]) return false;
-    seen[key] = true;
-    return true;
-  });
-}
-
-function graphRelated(id) {
-  var found = {}, known = {};
-  (D.tasks || []).forEach(function (t) { known[t.id] = true; });
-  function add(other, relation) {
-    if (!other || other === id || !known[other]) return;
-    var prior = found[other];
-    if (!prior || Number(relation.shared || 0) > Number(prior.shared || 0)) {
-      found[other] = {task: other, shared: Number(relation.shared || 0), via: relation.via || []};
-    }
-  }
-  var own = graphTask(id);
-  (own && own.related || []).forEach(function (r) { add(r.task, r); });
-  // Older snapshots were not guaranteed to carry the symmetric half.  Reading
-  // the reverse record is still an undirected relation, never an inferred edge.
-  (D.tasks || []).forEach(function (t) {
-    (t.related || []).forEach(function (r) { if (r.task === id) add(t.id, r); });
-  });
-  return Object.keys(found).map(function (key) { return found[key]; }).sort(function (a, b) {
-    return b.shared - a.shared || readableTaskTitle(graphTask(a.task)).localeCompare(readableTaskTitle(graphTask(b.task)));
-  });
-}
-
-function graphOrderTasks(tasks) {
-  var priority = {doing: 0, review: 1, blocked: 2, cycle: 3, ready: 4, closed: 5};
-  return tasks.slice().sort(function (a, b) {
-    var phase = (priority[a.phase] === undefined ? 9 : priority[a.phase]) -
-                (priority[b.phase] === undefined ? 9 : priority[b.phase]);
-    return phase || readableTaskTitle(a).localeCompare(readableTaskTitle(b)) || a.id.localeCompare(b.id);
-  });
-}
-
-function ensureGraphOrder(tasks) {
-  var known = {}, adjacency = {};
-  tasks.forEach(function (t) { known[t.id] = t; adjacency[t.id] = {}; });
-  graphDeclaredEdges().forEach(function (e) { adjacency[e.from][e.to] = true; adjacency[e.to][e.from] = true; });
-  tasks.forEach(function (t) {
-    (t.related || []).forEach(function (r) {
-      if (known[r.task] && r.task !== t.id) { adjacency[t.id][r.task] = true; adjacency[r.task][t.id] = true; }
-    });
-  });
-  GRAPH_STATE.order = GRAPH_STATE.order.filter(function (id) { return known[id]; });
-  var already = {};
-  GRAPH_STATE.order.forEach(function (id) { already[id] = true; });
-  var additions = tasks.filter(function (t) { return !already[t.id]; });
-  if (!GRAPH_STATE.order.length) {
-    // Open work gets a compact area of its own; within it, breadth-first
-    // component order keeps declared and advisory neighbours near each other.
-    var ordered = [];
-    [false, true].forEach(function (closed) {
-      var pool = graphOrderTasks(additions.filter(function (t) { return (t.phase === "closed") === closed; }));
-      var allowed = {}, visited = {};
-      pool.forEach(function (t) { allowed[t.id] = true; });
-      pool.forEach(function (seed) {
-        if (visited[seed.id]) return;
-        var queue = [seed.id]; visited[seed.id] = true;
-        while (queue.length) {
-          var id = queue.shift(); ordered.push(id);
-          Object.keys(adjacency[id] || {}).filter(function (other) { return allowed[other] && !visited[other]; })
-            .sort(function (a, b) { return readableTaskTitle(known[a]).localeCompare(readableTaskTitle(known[b])); })
-            .forEach(function (other) { visited[other] = true; queue.push(other); });
-        }
-      });
-    });
-    GRAPH_STATE.order = ordered;
-  } else {
-    graphOrderTasks(additions).forEach(function (t) { GRAPH_STATE.order.push(t.id); });
-  }
-  GRAPH_STATE.rank = {};
-  GRAPH_STATE.order.forEach(function (id, index) { GRAPH_STATE.rank[id] = index; });
-}
-
-function rememberGraphCamera() {
-  var viewport = document.getElementById("graphViewport");
-  if (!viewport) return;
-  GRAPH_STATE.left = Number(viewport.scrollLeft || 0);
-  GRAPH_STATE.top = Number(viewport.scrollTop || 0);
-}
-
-function graphFocusSnapshot() {
-  var active = document.activeElement;
-  if (!active) return null;
-  var task = active.getAttribute ? active.getAttribute("data-graph-task") : "";
-  if (task) return {task: task};
-  var ids = ["graphSearch", "graphCompleted", "graphView", "listView",
-             "graphZoomOut", "graphFit", "graphZoomIn", "graphDetails",
-             "graphShowCompleted", "graphMoreRelated"];
-  if (ids.indexOf(active.id) < 0) return null;
-  return {id: active.id, start: active.selectionStart, end: active.selectionEnd};
-}
-
-function restoreGraphFocus(saved) {
-  if (!saved) return;
-  var target = null;
-  if (saved.task) {
-    target = Array.prototype.slice.call(el("tasks").querySelectorAll("[data-graph-task]")).filter(function (node) {
-      return node.getAttribute("data-graph-task") === saved.task;
-    })[0] || null;
-  } else if (saved.id) {
-    target = document.getElementById(saved.id);
-  }
-  if (!target || !target.focus) return;
-  target.focus();
-  if (target.setSelectionRange && typeof saved.start === "number") {
-    target.setSelectionRange(saved.start, typeof saved.end === "number" ? saved.end : saved.start);
-  }
-}
-
-function chooseGraphFocus(tasks) {
-  // Snapshots are serialized by task id, not by the graph layout.  Choosing
-  // from that raw order can focus a useful task several rows below the initial
-  // viewport even though the same task set has a stable, readable display
-  // order.  Existing selection bypasses this function, so live pushes never
-  // pull a reader away from the node they chose.
-  var ordered = tasks.slice().sort(function (a, b) {
-    return GRAPH_STATE.rank[a.id] - GRAPH_STATE.rank[b.id];
-  });
-  var open = ordered.filter(function (t) { return t.phase !== "closed"; });
-  var openIds = {};
-  open.forEach(function (t) { openIds[t.id] = true; });
-  var doing = open.filter(function (t) { return t.phase === "doing"; })[0];
-  if (doing) return doing.id;
-  var connected = open.filter(function (t) {
-    return graphRelated(t.id).some(function (r) { return openIds[r.task]; }) ||
-           graphDeclaredEdges().some(function (e) {
-             return (e.from === t.id && openIds[e.to]) || (e.to === t.id && openIds[e.from]);
-           });
-  })[0];
-  return connected ? connected.id : open.length ? open[0].id : null;
-}
-
-function setGraphCompleted(value) {
-  rememberGraphCamera(); GRAPH_STATE.showCompleted = !!value; renderTasks();
-}
-function setGraphQuery(value) {
-  rememberGraphCamera(); GRAPH_STATE.query = String(value || "");
-  var query = GRAPH_STATE.query.trim().toLowerCase();
-  if (query) {
-    var matches = (D.tasks || []).filter(function (t) {
-      return (GRAPH_STATE.showCompleted || t.phase !== "closed") &&
-             (String(t.title || "").toLowerCase().indexOf(query) >= 0 || String(t.id || "").toLowerCase().indexOf(query) >= 0);
-    }).sort(function (a, b) { return GRAPH_STATE.rank[a.id] - GRAPH_STATE.rank[b.id]; });
-    GRAPH_STATE.selected = matches.length ? matches[0].id : null;
-  }
-  renderTasks();
-}
-function selectGraphTask(id) {
-  if (!graphTask(id)) return;
-  rememberGraphCamera(); GRAPH_STATE.selected = id; GRAPH_STATE.relatedExpanded = false; renderTasks();
-}
-function setGraphRelatedExpanded(value) {
-  rememberGraphCamera(); GRAPH_STATE.relatedExpanded = !!value; renderTasks();
-}
-function setGraphView(view) {
-  rememberGraphCamera(); GRAPH_STATE.view = view === "list" ? "list" : "graph"; renderTasks();
-}
-function setGraphZoom(value) {
-  rememberGraphCamera(); GRAPH_STATE.zoom = Math.max(.55, Math.min(1.6, Number(value) || 1)); renderTasks();
-}
-function fitGraph() {
-  var viewport = document.getElementById("graphViewport");
-  var width = viewport && viewport.clientWidth ? viewport.clientWidth : 760;
-  setGraphZoom(Math.min(1, (width - 24) / Math.max(1, GRAPH_STATE.sceneWidth)));
-}
-
-function bindGraphControls() {
-  var search = document.getElementById("graphSearch");
-  if (search) {
-    search.value = GRAPH_STATE.query;
-    search.oninput = function (event) { setGraphQuery(event.target.value); };
-  }
-  var completed = document.getElementById("graphCompleted");
-  if (completed) completed.onclick = function () { setGraphCompleted(!GRAPH_STATE.showCompleted); };
-  var graphView = document.getElementById("graphView");
-  if (graphView) graphView.onclick = function () { setGraphView("graph"); };
-  var listView = document.getElementById("listView");
-  if (listView) listView.onclick = function () { setGraphView("list"); };
-  var zoomOut = document.getElementById("graphZoomOut");
-  if (zoomOut) zoomOut.onclick = function () { setGraphZoom(GRAPH_STATE.zoom - .1); };
-  var zoomIn = document.getElementById("graphZoomIn");
-  if (zoomIn) zoomIn.onclick = function () { setGraphZoom(GRAPH_STATE.zoom + .1); };
-  var fit = document.getElementById("graphFit");
-  if (fit) fit.onclick = fitGraph;
-  var details = document.getElementById("graphDetails");
-  if (details) details.onclick = function () { openTask(GRAPH_STATE.selected); };
-  var showDone = document.getElementById("graphShowCompleted");
-  if (showDone) showDone.onclick = function () { setGraphCompleted(true); };
-  var more = document.getElementById("graphMoreRelated");
-  if (more) more.onclick = function () { setGraphRelatedExpanded(true); };
-  Array.prototype.forEach.call(el("tasks").querySelectorAll("[data-graph-task]"), function (node) {
-    node.onclick = function () { selectGraphTask(node.getAttribute("data-graph-task")); };
-  });
-}
-
-function renderTasks() {
-  var savedFocus = graphFocusSnapshot();
-  var tasks = D.tasks || [];
-  var project = (D.projects || []).filter(function (p) { return p.current; })[0];
-  el("projectTitle").textContent = project && project.name ? project.name : "Your work";
-  if (!tasks.length) {
-    el("tasks").innerHTML = '<div class="empty">No tasks recorded yet. Team activity and held work are still shown alongside.</div>';
-    return;
-  }
-
-  ensureGraphOrder(tasks);
-  if (GRAPH_STATE.selected && !graphTask(GRAPH_STATE.selected)) GRAPH_STATE.selected = null;
-
-  var query = GRAPH_STATE.query.trim().toLowerCase();
-  var visible = tasks.filter(function (t) {
-    if (t.phase === "closed" && !GRAPH_STATE.showCompleted) return false;
-    return !query || String(t.title || "").toLowerCase().indexOf(query) >= 0 || String(t.id || "").toLowerCase().indexOf(query) >= 0;
-  }).sort(function (a, b) { return GRAPH_STATE.rank[a.id] - GRAPH_STATE.rank[b.id]; });
-  var visibleIds = {};
-  visible.forEach(function (t) { visibleIds[t.id] = true; });
-  if (query && !visibleIds[GRAPH_STATE.selected]) {
-    GRAPH_STATE.selected = visible.length ? visible[0].id : null;
-  } else if (!query && !GRAPH_STATE.selected) {
-    GRAPH_STATE.selected = chooseGraphFocus(tasks);
-  }
-  var positions = {}, nodeWidth = 260, stepX = 282;
-  var availableWidth = Number(el("tasks").clientWidth || 760);
-  var columns = Math.max(1, Math.min(4, Math.floor((availableWidth - 20) / stepX)));
-  var rows = Math.ceil(visible.length / columns), rowHeights = [];
-  visible.forEach(function (t, index) {
-    var titleLines = Math.max(1, Math.ceil(readableTaskTitle(t).length / 22));
-    var metaLength = taskStatus(t).length + taskOwners(t).join(", ").length + 12;
-    var metaLines = Math.max(1, Math.ceil(metaLength / 27));
-    var height = Math.max(92, 38 + titleLines * 18 + metaLines * 14);
-    var row = Math.floor(index / columns);
-    rowHeights[row] = Math.max(rowHeights[row] || 0, height);
-    positions[t.id] = {x: 24 + (index % columns) * stepX, row: row, h: height};
-  });
-  var rowTops = [], y = 24;
-  rowHeights.forEach(function (height, row) { rowTops[row] = y; y += height + 26; });
-  visible.forEach(function (t) { positions[t.id].y = rowTops[positions[t.id].row]; });
-  var sceneWidth = Math.max(320, Math.min(columns, Math.max(1, visible.length)) * stepX + 12);
-  var sceneHeight = Math.max(330, y + 4);
-  GRAPH_STATE.sceneWidth = sceneWidth; GRAPH_STATE.sceneHeight = sceneHeight;
-
-  var selected = graphTask(GRAPH_STATE.selected);
-  var declared = graphDeclaredEdges();
-  var related = selected ? graphRelated(selected.id) : [];
-  var relatedVisible = related.filter(function (r) { return visibleIds[r.task]; });
-  var relatedShown = relatedVisible.slice();
-  if (!GRAPH_STATE.relatedExpanded) relatedShown = relatedShown.slice(0, GRAPH_RELATED_LIMIT);
-  var connected = {};
-  declared.forEach(function (edge) {
-    if (selected && (edge.from === selected.id || edge.to === selected.id)) connected[edge.from === selected.id ? edge.to : edge.from] = true;
-  });
-  relatedShown.forEach(function (r) { connected[r.task] = true; });
-
-  var closedConnections = {};
-  if (selected && !GRAPH_STATE.showCompleted) {
-    declared.forEach(function (edge) {
-      var other = edge.from === selected.id ? edge.to : edge.to === selected.id ? edge.from : "";
-      if (other && graphTask(other) && graphTask(other).phase === "closed") closedConnections[other] = true;
-    });
-    related.forEach(function (r) { if (graphTask(r.task) && graphTask(r.task).phase === "closed") closedConnections[r.task] = true; });
-  }
-  var hiddenCompleted = Object.keys(closedConnections).length;
-
-  var h = '<div class="graph-shell"><div class="graph-controls">' +
-          '<input class="graph-search" id="graphSearch" type="search" aria-label="Search tasks" placeholder="Search tasks" value="' + esc(GRAPH_STATE.query) + '">' +
-          '<button class="ghost' + (GRAPH_STATE.showCompleted ? " pressed" : "") + '" id="graphCompleted">' +
-            (GRAPH_STATE.showCompleted ? "Hide completed" : "Show completed") + '</button>' +
-          '<button class="ghost' + (GRAPH_STATE.view === "graph" ? " pressed" : "") + '" id="graphView">Graph</button>' +
-          '<button class="ghost' + (GRAPH_STATE.view === "list" ? " pressed" : "") + '" id="listView">List</button>' +
-          '<span class="graph-count">' + visible.length + ' shown · ' + tasks.length + ' total</span>' +
-          '<span class="grow"></span><span class="graph-zoom"><button class="ghost" id="graphZoomOut" aria-label="Zoom out">−</button>' +
-          '<button class="ghost" id="graphFit">Fit</button><button class="ghost" id="graphZoomIn" aria-label="Zoom in">+</button></span></div>';
-  h += '<div class="graph-key" aria-label="Connection legend"><span><i class="dep"></i>Unlocks (prerequisite → dependent)</span>' +
-       '<span><i class="rel"></i>Related work</span></div>';
-
-  if (selected) {
-    var declaredCount = declared.filter(function (edge) { return edge.from === selected.id || edge.to === selected.id; }).length;
-    h += '<div class="graph-focus"><strong>' + esc(readableTaskTitle(selected)) + '</strong>' +
-         '<span>' + declaredCount + (declaredCount === 1 ? " dependency" : " dependencies") + '</span>';
-    if (!D.code_map_available) {
-      h += '<span>Code-related links unavailable — no code map is loaded.</span>';
-    } else if (!related.length) {
-      h += '<span>No code-related links were found in the loaded map.</span>';
-    } else {
-      h += '<span>' + (relatedShown.length < relatedVisible.length
-           ? "Showing " + relatedShown.length + " of " + relatedVisible.length + " visible related links."
-           : relatedShown.length + (relatedShown.length === 1 ? " visible related link." : " visible related links.")) + '</span>';
-      if (relatedShown.length < relatedVisible.length && !GRAPH_STATE.relatedExpanded) h += '<button class="ghost" id="graphMoreRelated">Show all related</button>';
-    }
-    if (hiddenCompleted) {
-      h += '<span>' + hiddenCompleted + (hiddenCompleted === 1 ? " connection" : " connections") +
-           ' to completed work.</span><button class="ghost" id="graphShowCompleted">Show completed</button>';
-    }
-    h += '<button id="graphDetails">Details</button></div>';
-  }
-
-  if (!visible.length) {
-    h += '<div class="graph-empty">No tasks match this view. Clear the search or show completed work.</div></div>';
-    el("tasks").innerHTML = h; bindGraphControls(); restoreGraphFocus(savedFocus); return;
-  }
-
-  if (GRAPH_STATE.view === "list") {
-    h += '<div class="graph-list" aria-label="Task list">';
-    visible.forEach(function (t) {
-      var owners = taskOwners(t), holds = Number(t.files_held || 0);
-      h += '<button class="graph-list-row" id="graphNode-' + GRAPH_STATE.rank[t.id] + '" data-graph-task="' + esc(t.id) + '" title="' + esc(t.title || "Untitled task") + '">' +
-           '<span class="graph-orb">' + esc(taskStatus(t).slice(0, 1)) + '</span><span class="graph-title">' + esc(readableTaskTitle(t)) + '</span>' +
-           '<span class="graph-meta"><span class="status">' + esc(taskStatus(t)) + '</span>' +
-           (owners.length ? '<span>' + esc(owners.map(function (o) { return "@" + o; }).join(", ")) + '</span>' : '<span>Unassigned</span>') +
-           (holds ? '<span>' + holds + (holds === 1 ? " hold" : " holds") + '</span>' : "") + '</span></button>';
-    });
-    h += '</div></div>';
-    el("tasks").innerHTML = h; bindGraphControls(); restoreGraphFocus(savedFocus); return;
-  }
-
-  function graphCurve(from, to) {
-    var fx = from.x + 25, fy = from.y + from.h / 2;
-    var tx = to.x + 25, ty = to.y + to.h / 2;
-    var dx = tx - fx, dy = ty - fy, length = Math.sqrt(dx * dx + dy * dy) || 1;
-    var sx = fx + dx / length * 20, sy = fy + dy / length * 20;
-    var ex = tx - dx / length * 20, ey = ty - dy / length * 20;
-    if (Math.abs(dx) > 30) {
-      var midX = (sx + ex) / 2;
-      return "M" + sx + "," + sy + " C" + midX + "," + sy + " " + midX + "," + ey + " " + ex + "," + ey;
-    }
-    var midY = (sy + ey) / 2;
-    return "M" + sx + "," + sy + " C" + sx + "," + midY + " " + ex + "," + midY + " " + ex + "," + ey;
-  }
-  var lines = '';
-  declared.forEach(function (edge) {
-    if (!visibleIds[edge.from] || !visibleIds[edge.to]) return;
-    var from = positions[edge.from], to = positions[edge.to];
-    var dim = selected && edge.from !== selected.id && edge.to !== selected.id;
-    lines += '<path class="graph-edge dependency' + (dim ? " dim" : "") + '" d="' + graphCurve(from, to) +
-             '" marker-end="url(#taskArrow)"><title>Unlocks dependent task</title></path>';
-  });
-  relatedShown.forEach(function (relation) {
-    if (!selected || !positions[selected.id] || !positions[relation.task]) return;
-    var from = positions[selected.id], to = positions[relation.task];
-    lines += '<path class="graph-edge related" d="' + graphCurve(from, to) + '"><title>Related work</title></path>';
-  });
-  var nodes = '';
-  visible.forEach(function (t) {
-    var p = positions[t.id], owners = taskOwners(t), holds = Number(t.files_held || 0);
-    var classes = 'graph-node p-' + esc(t.phase) + (t.id === GRAPH_STATE.selected ? " selected" : "") + (connected[t.id] ? " connected" : "");
-    nodes += '<button class="' + classes + '" id="graphNode-' + GRAPH_STATE.rank[t.id] + '" data-graph-task="' + esc(t.id) + '" style="left:' + p.x + 'px;top:' + p.y +
-             'px;min-height:' + p.h + 'px" title="' + esc(t.title || "Untitled task") + ' — ' + esc(taskStatus(t)) + '" aria-label="' +
-             esc((t.title || "Untitled task") + ". " + taskStatus(t)) + '">' +
-             '<span class="graph-orb" aria-hidden="true">' + esc(taskStatus(t).slice(0, 1)) + '</span><span class="graph-label">' +
-             '<span class="graph-title">' + esc(readableTaskTitle(t)) + '</span><span class="graph-meta"><span class="status">' +
-             esc(taskStatus(t)) + '</span>' +
-             (owners.length ? '<span>' + esc(owners.map(function (o) { return "@" + o; }).join(", ")) + '</span>' : '<span>Unassigned</span>') +
-             (holds ? '<span>' + holds + (holds === 1 ? " hold" : " holds") + '</span>' : "") + '</span></span></button>';
-  });
-  var scaledWidth = Math.ceil(sceneWidth * GRAPH_STATE.zoom), scaledHeight = Math.ceil(sceneHeight * GRAPH_STATE.zoom);
-  h += '<div class="graph-viewport" id="graphViewport" tabindex="0" aria-label="Task connection graph">' +
-       '<div class="graph-camera" style="width:' + scaledWidth + 'px;height:' + scaledHeight + 'px">' +
-       '<div class="graph-scene" style="width:' + sceneWidth + 'px;height:' + sceneHeight + 'px;transform:scale(' + GRAPH_STATE.zoom + ')">' +
-       '<svg width="' + sceneWidth + '" height="' + sceneHeight + '" aria-hidden="true"><defs><marker id="taskArrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path class="graph-arrow" d="M0,0 L7,3.5 L0,7 z"></path></marker></defs>' +
-       lines + '</svg>' + nodes + '</div></div></div></div>';
-  el("tasks").innerHTML = h;
-  var viewport = document.getElementById("graphViewport");
-  if (viewport) { viewport.scrollLeft = GRAPH_STATE.left; viewport.scrollTop = GRAPH_STATE.top; }
-  bindGraphControls();
-  restoreGraphFocus(savedFocus);
-}
-
-/* One task, in full. Opened from a row rather than always on screen: the list
-   answers "what is there", this answers "what is this and where does it live".
-   Rebuilt from D on every open, so it is never stale against the feed. */
-function openTask(id) {
-  var t = (D.tasks || []).filter(function (x) { return x.id === id; })[0];
-  if (!t) { return; }
-  var refreshing = OPEN_TASK === id;
-  var focusedId = document.activeElement && document.activeElement.id;
-  var oldDetails = el("taskTechnical");
-  var expanded = refreshing && oldDetails && oldDetails.open;
-  var previousScroll = el("tdet").querySelector(".tdet-bd");
-  var detailScroll = refreshing && previousScroll ? previousScroll.scrollTop : 0;
-  OPEN_TASK = id;
-  var h = '<div class="tdet-hd">' +
-          '<span class="tphase p-' + esc(t.phase) + '">' + esc(t.phase) + "</span>" +
-          '<span class="tdet-title">' + esc(t.title || t.id) + "</span>" +
-          '<span class="mono tdet-id">' + esc(t.id) + "</span>" +
-          '<button class="ghost" id="tdetClose">Close</button></div>';
-
-  h += '<div class="tdet-bd">';
-
-  // Is it done? Said in words, because "closed" and "somebody checked it" are
-  // different claims and the difference is the whole point of the review gate.
-  var state;
-  if (t.phase === "closed" && t.verified_by) {
-    state = "Done, and checked by @" + esc(t.verified_by || "?") +
-            (t.independence ? " (" + esc(t.independence) + ")" : "");
-  } else if (t.phase === "closed") {
-    state = "Finished. Independent verification was not recorded.";
-  } else if (t.phase === "review") {
-    state = "Finished by @" + esc(t.did || "?") + ", waiting for somebody else to check it.";
-  } else if (t.phase === "doing") {
-    state = "Being worked on by " + (t.doers || []).map(function (d) { return "@" + esc(d); }).join(", ");
-  } else if (t.phase === "blocked") {
-    state = "Blocked until these are verified: " + esc((t.blocked_by || []).join(", "));
-  } else if (t.phase === "cycle") {
-    state = "In a dependency loop, so nothing here can start.";
-  } else {
-    state = "Ready: nobody has claimed it.";
-  }
-  h += '<div class="tdet-state">' + state + "</div>";
-  h += '<button class="ghost" id="taskHistory">Task history</button>';
-  if (t.rejections) {
-    h += '<div class="tdet-note amber">Sent back ' + t.rejections +
-         (t.rejections === 1 ? " time" : " times") + " before.</div>";
-  }
-
-  // The checks it declared, and what actually came back for each.
-  var checks = t.checks || [], res = t.check_results || {};
-  if (checks.length) {
-    h += '<div class="tdet-sec">CHECKS</div><div class="tdet-checks">';
-    checks.forEach(function (c) {
-      var r = res[c] || "";
-      var cls = r === "pass" ? "ok" : r ? "bad" : "none";
-      h += '<span class="chk ' + cls + '"><span class="mono">' + esc(c) + "</span>" +
-           (r ? " " + esc(r) : " not run") + "</span>";
-    });
-    h += "</div>";
-  }
-  if (t.verification) {
-    h += '<div class="tdet-sec">WHAT THE REVIEWER RAN</div>' +
-         '<div class="tdet-note">' + esc(t.verification) + "</div>";
-  }
-
-  h += '<div class="tdet-sec">Visual evidence</div><div class="tdet-note">No screenshots linked here yet.</div>';
-  h += '<details class="technical-details" id="taskTechnical"' + (expanded ? " open" : "") + '><summary id="taskTechnicalToggle">Files and code connections</summary>';
-
-  // RECORDED DIRECTION, kept separate from the undirected map relation below.
-  // The kind and provides note are technical detail, but they are also the
-  // evidence for why one task really comes after another.
-  var declaredForTask = graphDeclaredEdges().filter(function (edge) {
-    return edge.from === id || edge.to === id;
-  });
-  if (declaredForTask.length) {
-    h += '<div class="tdet-sec">DECLARED DEPENDENCIES (' + declaredForTask.length + ')</div><div class="tdet-files">';
-    declaredForTask.forEach(function (edge) {
-      var incoming = edge.to === id;
-      var otherId = incoming ? edge.from : edge.to;
-      var other = graphTask(otherId);
-      h += '<div class="tfrow tmeet" data-task="' + esc(otherId) + '">' +
-           '<span class="tfdot ' + (incoming ? "wait" : "done") + '"></span>' +
-           '<span class="tfpath">' + (incoming ? "Depends on " : "Used by ") +
-             esc(other ? readableTaskTitle(other) : otherId) + '</span>' +
-           '<span class="tfstate">' + esc(edge.kind || "sequence") +
-             (edge.provides ? " · " + esc(edge.provides) : "") + '</span></div>';
-    });
-    h += '</div>';
-  }
-
-  // WHAT ELSE THIS MEETS, from the code map rather than from anybody declaring
-  // it. This is the join the whole thing was for: the log knows which files the
-  // task touched, the map knows how files reach each other, and neither knew the
-  // other. Nobody has ever declared a task edge on this machine, so without this
-  // the graph could only ever be a list.
-  //
-  // Said as "meets", never as an ordering. A declared edge is a judgement about
-  // sequence; a code connection is a fact with no direction, and the map runs at
-  // roughly a third to a half recall: an inferred arrow would be confidently
-  // wrong often enough to poison the board.
-  var rel = t.related || [];
-  if (rel.length) {
-    h += '<div class="tdet-sec">MEETS IN THE CODE (' + rel.length + ")</div>";
-    h += '<div class="tdet-note">Not declared by anyone: these tasks touch files that ' +
-         "reach each other in the map.</div>";
-    h += '<div class="tdet-files">';
-    // Demote, never drop: same reason as the CLI. Sorting own work last and
-    // then slicing deleted it, and that row is the one an agent reported as the
-    // win.
-    var strangers = rel.filter(function (r) { return !r.same_actor; });
-    var ownRel = rel.filter(function (r) { return r.same_actor; });
-    strangers.slice(0, 8).concat(ownRel.slice(0, 4)).forEach(function (r) {
-      // NAME the places. Three agents said the same thing independently: a
-      // count is a number without a noun, and you cannot act on it: whether to
-      // go and knock on somebody's door depends on whether the shared files are
-      // the component you both edit or four barrels every file imports. Naming
-      // them also lets a reader discount a 3000-line god file on sight.
-      var via = (r.via || []).map(function (v) {
-        var parts = String(v).split("/");
-        return parts.length > 2 ? parts.slice(-2).join("/") : v;
-      });
-      var more = r.shared - (r.via || []).length;
-      h += '<div class="tfrow tmeet" data-task="' + esc(r.task) + '">' +
-           '<span class="tfdot meet"></span>' +
-           '<span class="mono tfpath">' + esc(r.task) + "</span>" +
-           (r.same_actor ? '<span class="tag">your own</span>' : "") +
-           '<span class="tfstate">' + r.shared +
-           (r.shared === 1 ? " shared file" : " shared files") + "</span></div>";
-      if (via.length) {
-        h += '<div class="tvia mono">' + esc(via.join(", ")) +
-             (more > 0 ? ", +" + more + " more" : "") + "</div>";
-      }
-    });
-    h += "</div>";
-  } else if (t.touches) {
-    h += '<div class="tdet-sec">MEETS IN THE CODE</div>' +
-         '<div class="tdet-note">Nothing. Its files reach ' + t.touches +
-         " place(s) in the map, none of them touched by another task.</div>";
-  }
-
-  // WHERE IT LIVES. Derived from claims tagged to this task, kept after release
-  // so finishing the work does not empty the answer.
-  var files = t.files || [];
-  h += '<div class="tdet-sec">FILES (' + files.length + ")</div>";
-  if (!files.length) {
-    h += '<div class="tdet-note">No files are tagged to this task. An agent ties ' +
-         'them on as it works: <code class="mono">comms-graph claim &lt;path&gt; --task ' +
-         esc(t.id) + "</code></div>";
-  } else {
-    h += '<div class="tdet-files">';
-    files.forEach(function (f) {
-      h += '<div class="tfrow">' +
-           '<span class="tfdot ' + (f.held ? "held" : "done") + '"></span>' +
-           '<span class="mono tfpath">' + esc(f.scope) + "</span>" +
-           '<span class="tfactor">@' + esc(f.actor) + "</span>" +
-           '<span class="tfstate">' + (f.held ? "held now" : "released") + "</span>" +
-           "</div>";
-    });
-    h += "</div>";
-  }
-  h += "</details></div>";
-
-  el("tdet").innerHTML = h;
-  el("tdetWrap").hidden = false;
-  el("tdetClose").onclick = closeTask;
-  el("taskHistory").onclick = function () { closeTask(); openHistory("task", id); };
-  var body = el("tdet").querySelector(".tdet-bd");
-  if (body) body.scrollTop = detailScroll;
-  var focusTarget = el(refreshing && focusedId ? focusedId : "tdetClose");
-  if (focusTarget && focusTarget.focus) focusTarget.focus();
-  // Follow the connection. Being told two tasks meet and then having to go and
-  // find the other one by hand is most of the cost of knowing.
-  Array.prototype.forEach.call(el("tdet").querySelectorAll(".tmeet"), function (row) {
-    row.onclick = function () { openTask(row.getAttribute("data-task")); };
-  });
-}
-
-function closeTask() {
-  var id = OPEN_TASK;
-  OPEN_TASK = null;
-  el("tdetWrap").hidden = true;
-  if (id) {
-    var rows = Array.prototype.slice.call(el("tasks").querySelectorAll("[data-task]"));
-    var target = rows.filter(function (row) { return row.getAttribute("data-task") === id; })[0] || el("historyBtn");
-    if (target && target.focus) target.focus();
-  }
-}
 function closeHistory() {
   if (el("historyWrap").hidden) return;
   el("historyWrap").hidden = true;
@@ -2761,37 +1701,34 @@ function renderSession() {
 /* ---------- alarms ------------------------------------------------------ */
 
 function renderAlarms() {
-  var a = (D.alerts || []).filter(function (x) { return ["quiet", "cycle", "dangling"].indexOf(x.kind) >= 0; });
-  if (!a.length) { el("alarms").innerHTML = ""; return; }
-  var h = "";
-  a.forEach(function (x) {
-    h += '<div class="attention"><strong>' + (x.kind === "quiet" ? "A hold may need your attention" : "Task plan needs attention") + "</strong><p>" +
-         (x.kind === "quiet" ? "An agent has not reported recently. Check its holds in Team before releasing anything." : esc(x.text)) + "</p></div>";
-  });
-  el("alarms").innerHTML = h;
+  var quiet = (D.alerts || []).some(function (x) { return x.kind === "quiet"; });
+  el("alarms").innerHTML = quiet
+    ? '<div class="attention"><strong>A hold may need your attention</strong><p>' +
+      "An agent holding files has been silent for over an hour. It may still be running, " +
+      "so check before you release anything.</p></div>"
+    : "";
+}
+
+/* The newest events, the same rows History shows. */
+function renderActivity() {
+  var f = (D.feed || []).slice(0, 15);
+  el("activityCount").textContent = f.length ? f.length : "";
+  el("activity").innerHTML = f.length
+    ? f.map(function (e, i) { return eventRow(e, i === f.length - 1); }).join("")
+    : '<div class="empty">Nothing has happened here yet.</div>';
 }
 
 /* ---------- driver ------------------------------------------------------ */
 
 function renderAll(d) {
-  // A pushed snapshot for the same project refreshes facts without moving the
-  // reader's camera or clearing their focus.  A project switch is a new scene
-  // and must not inherit a hidden completed filter or an unrelated selection.
-  var nextProject = d && (d.store_key || d.root || "");
-  if (D) rememberGraphCamera();
-  if (GRAPH_STATE.projectKey !== nextProject) GRAPH_STATE = freshGraphState(nextProject);
   D = d;
   if (d.error) {
     el("alarms").innerHTML = '<span class="alarm r">' + esc(d.error) + "</span>";
     el("streamList").innerHTML = '<div class="empty">' + esc(d.error) + "</div>";
     return;
   }
-  renderAlarms(); renderProjects(); renderNow(); renderChips();
-  renderStream(); renderRoster(); renderTasks(); renderSession();
-  if (OPEN_TASK) {
-    if ((D.tasks || []).some(function (t) { return t.id === OPEN_TASK; })) openTask(OPEN_TASK);
-    else closeTask();
-  }
+  renderAlarms(); renderProjects(); renderHolds(); renderActivity();
+  renderChips(); renderStream(); renderRoster(); renderSession();
 }
 
 function acceptSnapshot(d) {
@@ -2839,9 +1776,9 @@ el("historyClose").addEventListener("click", closeHistory);
 el("releaseCancel").addEventListener("click", closeRelease);
 el("releaseForm").addEventListener("submit", submitRelease);
 document.addEventListener("keydown", function (e) {
-  if (e.key === "Escape") { closeRelease(); closeTask(); closeHistory(); }
+  if (e.key === "Escape") { closeRelease(); closeHistory(); }
   if (e.key === "Tab") {
-    var modal = !el("releaseWrap").hidden ? el("releaseWrap") : !el("historyWrap").hidden ? el("historyWrap") : !el("tdetWrap").hidden ? el("tdetWrap") : null;
+    var modal = !el("releaseWrap").hidden ? el("releaseWrap") : !el("historyWrap").hidden ? el("historyWrap") : null;
     if (!modal) return;
     var focusable = Array.prototype.slice.call(modal.querySelectorAll("button, a[href], input, select, textarea, summary, [tabindex='0']"))
       .filter(function (node) { return !node.disabled && node.getClientRects().length; });
@@ -2865,16 +1802,14 @@ document.addEventListener("keydown", function (e) {
   });
 })();
 
-// The task DAG, on demand. It is a whole vis-network page in an iframe and
-// most of the day nobody wants it: so it costs nothing until asked for.
+// The code map, on demand. It is a whole vis-network page in an iframe and
+// most of the day nobody wants it, so it costs nothing until asked for.
 (function () {
   var wrap = el("dagWrap"), frame = el("dagFrame"), shown = "";
   function show(src, btn) {
     var store = currentStore();
     if (store) { src += "?store=" + encodeURIComponent(store); }
-    // Loading only what is asked for, and only once. Both are full
-    // vis-network pages; mounting them behind a closed overlay would pay for
-    // two graph layouts on every page load for a view most days nobody opens.
+    // Loaded only when asked for, and only once per project.
     if (shown !== src) { frame.src = src; shown = src; }
     wrap.hidden = false;
   }
@@ -2915,17 +1850,14 @@ def _frontend_build_token(page: str) -> str:
     return hashlib.sha256(page.encode("utf-8")).hexdigest()
 
 
-#: Appended to each embedded page to give the graph the whole pane.
+#: Appended to the embedded code map to give the graph the whole pane.
 #:
-#: Both pages are complete, standalone documents, and each carries its own
-#: right-hand panel: the map has search, node info and a community filter; the
-#: task graph has its counts and legend. Standalone that is exactly right. Side
-#: by side inside the board, with the board's own rail beside them, it meant
-#: THREE columns of chrome saying overlapping things, and the graphs: the
-#: reason anybody opens this: were squeezed into what was left.
+#: The map is a complete, standalone page with its own right-hand panel
+#: (search, node info, a community filter). Inside the board, beside the
+#: board's own rail, that panel squeezed the graph into what was left.
 #:
-#: Hidden rather than removed, so both pages keep working on their own and
-#: neither generator has to know it is inside a frame.
+#: Hidden rather than removed, so the map keeps working on its own and its
+#: generator does not have to know it is inside a frame.
 _EMBED_CSS = (
     "<style>"
     "#comms-panel,#sidebar,#side{display:none!important}"
@@ -2946,7 +1878,7 @@ _EMBED_CSS = (
     "<script>(function(){"
     "var g=document.getElementById('graph')||document.body;"
     "var fire=function(){window.dispatchEvent(new Event('resize'));"
-    "var n=window.commsTaskNetwork||window.network;"
+    "var n=window.network;"
     # setSize BEFORE redraw: vis measured its canvas when the panel was still
     # there, and fit() centres inside the CANVAS, not inside the container. So
     # the picture sat centred in a box narrower than the pane and read as

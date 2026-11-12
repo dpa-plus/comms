@@ -26,7 +26,7 @@ def history_page(events, *, actor="", before="", limit=60):
         original_actor = text(data, "original_actor") or text(data, "freed_from") or (owners[0] if owners else "")
         if actor and actor != ev.actor and actor not in owners and actor != original_actor:
             continue
-        scopes = list(ev.scope or [])
+        scopes = list(ev.scope or []) or ([text(data, "scope")] if ev.type == "blocked" and text(data, "scope") else [])
         if ev.type == "release":
             scopes = list(dict.fromkeys(s for c in referenced for s in (c.scope or [])))
         row = {"id": ev.id, "type": ev.type, "actor": ev.actor, "original_actor": original_actor,
@@ -34,7 +34,7 @@ def history_page(events, *, actor="", before="", limit=60):
                "scopes": scopes, "scope": scopes[0] if scopes else "",
                "ts": ev.ts.isoformat().replace("+00:00", "Z"),
                **{key: text(data, key) for key in ("intent", "reason", "result", "steals")},
-               "body": text(data, "body")}
+               "body": text(data, "body"), "auto": data.get("auto") is True}
         previous = rows[-1] if rows else None
         # A multi-file claim is one visible action.
         if (previous and ev.type == previous["type"] == "claim" and ev.actor == previous["actor"]
