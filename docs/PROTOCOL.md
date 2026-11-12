@@ -10,7 +10,7 @@ The log is a JSON lines file with one event per line. comms only ever appends to
 ```jsonl
 {"ts":"2026-11-11T19:26:31.62865Z","id":"01M7616Z6CAF9MA0X3EY6XNVGG","actor":"claude-4f9a1c","type":"hello","data":{"agent_session":"4f9a1c22-aaaa","hostname":"Mac","model":"claude-opus","vendor":"anthropic"}}
 {"ts":"2026-11-11T19:26:31.866268Z","id":"01M7616ZDT10X69FD8VV7NFP7G","actor":"claude-4f9a1c","type":"claim","scope":["src/new.ts"],"data":{"auto":true,"intent":"auto: edited"}}
-{"ts":"2026-11-11T19:26:44.650329Z","id":"01M7617BXACE3J2MJ2V3AT2T3Z","actor":"claude-billing","type":"finding","data":{"category":"gotcha","refs":[{"kind":"path","value":"src/crypto.ts"}],"summary":"META_TOKEN_ENC_KEY cannot change after the first deploy"}}
+{"ts":"2026-11-11T19:26:44.650329Z","id":"01M7617BXACE3J2MJ2V3AT2T3Z","actor":"claude-billing","type":"note","data":{"body":"@claude-4f9a1c META_TOKEN_ENC_KEY cannot change after the first deploy"}}
 {"ts":"2026-11-11T19:26:32.868603Z","id":"01M76170D44EDZ229ZRBK5XA56","actor":"claude-4f9a1c","type":"release","data":{"refs":["01M7616ZDT10X69FD8VV7NFP7G"],"result":"session ended"}}
 ```
 
@@ -19,7 +19,7 @@ The log is a JSON lines file with one event per line. comms only ever appends to
 | `ts` | string | RFC 3339 in UTC. |
 | `id` | string | ULID: 26 characters, time-ordered. |
 | `actor` | string | The name of the caller. See [Identity](#identity). |
-| `type` | string | `hello`, `claim`, `release`, `note`, `finding`, `task`, `task_edge`, `task_state` or `blocked`. |
+| `type` | string | `hello`, `claim`, `release`, `note` or `blocked`. Old logs also hold the [retired types](#retired-types). |
 | `scope` | array | Set on `claim` only. |
 | `data` | object | Fields per type, below. Every field is optional unless noted. Readers ignore fields they do not know. |
 
@@ -40,7 +40,7 @@ Ties an actor to a host agent session and records who it is.
 |---|---|
 | `agent_session` | The host's session id (`CLAUDE_CODE_SESSION_ID`, or `session_id` in a hook payload). Absent when there is none, for example under Codex. |
 | `label` | A display name. From `--label` or `COMMS_LABEL`. |
-| `vendor` | Who made the model, for example `anthropic` or `openai`. From `--vendor` or `COMMS_VENDOR`. Used to tell an independent review from a same-family one. |
+| `vendor` | Who made the model, for example `anthropic` or `openai`. From `--vendor` or `COMMS_VENDOR`. |
 | `model` | From `--model`, `COMMS_MODEL`, or the session-start payload. |
 | `hostname` | The machine name. |
 | `leader`, `base_name`, `tty` | Read for display. Written by older builds. |
@@ -51,13 +51,12 @@ start, on the first auto-claim, or on the first write under an auto-name.
 ### `claim`
 
 ```json
-{"scope": ["src/auth.ts"], "data": {"intent": "rework the session cookie", "task": "stay-signed-in"}}
+{"scope": ["src/auth.ts"], "data": {"intent": "rework the session cookie"}}
 ```
 
 | Field | Notes |
 |---|---|
 | `intent` | One line on what the holder is about to do. |
-| `task` | The task this claim works on. |
 | `agent_session` | The host session that made the claim. Absent on claims written before 0.5.0 and on calls made outside an agent session. |
 | `auto` | `true` when the pre-edit hook made the claim on a first edit. Its intent is `auto: edited`. |
 | `agent_id`, `agent_type` | On an auto-claim, copied from the hook payload when Claude Code sends them, which it does for a subagent. |
@@ -104,98 +103,20 @@ Roster changes are `release` events too:
 shown to that actor once, after its next comms command. A session briefing also
 lists notes addressed to the session from the last 24 hours.
 
-### `finding`
-
-```json
-{"data": {"category": "gotcha", "summary": "META_TOKEN_ENC_KEY cannot change after the first deploy", "refs": [{"kind": "path", "value": "src/crypto.ts"}]}}
-```
-
-`category` is `bug`, `fix`, `ship`, `decision` or `gotcha`. `summary` holds at most
-1000 characters. `refs[].kind` is free text. The usual kinds are `path`, `commit`,
-`pr`, `issue`, `doc` and `url`.
-
-### `task`
-
-Declares a task, or restates one. A restatement replaces the record. A field it
-leaves out keeps its old value, except `review`, which is turned off when absent.
-
-```json
-{"data": {"task": "stay-signed-in", "title": "Let people stay signed in after a restart", "checks": ["test"], "review": true}}
-```
-
-| Field | Notes |
-|---|---|
-| `task` | Required. The id: lowercase letters, digits and hyphens, up to 64 characters. The CLI turns case, spaces and underscores into this form. |
-| `title` | One line in plain English for a person outside the code. |
-| `checks` | Names that must be reported `pass` before `done` is accepted. A check added after `done` sends the task back to be resubmitted. |
-| `review` | `true` when a different agent must verify the task before it closes. |
-| `size` | `S`, `M` or `L`. |
-| `ref` | A reference to context kept elsewhere, such as `tracker:PROJ-1234`. comms stores it and never follows it. |
-
-### `task_edge`
-
-```json
-{"data": {"from": "stay-signed-in", "to": "login-ui", "kind": "consumes", "provides": "sessions table, uuid keys"}}
-```
-
-`kind` is `consumes` (`to` uses something `from` produces) or `sequence` (order
-only). The older kinds `interface` and `artifact` fold to `consumes`. Any other kind
-folds to `sequence`. Reworking a task puts the tasks that consume from it back in
-question and leaves the tasks that only follow it alone. An edge whose two tasks are
-not both declared is ignored, and `task edge` refuses it.
-
-### `task_state`
-
-```json
-{"data": {"task": "stay-signed-in", "state": "done", "checks": {"test": "pass"}, "notes": ["Cookie is httpOnly, because the security review asks about XSS."]}}
-```
-
-```json
-{"data": {"task": "login-ui", "state": "rejected", "findings": [{"what": "POST /session/refresh twice returns 200 both times"}]}}
-```
-
-`state` is `done`, `verified` or `rejected`. The fold checks each transition and
-records a refusal instead of trusting the writer:
-
-- `done` is refused unless every declared check is reported `pass`. Without
-  `review`, `done` closes the task.
-- `verified` is refused when the actor did the work. Two names count as the same
-  agent when they match after normalizing case, look-alike characters and a role
-  suffix, or when they share an agent session. With `acknowledged_self_review: true`
-  it is recorded and marked `self-acknowledged`.
-- `rejected` returns the task to open work. The author may reject its own work.
-
-`notes` on `done` are the author's decisions and reasons, passed on by `comms brief`.
-`notes` on `verified` say how the reviewer checked. A verification is recorded as
-`independent` when the two actors' vendors differ, `same-family` when they match,
-and `unknown` when either hello has no vendor.
-
 ### `blocked`
 
-Records a claim, a `done` or a review that comms turned down.
+Records a claim that comms turned down.
 
 ```json
 {"data": {"scope": "src/auth.ts", "intent": "take it", "holder": "claude-billing", "holder_scope": "src/auth.ts"}}
 ```
 
-A refusal on a task carries `task`, `attempted` and `reason` instead of the scope
-fields.
+### Retired types
 
-## Derived task phase
-
-The fold computes the phase from the log. It is never written.
-
-| Phase | Meaning |
-|---|---|
-| `ready` | Every task it depends on is closed, and nobody holds a claim tagged to it. |
-| `doing` | At least one agent holds a claim tagged to it. |
-| `review` | Done, waiting for a different agent to verify it. |
-| `closed` | Done without review, or verified. Only now are the tasks after it unblocked. |
-| `blocked` | A task it depends on is not closed. |
-| `cycle` | It depends on itself through its edges. The fold still finishes. |
-
-Who works on a task is read from live claims tagged with its id, so releasing the
-file takes the agent off the task.
+`finding`, `task`, `task_edge` and `task_state` were written by comms 0.5 and
+earlier. They are read from old logs and skipped, and never written. The fold
+ignores them and the `task` field on an old claim, so they change no claim and no
+session. `comms log --type finding` or `--type task` still lists them.
 
 ## Identity
 
@@ -238,7 +159,6 @@ Ownership depends on the path:
   from the same session, so parallel subagents with their own names keep off each
   other's files. The one exception is the session's own auto-claim, which a hand
   claim replaces.
-- **The review gate** treats two actors of one family as the same agent.
 
 ### Liveness markers
 
@@ -365,16 +285,17 @@ shows the repository it was started in.
 | `/` | GET | The board page. |
 | `/api/status` | GET | One project's snapshot as JSON. |
 | `/events` | GET | Server-Sent Events. Each frame is a full snapshot plus a `stamp`. |
-| `/api/history` | GET | One page of history: `{"events": [...], "next_before": "<id>"}`. Takes `actor`, `task` and `before` (an event id). At most 60 rows per page, newest first. |
+| `/api/history` | GET | One page of history: `{"events": [...], "next_before": "<id>"}`. Takes `actor` and `before` (an event id). At most 60 rows per page, newest first. Leaves out the retired types. |
 | `/map.html` | GET | The code map page. |
-| `/tasks.html` | GET | The task graph page. |
 | `/api/release` | POST | Ends one claim held by someone else. |
 
 `/api/status` has these top-level fields: `version` (the installed comms version),
 `root`, `store_key`, `generated`, `board_actor`, `frontend_build`, `projects`,
-`projects_hidden`, `claims`, `roster`, `tasks`, `task_edges`, `findings`, `notes`,
-`blocked_events`, `feed`, `counts`, `dirty`, `guard`, `alerts`,
-`code_map_available` and `map_age_seconds`. A snapshot that cannot read the log
+`projects_hidden`, `claims`, `roster`, `notes`, `blocked_events`, `feed`, `counts`,
+`dirty`, `guard`, `alerts` and `map_age_seconds`. Each claim carries `id`, `actor`,
+`scope`, `intent`, `auto`, `ts`, `idle_seconds`, `quiet`, `stolen_from` and
+`steal_reason`. Each roster entry carries `actor`, `label`, `vendor`, `model`,
+`host`, `identified`, `last_seen` and `holding`. A snapshot that cannot read the log
 returns only `error` and `generated`.
 
 `/events` checks for a change every half second and sends a frame when the log or

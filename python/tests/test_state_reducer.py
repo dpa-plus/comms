@@ -136,7 +136,7 @@ def test_the_same_events_in_any_order_give_the_same_world():
         claim("C1", "src/api/server.ts", actor="alice", secs=10, intent="charge"),
         event("H2", "hello", actor="bob", secs=20),
         claim("C2", "src/ui/App.tsx", actor="bob", secs=30),
-        event("F1", "finding", actor="bob", secs=40, summary="n+1"),
+        event("N1", "note", actor="bob", secs=40, body="n+1"),
         release("R1", ["C1"], actor="alice", secs=50, result="done"),
         claim("C3", "src/api/server.ts#refund", actor="bob", secs=60),
     ]
@@ -148,7 +148,7 @@ def test_the_same_events_in_any_order_give_the_same_world():
         got = fold(shuffled)
         assert sorted(got.claims) == sorted(baseline.claims)
         assert sorted(got.sessions) == sorted(baseline.sessions)
-        assert [f.id for f in got.findings] == [f.id for f in baseline.findings]
+        assert [n.id for n in got.notes] == [n.id for n in baseline.notes]
         assert [r.id for r in got.releases] == [r.id for r in baseline.releases]
 
 
@@ -217,21 +217,21 @@ def test_ending_a_session_hands_every_piece_of_ground_back():
     """IF THIS FAILS: the next session starts blocked by claims belonging to
     agents that no longer exist, and nobody has the claim ids to release them,
     so the repository stays locked until somebody deletes the store by hand.
-    What was FOUND has to survive the same wipe: findings are the durable output
+    What was SAID has to survive the same wipe: notes are the durable output
     of a session, while claims are only its scaffolding."""
     state = fold([
         event("H", "hello", actor="alice", secs=0),
         claim("C1", "src/a.ts", actor="alice", secs=1),
-        event("F", "finding", actor="alice", secs=2, summary="n+1 in charge()"),
+        event("N", "note", actor="alice", secs=2, body="n+1 in charge()"),
         release("R1", ["C1"], actor="alice", secs=3,
                 comms_session_end=True, reason="wrapped up"),
     ])
     assert state.claims == {}
     assert state.sessions == {}
-    assert [f.id for f in state.findings] == ["F"]
+    assert [n.id for n in state.notes] == ["N"]
     (ended,) = state.ended_comms_sessions
     assert ended.reason == "wrapped up"
-    assert (ended.claim_count, ended.finding_count) == (1, 1)
+    assert (ended.claim_count, ended.note_count) == (1, 1)
     assert ended.actors == ["alice"]
 
 

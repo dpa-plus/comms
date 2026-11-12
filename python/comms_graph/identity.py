@@ -47,6 +47,16 @@ def auto_name(st, agent_session: str) -> str:
     return name
 
 
+def base_actor(actor: str) -> str:
+    """The actor without its role suffix: ``claude-dev/review`` -> ``claude-dev``.
+
+    A leading slash is not a role suffix: ``/alice`` stays ``/alice``, because
+    an empty base would make every such name the same agent.
+    """
+    head = actor.split("/", 1)[0] if "/" in actor else actor
+    return head or actor
+
+
 def is_generic(name: str) -> bool:
     return name.casefold() in GENERIC_ACTORS and \
         os.environ.get("COMMS_ALLOW_GENERIC_ACTOR", "") != "1"

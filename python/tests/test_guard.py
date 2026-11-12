@@ -406,32 +406,13 @@ def test_check_takes_several_paths_and_blocks_if_any_is_held(tmp_path, monkeypat
     assert "b.tsx" in out and "a.tsx is claimed" not in out, out
 
 
-def test_a_title_that_reads_like_code_is_warned_about_not_refused(tmp_path, monkeypatch):
-    """IF THIS FAILS: either nothing pushes back on a title only an engineer can
-    read (reported: the positional form accepted German half-technical text in
-    silence), or a heuristic has started REFUSING titles. The rule is "a
-    non-technical reader understands it", which no regex decides, so a correct
-    title that happens to mention a file must still go through."""
-    repo = _repo(tmp_path, monkeypatch)
-
-    code, out = _cli(repo, "task", "add", "t1", "--as", "a",
-                     "--title", "Refactor toCents() in money.ts", session="sA")
-    assert code == 0, "a heuristic must never block the write"
-    assert "reads like code" in out, out
-
-    code, out = _cli(repo, "task", "add", "t2", "--as", "a",
-                     "--title", "Round money the same way everywhere", session="sA")
-    assert code == 0, out
-    assert "reads like code" not in out, out
-
-
 def test_a_refused_length_hands_back_something_that_fits(tmp_path, monkeypatch):
     """IF THIS FAILS: trimming is guesswork again. Reported: 538 characters
     refused, trimmed to 401, refused a second time for one character. Two round
-    trips for one finding, when the answer was computable at the first."""
+    trips for one note, when the answer was computable at the first."""
     repo = _repo(tmp_path, monkeypatch)
     long = "word " * 400
-    code, out = _cli(repo, "find", "decision", long, "--as", "a", session="sA")
+    code, out = _cli(repo, "note", long, "--as", "a", session="sA")
     assert code != 0, out
     assert "This fits" in out, out
     fitted = [l for l in out.splitlines() if l.strip().startswith("word")]

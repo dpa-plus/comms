@@ -43,11 +43,9 @@ TYPE_HELLO = "hello"
 TYPE_CLAIM = "claim"
 TYPE_RELEASE = "release"
 TYPE_NOTE = "note"
-TYPE_FINDING = "finding"
 
-# The task graph. A task is what should happen; an edge is the order it must
-# happen in and what the later task consumes from the earlier one; a state event
-# moves a task along its two steps: do it, then a DIFFERENT agent verifies it.
+# Written by comms 0.5 and earlier: findings and the task graph.
+TYPE_FINDING = "finding"
 TYPE_TASK = "task"
 TYPE_TASK_EDGE = "task_edge"
 TYPE_TASK_STATE = "task_state"
@@ -60,21 +58,21 @@ TYPE_TASK_STATE = "task_state"
 # prevented one left no trace.
 TYPE_BLOCKED = "blocked"
 
-# Ordered on purpose: this tuple is the single list of types this build
-# understands, so flag help, validation errors and the reader's tolerance check
-# all read from the same place. The Go port had two hand-maintained whitelists
-# in two packages and adding a type meant remembering both.
-KNOWN_TYPES: tuple[str, ...] = (
+# The types this build writes. Ordered on purpose: flag help, validation errors
+# and the fold all read from this one tuple.
+WRITTEN_TYPES: tuple[str, ...] = (
     TYPE_HELLO,
     TYPE_CLAIM,
     TYPE_RELEASE,
     TYPE_NOTE,
-    TYPE_FINDING,
-    TYPE_TASK,
-    TYPE_TASK_EDGE,
-    TYPE_TASK_STATE,
     TYPE_BLOCKED,
 )
+
+# Types older builds wrote. Read from old logs so `log` can still list them,
+# skipped by the fold, never written.
+RETIRED_TYPES: tuple[str, ...] = (TYPE_FINDING, TYPE_TASK, TYPE_TASK_EDGE, TYPE_TASK_STATE)
+
+KNOWN_TYPES: tuple[str, ...] = WRITTEN_TYPES + RETIRED_TYPES
 
 _KNOWN_TYPE_SET = frozenset(KNOWN_TYPES)
 
@@ -646,6 +644,9 @@ def append_batch(
     evs = list(events)
     if not evs:
         return
+    for ev in evs:
+        if ev.type not in WRITTEN_TYPES:
+            raise ValueError(f"event: {ev.type!r} is read from old logs, never written")
     buf = b"".join(ev.encode() for ev in evs)
 
     target = os.fspath(path)

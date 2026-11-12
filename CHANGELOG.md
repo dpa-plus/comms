@@ -6,6 +6,53 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-12
+
+comms does one job: it keeps agents that share a repository off each other's
+files. Tasks, reviews and findings were a second product. Task bookkeeping
+alone was about one in five of all comms calls agents made, and the task view
+on the board had stopped being read. This release removes all three.
+
+### Removed
+
+- `comms find`, `comms findings` and the MCP tool `comms_find`. Both commands
+  now get the short unknown-command answer.
+- Tasks: `task add`, `task edge`, `task done`, `task review`, `task list`,
+  `task show`, `next`, `brief` and `tasks`, with the review gate, task edges and
+  task phases.
+- The `--task` flag on `claim` and `release`, and the `task` argument of the MCP
+  tool `comms_claim`.
+- The task graph, task details and task views on the board, and the tasks and
+  findings in `status` and `board`.
+- The vendor comparison that labelled a review independent or same-family.
+  `hello` still records `label`, `model` and `vendor`, and the board shows them.
+
+### Changed
+
+- The board opens on who holds which files: one group per agent, each held file
+  with its intent and how long it has been held, a mark on an agent that has been
+  silent for over an hour, the changed files nobody holds, and the recent
+  activity. The code map is one click away.
+- `doc --edit` records the edit as a note instead of a finding.
+
+### Kept for one release
+
+`task` with any subcommand, `next`, `brief` and `tasks` still run. They do
+nothing, print one line saying comms no longer has tasks, and exit 0.
+
+`--task` on `claim` and `release` is ignored with one line saying so, and the
+rest of the command runs, so a claim never fails on a retired flag. `release
+--task <id>` with no path therefore releases everything you hold, as `release`
+with no path always has.
+
+The next release removes all of these.
+
+### Upgrading
+
+Old logs still load. Their task, edge, task state and finding events stay in the
+log, and `comms log --type task` or `--type finding` lists them, but nothing else
+shows them. A claim that an old build tagged with a task is held as before.
+
 ## [0.5.1] - 2026-11-12
 
 comms does one job: it keeps agents off each other's files. This release removes

@@ -7,8 +7,8 @@ routed through a fork of graphify's CLI, which is where it used to live.
 Exit status is the contract and is not uniform by accident:
 
 * **0** recorded, or the edit may proceed.
-* **1** the answer is no: somebody else holds this ground, or this is a
-  self-review. A refusal, not a failure.
+* **1** the answer is no: somebody else holds this ground. A refusal, not a
+  failure.
 * **2** it did not work: bad usage, an unreadable store, a payload that could
   not be parsed. Claude Code treats 2 as BLOCK on a PreToolUse hook, and that
   is deliberate: an edit guard that cannot tell whether an edit is safe must

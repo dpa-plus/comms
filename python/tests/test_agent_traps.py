@@ -39,22 +39,26 @@ CASES = [
     ("whoami", OK, ["whoami", "--as", "a1"], {}),
     ("task list", OK, ["task", "list", "--as", "a1"], {}),
     ("task show", OK, ["task", "show", "demo-task", "--as", "a1"], {}),
-    ("findings", OK, ["findings", "--as", "a1"], {}),
+    ("findings is gone and says so briefly", HINT, ["findings", "--as", "a1"], {}),
     ("--version", OK, ["--version"], {}),
     ("-V", OK, ["-V"], {}),
     ("claim --help is about claim", HELP, ["claim", "--help"], {"needs": "--steal", "max_lines": 30}),
-    ("task add --help lists --title", HELP, ["task", "add", "--help"],
-     {"needs": "--title", "max_lines": 30}),
     ("note of 640 characters", OK, ["note", LONG[:640], "--as", "a1"], {}),
-    ("finding of 640 characters", OK, ["find", "decision", LONG[:640], "--as", "a1"], {}),
+    ("find is gone and says so briefly", HINT, ["find", "decision", LONG[:640], "--as", "a1"], {}),
     ("task id of 40 characters", OK,
      ["task", "add", "haken-gates-planen-nicht-aufraeumen-jetzt",
       "--title", "Freeze switch stops planning only", "--as", "a1"], {}),
     ("task id with capitals and underscore", OK,
      ["task", "add", "Fix_Login-Flow", "--title", "Let people sign in again", "--as", "a1"], {}),
-    ("claim tagged to a task that does not exist", HINT,
-     ["claim", "t.txt", "--task", "no-such-task", "--intent", "x", "--as", "a1"],
-     {"needs": "demo-task"}),
+    ("task add --review still runs, with a notice", OK,
+     ["task", "add", "rev-task", "--title", "Check the totals", "--review", "--as", "a1"], {}),
+    ("task review still runs, with a notice", OK,
+     ["task", "review", "demo-task", "--pass", "--evidence", "ran it", "--as", "a2"], {}),
+    ("claim with the retired --task flag still claims", OK,
+     ["claim", "t.txt", "--task", "no-such-task", "--intent", "x", "--as", "a1"], {}),
+    ("release with the retired --task flag still releases", OK,
+     ["release", "--task", "demo-task", "--result", "done", "--as", "a1"], {}),
+    ("next still runs, with a notice", OK, ["next", "--as", "a1"], {}),
     ("check three paths", OK, ["check", "a.txt", "b.txt", "c.txt", "--as", "a1"], {}),
     ("release two scopes", OK, ["release", "a.txt", "b.txt", "--as", "a1", "--result", "done"],
      {"before": [["claim", "a.txt", "b.txt", "--intent", "x", "--as", "a1"]]}),
@@ -189,15 +193,6 @@ def test_a_claim_in_a_directory_that_does_not_exist_warns_in_one_line(tmp_path):
         "(a new directory is fine, a typo is not)."]
 
 
-def test_an_unknown_task_lists_the_open_ones_and_the_add_line(tmp_path):
-    repo, env = _setup(tmp_path, {})
-    code, text = _call(["claim", "t.txt", "--task", "demo-taks", "--intent", "x", "--as", "a1"],
-                       repo, env)
-    assert code == 2
-    assert "Did you mean demo-task?" in text and "Open tasks: demo-task" in text
-    assert 'comms-graph task add demo-taks --title "..."' in text
-
-
 def test_the_documented_global_flags_work_in_any_position(tmp_path):
     repo, env = _setup(tmp_path, {})
     before = _call(["--as", "a1", "--json", "status"], repo, env)
@@ -213,32 +208,3 @@ def test_the_python_module_entry_point_agrees(tmp_path):
     assert run.returncode == 0 and "you are @a1" in run.stdout, run.stdout + run.stderr
 
 
-def test_task_done_takes_summary_and_result_as_the_note(tmp_path, monkeypatch):
-    from comms_graph import cli, log as clog, state as cstate
-    import subprocess
-
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
-    monkeypatch.chdir(repo)
-    assert cli.main(["task", "add", "demo", "--title", "Show the demo", "--as", "a1"]) == 0
-    assert cli.main(["task", "done", "demo", "--summary", "kept the old cookie name", "--as", "a1"]) == 0
-    events = clog.read(clog.log_path(repo))
-    assert any("kept the old cookie name" in str(e.data) for e in events)
-
-
-def test_release_task_frees_only_the_claims_tagged_to_it(tmp_path, monkeypatch, capsys):
-    from comms_graph import cli
-    import subprocess
-
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
-    monkeypatch.chdir(repo)
-    assert cli.main(["task", "add", "demo", "--title", "Show the demo", "--as", "a1"]) == 0
-    assert cli.main(["claim", "a.txt", "--task", "demo", "--intent", "x", "--as", "a1"]) == 0
-    assert cli.main(["claim", "b.txt", "--intent", "y", "--as", "a1"]) == 0
-    capsys.readouterr()
-    assert cli.main(["release", "--task", "demo", "--result", "done", "--as", "a1"]) == 0
-    out = capsys.readouterr().out
-    assert "RELEASED a.txt" in out and "b.txt" not in out

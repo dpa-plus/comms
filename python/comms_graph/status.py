@@ -19,7 +19,7 @@ Three properties hold for everything in this module:
   them in opposite ways.
 * **THE LOG IS SHARED WITH THE GO BUILD.** Every data key read here is a key the
   Go build writes. Nothing is invented; where this build's reducer does not
-  carry a fact the Go one does (finding/note ``priority``, task slots), the fact
+  carry a fact the Go one does (note ``priority``, task slots), the fact
   is OMITTED rather than defaulted, because a defaulted ``"priority": false`` is
   a confident wrong answer about a message somebody marked urgent.
 """
@@ -36,12 +36,10 @@ from . import identity as _identity
 from . import log as _log
 from . import scope as _scope
 from . import state as _state
-from . import task as _task
 from .cli import (
     EXIT_ERROR,
     EXIT_OK,
     EXIT_USAGE,
-    FINDING_CATEGORIES,
     _actor,
     _err,
     _parse_flags,
@@ -59,7 +57,7 @@ STATUS_USAGE = """Usage: comms-graph status [options]
   have been prevented. Reads only; never writes.
 
   Options:
-    --since <dur>        lookback for findings and notes (default 24h)
+    --since <dur>        lookback for notes (default 24h)
     --stale-after <dur>  age past which a held claim is STALE and a silent
                          holder is flagged likely dead (default 1h)
     --json               machine-readable output
@@ -76,12 +74,11 @@ LOG_USAGE = """Usage: comms-graph log [options]
     --actor <name>       only events by this actor
     --scope <path>       only events whose scope overlaps this path
     --type a,b           only these event types ({types})
-    --category <cat>     findings only, of this category ({cats})
     --json               raw JSONL, exactly as it sits in the log
     --root <path>        repo root (default: the git root above the cwd)
 
   Exit status: 0 printed, 2 bad usage or an unreadable log.""".format(
-    types=_log.known_types(), cats=", ".join(FINDING_CATEGORIES)
+    types=_log.known_types()
 )
 
 
@@ -360,15 +357,8 @@ def _recent(items: list, cutoff: datetime, limit: int) -> list:
     return out
 
 
-def _counts_for(st: _state.State, actor: str) -> tuple[int, int]:
-    claims = sum(1 for c in st.claims.values() if c.actor == actor)
-    findings = sum(1 for f in st.findings if f.actor == actor)
-    return claims, findings
-
-
-def _sorted_tasks(st: _state.State) -> list:
-    _epoch = datetime(1, 1, 1, tzinfo=timezone.utc)
-    return sorted(st.tasks.values(), key=lambda t: (t.ts or _epoch, t.id))
+def _claims_held(st: _state.State, actor: str) -> int:
+    return sum(1 for c in st.claims.values() if c.actor == actor)
 
 
 def _markdown_slugs(directory: Path) -> list[str]:
@@ -455,9 +445,6 @@ def _emit_status_compact(st: _state.State, root: Path, flags: dict, now: datetim
 
     lines = _compact.view(st, _log.log_path(root).parent, _actor(flags, write=False),
                           now=now, stale_after=stale_after)
-    if st.tasks:
-        closed = sum(1 for t in st.tasks.values() if t.phase == _task.PHASE_CLOSED)
-        lines.append(f"tasks: {len(st.tasks) - closed} open, {closed} closed (`comms-graph next`)")
     lines.append(_compact.all_hint("status"))
     print("\n".join(lines))
 
@@ -481,7 +468,6 @@ def _emit_status_human(
     all_docs = _list_docs(root)
     sessions, omitted_sessions = _limit_head(all_sessions, 10)
     claims, omitted_claims = _limit_tail(all_claims, 50)
-    findings = _recent(st.findings, cutoff, 5)
     notes = _recent(st.notes, cutoff, 3)
     docs, omitted_docs = _limit_head(all_docs, 10)
     omitted = omitted_sessions + omitted_claims + omitted_docs
@@ -490,7 +476,7 @@ def _emit_status_human(
     if not sessions:
         print("  (none)")
     for session in sessions:
-        held, found = _counts_for(st, session.actor)
+        held = _claims_held(st, session.actor)
         role = "  leader" if session.leader else ""
         label = f" ({session.label})" if session.label else ""
         named = f'  session="{session.session_name}"' if session.session_name else ""
@@ -505,7 +491,7 @@ def _emit_status_human(
             dead = f"   ** LIKELY DEAD: holds {held}, silent {_short_age(silent)} **"
         print(
             f"  @{session.actor:<14}{label} {seen}   "
-            f"{held} claim{_plural(held)}  {found} finding{_plural(found)}"
+            f"{held} claim{_plural(held)}"
             f"{role}{named}{dead}"
         )
 
@@ -527,12 +513,6 @@ def _emit_status_human(
             f"(since {when} · {_short_age(age)}){stale}{named}"
         )
 
-    print()
-    print(f"RECENT FINDINGS (last {since_raw})")
-    if not findings:
-        print("  (none)")
-    for finding in findings:
-        print(f"  {finding.category:<9} @{finding.actor:<14} {finding.summary}")
 
     print()
     print(f"RECENT NOTES (last {since_raw})")
@@ -541,7 +521,6 @@ def _emit_status_human(
     for note in notes:
         print(f"  @{note.actor:<14} {note.body}")
 
-    _emit_task_summary(st)
     _emit_blocked_summary(st, cutoff, since_raw)
 
     if docs:
@@ -550,47 +529,6 @@ def _emit_status_human(
     if omitted:
         print()
         print(f"... {omitted} more; run `comms-graph log --since {since_raw}` for details")
-
-
-def _emit_task_summary(st: _state.State) -> None:
-    """The work graph, but only the parts somebody could act on.
-
-    A wall of blocked tasks is not status, it is noise: blocked work is a count,
-    and the things that need a person are named.
-    """
-    if not st.tasks:
-        return
-    buckets: dict[str, list] = {
-        _task.PHASE_REVIEW: [],
-        _task.PHASE_READY: [],
-        _task.PHASE_DOING: [],
-        _task.PHASE_BLOCKED: [],
-        _task.PHASE_CLOSED: [],
-        _task.PHASE_CYCLE: [],
-    }
-    for t in _sorted_tasks(st):
-        if t.phase in buckets:
-            buckets[t.phase].append(t)
-    closed = buckets[_task.PHASE_CLOSED]
-    open_count = sum(len(v) for k, v in buckets.items() if k != _task.PHASE_CLOSED)
-
-    print()
-    print(f"TASKS ({open_count} open, {len(closed)} closed)")
-    for t in buckets[_task.PHASE_REVIEW]:
-        print(f"  VERIFY  {t.id:<16} {t.title}")
-        print(f"          done by @{t.did}: needs someone else")
-    for t in buckets[_task.PHASE_READY]:
-        print(f"  READY   {t.id:<16} {t.title}")
-    for t in buckets[_task.PHASE_DOING]:
-        who = ", @".join(t.doers)
-        print(f"  DOING   {t.id:<16} {t.title}  (@{who})")
-    if buckets[_task.PHASE_BLOCKED]:
-        print(f"  {len(buckets[_task.PHASE_BLOCKED])} waiting on work that has not been verified yet")
-    for t in buckets[_task.PHASE_CYCLE]:
-        print(f"  CYCLE   {t.id:<16} depends on itself: the plan needs fixing")
-    if st.refused_task_states:
-        n = len(st.refused_task_states)
-        print(f"  {n} refused transition{_plural(n)}: see `comms-graph brief <task>`")
 
 
 def _emit_blocked_summary(st: _state.State, cutoff: datetime, since_raw: str) -> None:
@@ -610,15 +548,9 @@ def _emit_blocked_summary(st: _state.State, cutoff: datetime, since_raw: str) ->
         line += f", {recent} in the last {since_raw}"
     print(line)
     for b in st.blocked[-3:]:
-        # A refusal against a TASK: a self-review, a failing check: has no
-        # scope and no holder. Rendering it through the claim sentence printed
-        # "stopped from editing  (held by @)", which reads as a bug in comms
-        # rather than as the rule doing its job.
+        # An old log also holds refusals on tasks, which have no scope.
         if b.scope:
             print(f"  @{b.actor} was stopped from editing {b.scope} (held by @{b.holder})")
-        elif b.task:
-            why = f" ({b.reason})" if b.reason else ""
-            print(f"  @{b.actor} was refused on task {b.task}{why}")
         else:
             print(f"  @{b.actor} was refused")
 
@@ -634,10 +566,8 @@ def _emit_status_json(
     out: dict = {
         "sessions": [],
         "claims": [],
-        "findings": [],
         "notes": [],
         "docs": _list_docs(root),
-        "tasks": [],
     }
     for s in _roster(st, now - ACTIVE_WINDOW):
         row = {
@@ -666,26 +596,11 @@ def _emit_status_json(
         }
         if c.stolen_from_id:
             row["stole_id"] = c.stolen_from_id
-        if c.task:
-            row["task"] = c.task
         if c.session_id:
             row["session_id"] = c.session_id
         if c.session_name:
             row["session_name"] = c.session_name
         out["claims"].append(row)
-    for f in _recent(st.findings, cutoff, 50):
-        row = {
-            "id": f.id,
-            "actor": f.actor,
-            "category": f.category,
-            "summary": f.summary,
-            "ts": _stamp(f.ts),
-        }
-        if f.session_id:
-            row["session_id"] = f.session_id
-        if f.session_name:
-            row["session_name"] = f.session_name
-        out["findings"].append(row)
     for n in _recent(st.notes, cutoff, 50):
         row = {"id": n.id, "actor": n.actor, "body": n.body, "ts": _stamp(n.ts)}
         if n.session_id:
@@ -693,25 +608,6 @@ def _emit_status_json(
         if n.session_name:
             row["session_name"] = n.session_name
         out["notes"].append(row)
-    for t in _sorted_tasks(st):
-        row = {"id": t.id, "title": t.title, "phase": t.phase}
-        if t.size:
-            row["size"] = t.size
-        if t.doers:
-            row["doers"] = list(t.doers)
-        if t.did:
-            row["done_by"] = t.did
-        if t.verified_by:
-            row["verified_by"] = t.verified_by
-        if t.independence:
-            row["independence"] = t.independence
-        if t.rejections:
-            row["rejections"] = t.rejections
-        if t.blocked_by:
-            row["blocked_by"] = list(t.blocked_by)
-        if t.ref:
-            row["ref"] = t.ref
-        out["tasks"].append(row)
     print(json.dumps(out, indent=2))
 
 
@@ -733,12 +629,6 @@ def log_main(argv: list[str]) -> int:
 
     type_filter = _parse_type_set(flags.get("type", ""))
     if type_filter is False:
-        return EXIT_USAGE
-
-    category = (flags.get("category") or "").strip()
-    if category and category not in FINDING_CATEGORIES:
-        _err(f"error: unknown category {category!r}; choose "
-             + ", ".join(FINDING_CATEGORIES))
         return EXIT_USAGE
 
     scope_filter = None
@@ -782,14 +672,6 @@ def log_main(argv: list[str]) -> int:
             continue
         if scope_filter is not None and not _event_touches(ev, scope_filter):
             continue
-        if category:
-            # A category is a question about findings, so it excludes everything
-            # else outright rather than letting claims and notes through a filter
-            # that cannot apply to them.
-            if ev.type != _log.TYPE_FINDING:
-                continue
-            if (ev.data or {}).get("category") != category:
-                continue
         shown.append(ev)
     if limit:
         shown = shown[-limit:]
@@ -844,10 +726,10 @@ def _path_refs(data) -> list[str]:
 def _event_touches(ev, want: _scope.Scope) -> bool:
     """Whether an event's scope OR one of its path refs overlaps ``want``.
 
-    The path-ref half is not an extra: findings and notes carry their target file
-    in ``data.refs`` and have an EMPTY top-level scope, so without it
-    ``log --scope <file> --type finding``: the query an agent runs to learn a
-    file's history: returns nothing while hundreds of findings name that file.
+    The path-ref half is for old findings, which carry their target file in
+    ``data.refs`` and have an EMPTY top-level scope, so without it
+    ``log --scope <file> --type finding`` would return nothing for a file that
+    hundreds of old findings name.
     """
     for raw in list(ev.scope or []) + _path_refs(ev.data):
         try:

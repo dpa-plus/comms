@@ -92,19 +92,6 @@ def test_one_scope_twice_in_a_batch_is_refused(repo, monkeypatch):
     assert cli.main(["claim", "src/a.ts", "src/a.ts", "--intent", "dup"]) == 2
 
 
-def test_a_batch_cannot_be_used_to_share_a_task(repo, monkeypatch, capsys):
-    """One task, one agent: the rule the single-scope path enforces. A batch
-    must not be the way round it."""
-    _as(monkeypatch, "alice")
-    cli.main(["task", "add", "auth-api", "--title", "Auth"])
-    cli.main(["claim", "src/a.ts", "--task", "auth-api", "--intent", "mine"])
-    capsys.readouterr()
-    _as(monkeypatch, "bob")
-    assert cli.main(["claim", "src/b.ts", "src/c.ts",
-                     "--task", "auth-api", "--intent", "also mine"]) == 1
-    assert "one agent at a time" in capsys.readouterr().err
-
-
 def _stage(repo, *names):
     git = shutil.which("git")
     subprocess.run([git, "add", *names], cwd=repo, check=True)

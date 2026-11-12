@@ -472,7 +472,7 @@ def test_ui_closes_watcher_and_server_socket_before_process_refresh(
 
     fake_server = FakeServer()
     log_file = tmp_path / "log.jsonl"
-    monkeypatch.setattr(cli, "_task_runtime", lambda flags: (tmp_path, log_file, None))
+    monkeypatch.setattr(cli, "_runtime", lambda flags: (tmp_path, log_file, None))
     monkeypatch.setattr(server, "serve", lambda *args, **kwargs: fake_server)
     monkeypatch.setattr(runtime_refresh, "SourceCodeWatcher", FakeWatcher)
     monkeypatch.setattr(
@@ -518,7 +518,7 @@ def test_ui_closes_unstarted_real_server_when_initial_fingerprint_fails(
 
     monkeypatch.setattr(
         cli,
-        "_task_runtime",
+        "_runtime",
         lambda _flags: (tmp_path, tmp_path / "log.jsonl", None),
     )
     monkeypatch.setattr(server, "serve", capture_server)
@@ -606,7 +606,7 @@ def test_ui_refresh_shuts_down_and_closes_a_real_running_server(tmp_path, monkey
 
     monkeypatch.setattr(
         cli,
-        "_task_runtime",
+        "_runtime",
         lambda _flags: (tmp_path, tmp_path / "log.jsonl", None),
     )
     monkeypatch.setattr(server, "serve", capture_server)
@@ -730,7 +730,7 @@ def test_ui_drains_an_accepted_release_before_process_replacement(
         events.append("process-replacement")
         replacement.set()
 
-    monkeypatch.setattr(cli, "_task_runtime", lambda _flags: (repo, log_file, None))
+    monkeypatch.setattr(cli, "_runtime", lambda _flags: (repo, log_file, None))
     monkeypatch.setattr(server, "serve", capture_server)
     monkeypatch.setattr(runtime_refresh, "SourceCodeWatcher", ControlledWatcher)
     monkeypatch.setattr(runtime_refresh, "restart_current_process", record_replacement)

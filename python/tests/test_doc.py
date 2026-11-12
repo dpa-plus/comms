@@ -102,8 +102,8 @@ def _editor(tmp_path, body, monkeypatch, name="fake-editor", args=""):
     return script
 
 
-def _findings(repo):
-    return cstate.fold(clog.read(clog.log_path(repo))).findings
+def _notes(repo):
+    return cstate.fold(clog.read(clog.log_path(repo))).notes
 
 
 # ---------------------------------------------------------------------------
@@ -308,7 +308,7 @@ def test_an_editor_that_fails_leaves_the_original_exactly_as_it_was(tmp_path, mo
     assert code == 2, "an editor that failed is 'it did not work', not a refusal"
     assert (_docs(repo) / "kartenansicht-entwurf.md").read_text() == original
     assert "unchanged" in out
-    assert not _findings(repo), "nothing was decided, so nothing may be recorded"
+    assert not _notes(repo), "nothing was decided, so nothing may be recorded"
 
 
 def test_an_abandoned_first_edit_leaves_no_empty_doc_behind(tmp_path, monkeypatch):
@@ -423,11 +423,9 @@ def test_the_repo_lock_is_free_while_the_editor_is_open(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_a_saved_edit_is_recorded_the_way_the_go_build_records_it(tmp_path, monkeypatch):
-    """IF THIS FAILS: doc edits are invisible to the other build. Both builds read
-    one log, so a different category, summary or ref spelling for the same fact is
-    dropped silently by the reader that did not write it: no error, just a wiki
-    that appears never to change."""
+def test_a_saved_edit_is_recorded_as_a_note(tmp_path, monkeypatch):
+    """IF THIS FAILS: doc edits are invisible to the other agents: no error, just
+    a wiki that appears never to change."""
     repo = _repo(tmp_path, monkeypatch)
     _editor(tmp_path, 'printf "%s\\n" "ALKIS via WFS" >> "$1"', monkeypatch)
 
@@ -435,13 +433,9 @@ def test_a_saved_edit_is_recorded_the_way_the_go_build_records_it(tmp_path, monk
                      session="agent-A")
 
     assert code == 0, out
-    findings = _findings(repo)
-    assert len(findings) == 1
-    recorded = findings[0]
+    (recorded,) = _notes(repo)
     assert recorded.actor == "claude-dev"
-    assert recorded.category == "decision"
-    assert recorded.summary == "updated doc:kataster-machbarkeit"
-    assert [(r.kind, r.value) for r in recorded.refs] == [("doc", "kataster-machbarkeit")]
+    assert recorded.body == "updated doc:kataster-machbarkeit"
 
 
 def test_the_docs_are_in_the_repo_not_the_per_machine_store(tmp_path, monkeypatch):
@@ -462,7 +456,7 @@ def test_the_docs_are_in_the_repo_not_the_per_machine_store(tmp_path, monkeypatc
 def test_reading_a_doc_writes_nothing_at_all(tmp_path, monkeypatch):
     """IF THIS FAILS: `doc --list` in a hook or a loop appends an event every time.
     Reading is not a decision, and a log full of 'somebody looked' buries the
-    findings that matter."""
+    notes that matter."""
     repo = _repo(tmp_path, monkeypatch)
     _write_doc(repo, "merge-develop", "# M\n\nreason\n")
 
