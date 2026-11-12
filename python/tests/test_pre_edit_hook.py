@@ -441,3 +441,22 @@ def test_an_unreachable_store_blocks_while_an_absent_one_allows(tmp_path, monkey
     })
     code, out = _run(other, ["check", "--stdin-json"], stdin_text=virgin_payload)
     assert code == 0, f"a repo with no log must not be blocked: {out}"
+
+
+def test_the_listing_fallback_does_not_list_a_case_sensitive_directory(tmp_path, monkeypatch):
+    """Platforms without F_GETPATH took the listing path on every edit."""
+    from comms_graph import cli
+
+    repo = _repo(tmp_path, monkeypatch)
+    big = repo / "node_modules"
+    big.mkdir()
+    (big / "f00001.js").touch()
+    monkeypatch.setattr(cli, "_disk_spelling", lambda target: None)
+    monkeypatch.setattr(cli, "_case_blind_here", lambda directory: False)
+    listed = []
+    real_iterdir = type(big).iterdir
+    monkeypatch.setattr(type(big), "iterdir",
+                        lambda self: listed.append(self) or real_iterdir(self))
+    assert cli._canonical_relpath(big / "f00001.js", repo) == "node_modules/f00001.js"
+    assert listed == []
+

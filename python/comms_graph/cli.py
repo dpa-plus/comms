@@ -425,13 +425,19 @@ def _canonical_relpath(target: Path, root: Path) -> str:
             return "/".join(parts)
 
     # Fallback for platforms without F_GETPATH: read the directories, exact
-    # match always winning over a case variant.
+    # match always winning over a case variant. Only a case-blind filesystem
+    # can hold a name under another spelling, so a case-sensitive one is never
+    # listed: listing costs O(entries) on every edit.
     here = root
     out: list[str] = []
+    blind: bool | None = None
     for part in parts:
         actual = part
         try:
-            names = {e.name for e in here.iterdir()} if here.is_dir() else set()
+            if blind is None:
+                blind = _case_blind_here(here)
+            names = ({e.name for e in here.iterdir()}
+                     if blind and here.is_dir() else {part})
             if part not in names and (here / part).exists():
                 want = unicodedata.normalize("NFC", part).casefold()
                 for name in sorted(names):
