@@ -161,7 +161,13 @@ def check_edit(target: Path, *, agent_session: str, explicit: str,
         st, conflicts = _settle_locked(root, log_file, scope, rel_text, me, agent_session,
                                        payload if claiming else None)
     except BaseException:  # noqa: BLE001: a write that fails never blocks an edit
-        pass
+        # The first read may be stale by now: whoever held the lock may have
+        # claimed this file. Reading needs no lock, so look again.
+        try:
+            st = _cli._read_state(log_file)
+            conflicts = _blocking(st, scope, rel_text, root, agent_session, me)
+        except Exception:  # noqa: BLE001
+            pass
     return _answer(st, store, root, rel_text, conflicts, agent_session, me)
 
 
@@ -465,18 +471,40 @@ def briefing(st, store: Path, root: Path, actor: str, agent_session: str) -> str
 
 
 def session_end(payload: HookPayload) -> None:
+    """Release this session's auto-claims in every repository it edited.
+
+    A session started in a folder above its repositories has no repository of
+    its own, so the stores are found by the liveness marker the edit check
+    leaves in each one.
+    """
+    if not payload.session_id:
+        return
+    logs: list[Path] = []
+    root = _root_of(payload)
+    if root is not None:
+        logs.append(_log.log_path(root))
+    for entry in _log.known_stores():
+        store = Path(entry["dir"])
+        if _identity.marker(store, payload.session_id).exists():
+            logs.append(store / _log.LOG_FILENAME)
+    seen: set[Path] = set()
+    for log_file in logs:
+        if log_file in seen or not log_file.is_file():
+            continue
+        seen.add(log_file)
+        try:
+            _release_session_auto_claims(log_file, payload.session_id)
+        except Exception:  # noqa: BLE001: one store that fails must not strand the rest
+            continue
+
+
+def _release_session_auto_claims(log_file: Path, agent_session: str) -> None:
     from . import cli as _cli
 
-    root = _root_of(payload)
-    if root is None or not payload.session_id:
-        return
-    log_file = _log.log_path(root)
-    if not log_file.is_file():
-        return
     with _lock.file_lock(log_file.parent / ".lock", timeout=_HOOK_LOCK_TIMEOUT):
         st = _cli._read_state(log_file)
         by_actor: dict[str, list[str]] = {}
-        for claim in st.auto_claims_of(payload.session_id):
+        for claim in st.auto_claims_of(agent_session):
             by_actor.setdefault(claim.actor, []).append(claim.id)
         events = [_cli._tagged(st, actor, _log.TYPE_RELEASE, None,
                                {"refs": refs, "result": SESSION_END_RESULT})

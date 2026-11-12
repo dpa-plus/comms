@@ -92,3 +92,13 @@ def test_a_hooks_value_of_the_wrong_shape_is_reported_and_left_alone(hooks):
     assert "by hand" in check.command
     assert check.fixer is None
     assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("text", [
+    "comms check --stdin-json; /opt/bin/other-guard",
+    "/opt/bin/other-guard && comms-graph hook pre-edit",
+])
+def test_a_line_that_also_runs_another_program_is_left_alone(text):
+    path = _settings({"PreToolUse": [{"matcher": "Edit", "hooks": [_cmd(text)]}]})
+    doctor._fix_hooks()
+    assert text in _commands(path)

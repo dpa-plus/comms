@@ -518,6 +518,12 @@ def fold(events: Iterable[Any]) -> State:
 
         elif ev.type == "claim":
             claim = _claim_from_event(ev)
+            if claim is not None and not claim.agent_session:
+                holder = state.sessions.get(ev.actor)
+                # Claims older than 0.5.0 record no session. The one the actor was
+                # tied to when it claimed is the owner, not every session that
+                # used the name afterwards.
+                claim.agent_session = holder.agent_session if holder is not None else ""
             if claim is None:
                 continue
             # An atomic steal: taking the scope and freeing the displaced claim

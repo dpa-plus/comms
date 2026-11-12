@@ -198,25 +198,34 @@ def _check_hooks() -> Check:
 
 _PROGRAMS = frozenset({"comms", "comms-graph"})
 _SEPARATORS = frozenset({"&&", "||", ";", "|"})
+_SHELL_HELPERS = frozenset({"cd", "true", "false", "cat", "echo", "export", "test", ":"})
 
 
 def _runs_comms(command: str) -> bool:
-    """Is comms the program of some command in this line, not just a word in it?"""
+    """Is this hook line ours to remove?
+
+    Yes when comms is a program it runs and everything else on the line is a
+    shell helper. A word that mentions comms does not count. A line that also
+    runs another real program is left alone: removing it would stop that
+    program too.
+    """
     lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|")
     lexer.whitespace_split = True
     try:
         tokens = list(lexer)
     except ValueError:
         return False
+    programs: list[str] = []
     starts = True
     for token in tokens:
         if token in _SEPARATORS:
             starts = True
             continue
-        if starts and os.path.basename(token) in _PROGRAMS:
-            return True
+        if starts:
+            programs.append(os.path.basename(token))
         starts = False
-    return False
+    return (any(p in _PROGRAMS for p in programs)
+            and all(p in _PROGRAMS or p in _SHELL_HELPERS for p in programs))
 
 
 def _is_comms_hook(h: object) -> bool:

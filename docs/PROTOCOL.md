@@ -229,8 +229,9 @@ subagent cannot rename its parent.
 Ownership depends on the path:
 
 - **The edit check** (`hook pre-edit`, `check <path>`). A claim is the caller's when
-  its `agent_session` equals the caller's session. A claim with no `agent_session`
-  is the caller's when its holder is in the caller's family. Two sessions that share
+  its `agent_session` equals the caller's session. A claim written without one takes
+  the session its holder was tied to at that moment. If there was none, the claim is
+  the caller's when its holder is in the caller's family. Two sessions that share
   a name therefore still block each other.
 - **The command line** (`claim`, `release`, `status`). A claim is the caller's when
   it is held under the caller's name. A claim under another name conflicts, even
@@ -320,7 +321,7 @@ Each hook reads Claude Code's hook JSON on stdin.
 |---|---|---|
 | `hook session-start` | `SessionStart` | Always 0. Prints a briefing of at most 900 characters in a repository with a store, and nothing elsewhere. |
 | `hook pre-edit` | `PreToolUse` for `Edit\|Write\|NotebookEdit` | 2 blocks the edit and the reason goes to stderr. 0 allows it. |
-| `hook session-end` | `SessionEnd` | Always 0. Releases the auto-claims this session made, with result `session ended`. |
+| `hook session-end` | `SessionEnd` | Always 0. Releases the auto-claims this session made, in every repository it edited, with result `session ended`. |
 
 `hook pre-edit` reads `tool_input.file_path` or `tool_input.notebook_path`. It
 exits 2 when:
@@ -333,7 +334,9 @@ It exits 0 when the file is outside a repository, when the repository has no sto
 and when the payload names no file. On an allowed first edit of a file the session
 does not hold yet, it appends an auto-claim, taking the lock for at most one second.
 It checks again under the lock: if another session claimed the file in the meantime,
-the edit is blocked. If the write itself fails, the edit is still allowed.
+the edit is blocked. If the lock cannot be taken or the write fails, the hook reads
+the log once more without the lock: a claim another session recorded in the meantime
+blocks, and otherwise the edit is allowed.
 
 An auto-claim that blocks someone gives way when it is at least five minutes old and
 its file is tracked with no change in `git status --porcelain`, in every worktree of

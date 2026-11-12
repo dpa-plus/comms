@@ -51,7 +51,8 @@ every check passes and 1 when something still needs fixing.
 - It writes three hooks into `~/.claude/settings.json`. If the hooks in that file
   are not in a shape it can rewrite safely, it says so and leaves the file alone.
   Otherwise it saves a timestamped
-  backup first, keeps every hook that is not a comms hook, and replaces old comms
+  backup first, keeps every hook that is not a comms hook, leaves alone a hook line
+  that runs comms together with another program, and replaces old comms
   hooks:
   - `SessionStart` runs `comms-graph hook session-start`.
   - `PreToolUse`, for `Edit|Write|NotebookEdit`, runs `comms-graph hook pre-edit`.
