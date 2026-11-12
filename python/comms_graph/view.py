@@ -12,7 +12,7 @@ That restriction is not politeness, it is the measured result. Deriving ORDER
 from the map. A changes something B leans on, therefore A first: was checked
 against three months of real changes on two projects and was right about as often
 as a coin flip; on one project the real work went the other way round most of the
-time. See ``docs/COMMS.md``. A picture is far more persuasive than a line of
+time. See ``the README (the task graph and the code map)``. A picture is far more persuasive than a line of
 text, so a picture that implied order would be the most effective way possible to
 ship a coin flip as a fact. Hence: rings, never arrows the reader could read as
 sequence, and never a verdict.
@@ -562,7 +562,7 @@ const COMMS_DREW = typeof window.vis !== 'undefined' && !!commsNet();
 // --- marks -----------------------------------------------------------------
 // A ring, never an arrow. An arrow between two people's work would read as
 // sequence, and sequence derived from this map was measured at coin-flip
-// accuracy and cut (docs/COMMS.md).
+// accuracy and cut (the README (the task graph and the code map)).
 //
 // afterDrawing hands over a ctx already transformed into NETWORK coordinates,
 // so a line width or a font size written here is in world units and shrinks

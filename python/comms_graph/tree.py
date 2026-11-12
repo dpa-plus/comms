@@ -220,6 +220,85 @@ def _covers(claim_scope: Any, path: str) -> bool:
         return False
 
 
+def _release_path_index(releases: list[Any]):
+    """Index literal release paths once; keep wildcard scopes for exact matching.
+
+    Dirty-tree attribution used to compare every changed path with every scope
+    in the full release history. Real stores have thousands of releases and
+    hundreds of changed paths, so that quadratic pass could hold the dashboard
+    for seconds before its first event arrived.
+
+    For literal paths, ``paths_overlap`` means equality or an ancestor/child
+    relationship (either side may name a directory). ``literal`` answers the
+    ancestor half and ``subtree`` the child half. Wildcards retain the original
+    matcher because reducing their intersection rules to prefixes would change
+    which release is credited.
+    """
+    literal: dict[str, tuple[int, Any]] = {}
+    subtree: dict[str, tuple[int, Any]] = {}
+    wildcard: list[tuple[int, Any, Any]] = []
+    ordered: list[tuple[int, Any, Any]] = []
+
+    for sequence, rel in enumerate(releases):
+        for raw_scope in rel.scopes or []:
+            try:
+                path = _scope_path(raw_scope)
+            except _scope.ScopeError:
+                # Same outcome as _covers(): an unreadable historic scope does
+                # not attribute any current file.
+                continue
+            ordered.append((sequence, rel, raw_scope))
+            if "*" in path:
+                wildcard.append((sequence, rel, raw_scope))
+                continue
+
+            parts = [part for part in path.split("/") if part]
+            if not parts:
+                continue
+            canonical = "/".join(parts)
+            literal[canonical] = (sequence, rel)
+            for end in range(1, len(parts) + 1):
+                subtree["/".join(parts[:end])] = (sequence, rel)
+    return literal, subtree, wildcard, ordered
+
+
+def _latest_release_for_path(path: str, literal, subtree, wildcard, ordered):
+    """Return the newest release whose scope covers one dirty path."""
+    if "*" in path:
+        # Git paths may legally contain a literal star. paths_overlap has always
+        # interpreted both arguments as patterns, so preserve that existing
+        # (slightly surprising) answer instead of sending it through the prefix
+        # fast path, which treats the changed path as concrete.
+        for _sequence, rel, raw_scope in reversed(ordered):
+            if _covers(raw_scope, path):
+                return rel
+        return None
+
+    parts = [part for part in path.split("/") if part]
+    canonical = "/".join(parts)
+    best = subtree.get(canonical)
+    best_sequence = best[0] if best is not None else -1
+
+    # A literal release on any parent covers the changed child. Exact paths are
+    # included and harmlessly considered twice; sequence comparison keeps the
+    # result stable.
+    for end in range(1, len(parts) + 1):
+        candidate = literal.get("/".join(parts[:end]))
+        if candidate is not None and candidate[0] > best_sequence:
+            best = candidate
+            best_sequence = candidate[0]
+
+    # Newest first, matching the old "last chronological match wins" rule.
+    # Once entries are older than a literal winner, none can replace it.
+    for sequence, rel, raw_scope in reversed(wildcard):
+        if sequence <= best_sequence:
+            break
+        if _covers(raw_scope, path):
+            best = (sequence, rel)
+            break
+    return best[1] if best is not None else None
+
+
 def attribute(report: TreeReport, state: Any) -> TreeReport:
     """Say who the log knows about for each changed path, and nothing more.
 
@@ -232,6 +311,8 @@ def attribute(report: TreeReport, state: Any) -> TreeReport:
 
     claims = list(getattr(state, "claims", {}).values())
     releases = list(getattr(state, "releases", []) or [])
+    (literal_releases, release_subtrees,
+     wildcard_releases, ordered_releases) = _release_path_index(releases)
 
     out: list[Attributed] = []
     for a in report.changes:
@@ -241,11 +322,12 @@ def attribute(report: TreeReport, state: Any) -> TreeReport:
             out.append(Attributed(change=a.change, actor=holder.actor, basis="held",
                                   intent=getattr(holder, "intent", "") or ""))
             continue
-        # Most recent first: releases is chronological.
-        prior = None
-        for rel in releases:
-            if any(_covers(s, path) for s in (rel.scopes or [])):
-                prior = rel
+        # Releases are chronological; the index retains their sequence so the
+        # latest matching literal or wildcard scope still wins.
+        prior = _latest_release_for_path(
+            path, literal_releases, release_subtrees,
+            wildcard_releases, ordered_releases,
+        )
         if prior is not None:
             # original_actor is who HELD it. On an arbitrated release the
             # `actor` field is whoever took it away, and naming them as the

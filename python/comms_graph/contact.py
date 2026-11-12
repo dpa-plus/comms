@@ -9,7 +9,7 @@ against three months of real changes on two projects and was right about as ofte
 as a coin flip: on one project the real work went the other way round most of the
 time. Shipping that as a blocker would have had the board confidently telling
 people to wait for no reason, and they would have stopped believing it within a
-day. So there is no ordering here, and no blocking. See ``docs/COMMS.md``.
+day. So there is no ordering here, and no blocking. See ``the README (the task graph and the code map)``.
 
 WHAT IS LEFT, AND WHY IT IS WORTH HAVING. You say what you are about to work on
 and immediately find out (a) whether anyone else is standing on the same ground

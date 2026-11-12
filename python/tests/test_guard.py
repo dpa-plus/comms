@@ -394,15 +394,16 @@ def test_an_amend_in_a_repo_nobody_holds_anything_in_is_untouched(tmp_path, monk
     assert done.returncode == 0, (done.stdout + done.stderr).decode()
 
 
-def test_check_says_how_many_paths_it_got_rather_than_none(tmp_path, monkeypatch):
-    """IF THIS FAILS: `comms-graph check a b c` answers "check needs a path",
-    which reads as "you gave none" and sends a reader to --help looking for a
-    flag that was never missing."""
+def test_check_takes_several_paths_and_blocks_if_any_is_held(tmp_path, monkeypatch):
+    """IF THIS FAILS: `comms-graph check a b c` is refused as "one path at a
+    time" again, which agents typed constantly."""
     repo = _repo(tmp_path, monkeypatch)
-    code, out = _cli(repo, "check", "a.tsx", "b.tsx", "c.json")
-    assert code != 0, out
-    assert "you gave 3" in out, out
-    assert "one path at a time" in out, out
+    code, out = _cli(repo, "check", "a.tsx", "b.tsx", "c.json", "--as", "me-a")
+    assert code == 0, out
+    assert _cli(repo, "claim", "b.tsx", "--as", "other", "--intent", "x", session="sO")[0] == 0
+    code, out = _cli(repo, "check", "a.tsx", "b.tsx", "c.json", "--as", "me-a")
+    assert code == 2, out
+    assert "b.tsx" in out and "a.tsx is claimed" not in out, out
 
 
 def test_a_title_that_reads_like_code_is_warned_about_not_refused(tmp_path, monkeypatch):
@@ -429,10 +430,10 @@ def test_a_refused_length_hands_back_something_that_fits(tmp_path, monkeypatch):
     refused, trimmed to 401, refused a second time for one character. Two round
     trips for one finding, when the answer was computable at the first."""
     repo = _repo(tmp_path, monkeypatch)
-    long = "word " * 200
+    long = "word " * 400
     code, out = _cli(repo, "find", "decision", long, "--as", "a", session="sA")
     assert code != 0, out
     assert "This fits" in out, out
     fitted = [l for l in out.splitlines() if l.strip().startswith("word")]
     assert fitted, out
-    assert len(fitted[-1].strip()) <= 400, f"the suggestion is itself over the cap: {len(fitted[-1].strip())}"
+    assert len(fitted[-1].strip()) <= 1000, f"the suggestion is itself over the cap: {len(fitted[-1].strip())}"

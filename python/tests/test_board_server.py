@@ -12,9 +12,11 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import tempfile
 import threading
 import urllib.error
 import urllib.request
+from urllib.parse import quote
 
 import pytest
 
@@ -79,6 +81,165 @@ def test_the_page_ships_usable_css_and_script(board):
     assert "EventSource" in body
 
 
+def test_page_and_snapshots_identify_the_exact_frontend_build(board, monkeypatch):
+    """A tab and every pushed snapshot must name their in-memory page build."""
+    repo, log_file, _base = board
+    first = cserver.Board(repo, log_file)
+    first_snapshot = first.snapshot()
+    first_token = first_snapshot["frontend_build"]
+
+    assert first_token
+    assert f'var PAGE_BUILD = "{first_token}";' in first.page()
+
+    changed_template = cserver._PAGE.replace(
+        "<title>comms</title>",
+        "<title>comms next build</title>",
+        1,
+    )
+    assert changed_template != cserver._PAGE
+    monkeypatch.setattr(cserver, "_PAGE", changed_template)
+    changed = cserver.Board(repo, log_file)
+    changed_snapshot = changed.snapshot()
+    changed_token = changed_snapshot["frontend_build"]
+
+    assert changed_token != first_token
+    assert f'var PAGE_BUILD = "{changed_token}";' in changed.page()
+
+
+def test_open_page_reloads_once_when_stream_reconnects_to_a_new_build(
+    board, monkeypatch
+):
+    """A live old document must replace itself once, not render new-build data."""
+    import tempfile
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed; cannot exercise the served page script")
+
+    repo, log_file, _base = board
+    loaded = cserver.Board(repo, log_file)
+    changed_template = cserver._PAGE.replace(
+        "<title>comms</title>",
+        "<title>comms next build</title>",
+        1,
+    )
+    monkeypatch.setattr(cserver, "_PAGE", changed_template)
+    reconnected = cserver.Board(repo, log_file)
+    assert loaded.frontend_build != reconnected.frontend_build
+
+    page = loaded.page()
+    script = page.split("<script>", 1)[1].split("</script>", 1)[0]
+    snapshots = [loaded.snapshot(), reconnected.snapshot(), reconnected.snapshot()]
+    harness = r'''
+const elements = {};
+function fakeElement() {
+  return {
+    innerHTML: "", textContent: "", value: "", hidden: false,
+    disabled: false, src: "", scrollTop: 0, scrollHeight: 0, clientHeight: 0,
+    classList: {add() {}, remove() {}, toggle() {}, contains() { return false; }},
+    addEventListener() {}, getAttribute() { return ""; }, setAttribute() {},
+    querySelector() { return null; }, querySelectorAll() { return []; },
+    closest() { return null; }
+  };
+}
+const document = {
+  documentElement: fakeElement(),
+  getElementById(id) { return elements[id] || (elements[id] = fakeElement()); },
+  addEventListener() {}
+};
+let reloads = 0;
+let closes = 0;
+let source = null;
+const location = {search: "", reload() { reloads += 1; }};
+const window = {
+  location: location, prompt() { return null; },
+  addEventListener() {}, dispatchEvent() {}, ResizeObserver: null
+};
+const localStorage = {getItem() { return null; }, setItem() {}};
+const history = {replaceState() {}};
+function EventSource() {
+  source = this;
+  this.close = function () { closes += 1; };
+}
+function alert() {}
+function setInterval() {}
+function setTimeout() {}
+'''
+    exercise = (
+        "\nconst snapshots = " + json.dumps(snapshots) + ";\n"
+        "snapshots.forEach(function (snapshot) {\n"
+        "  source.onmessage({data: JSON.stringify(snapshot)});\n"
+        "});\n"
+        "process.stdout.write(JSON.stringify({reloads: reloads, closes: closes, "
+        "renderedBuild: D && D.frontend_build}));\n"
+    )
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as fh:
+        fh.write(harness + script + exercise)
+        path = fh.name
+    out = subprocess.run([node, path], capture_output=True, text=True)
+
+    assert out.returncode == 0, out.stderr
+    result = json.loads(out.stdout)
+    assert result == {
+        "reloads": 1,
+        "closes": 1,
+        "renderedBuild": loaded.frontend_build,
+    }
+
+
+def test_server_shutdown_ends_open_event_streams_within_a_bound(tmp_path, monkeypatch):
+    """An all-day SSE tab must close promptly instead of blocking request drain."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    log_file = clog.log_path(repo)
+    httpd = cserver.serve(repo, log_file, port=0)
+    serving = threading.Thread(target=httpd.serve_forever, daemon=True)
+    serving.start()
+    response = urllib.request.urlopen(
+        f"http://127.0.0.1:{httpd.server_address[1]}/events",
+        timeout=2,
+    )
+    assert response.readline().startswith(b"data: ")
+
+    stream_ended = threading.Event()
+
+    def consume_to_eof():
+        try:
+            response.read()
+        except (OSError, ValueError):
+            # RED cleanup can close the response while this daemon reader is
+            # blocked. The assertion below distinguishes that rescue from the
+            # server ending the stream before cleanup begins.
+            pass
+        finally:
+            stream_ended.set()
+
+    consumer = threading.Thread(target=consume_to_eof, daemon=True)
+    consumer.start()
+    shutdown_done = threading.Event()
+
+    def stop_server():
+        httpd.shutdown()
+        httpd.server_close()
+        shutdown_done.set()
+
+    stopper = threading.Thread(target=stop_server, daemon=True)
+    stopper.start()
+    try:
+        assert shutdown_done.wait(1.5), "server shutdown exceeded its SSE drain bound"
+        assert stream_ended.wait(0.25), "the open SSE handler survived server shutdown"
+    finally:
+        response.close()
+        if not shutdown_done.is_set():
+            httpd.shutdown()
+            httpd.server_close()
+        stopper.join(2.0)
+        serving.join(2.0)
+        consumer.join(2.0)
+
+
 def test_an_unreadable_log_is_reported_rather_than_blanking_the_board(board):
     """A board that vanishes when something is wrong tells you nothing. One
     that says what is wrong tells you where to look."""
@@ -98,6 +259,35 @@ def test_a_missing_code_map_says_how_to_build_one(board):
     status, body = _get(base + "/map.html")
     assert status == 200
     assert "graphify extract" in body
+
+
+def test_a_week_old_code_map_is_an_alert_not_a_blank_board(board):
+    """IF THIS FAILS: every repo whose map is more than a day old has no board.
+
+    That is how it shipped. The stale-map alert was appended to a list created
+    a hundred lines further down, so on any such repo the snapshot raised on
+    an unbound name, /api/status answered nothing, and the page sat empty
+    with the traceback in a log nobody was watching. The tests never saw it:
+    their map is fresh or absent. This one is eight days old.
+    """
+    import os
+    import time
+
+    repo, log_file, base = board
+    out = repo / "graphify-out"
+    out.mkdir()
+    graph = out / "graph.json"
+    graph.write_text(json.dumps({"nodes": [], "edges": []}))
+    week_ago = time.time() - 8 * 86400
+    os.utime(graph, (week_ago, week_ago))
+
+    status, body = _get(base + "/api/status")
+    assert status == 200
+    snap = json.loads(body)
+    assert "error" not in snap, snap.get("error")
+    assert snap["code_map_available"] is True
+    kinds = [a.get("kind") for a in snap["alerts"]]
+    assert "stale-map" in kinds, f"no stale-map alert, only {kinds}"
 
 
 def test_the_task_frame_renders_with_no_tasks(board):
@@ -247,6 +437,35 @@ def test_the_board_names_a_dependency_loop(board):
     assert "x" in cyc["text"] and "y" in cyc["text"], cyc
 
 
+def test_snapshot_preserves_every_declared_task_edge_for_the_dashboard(board):
+    """The main graph needs the recorded plan, not only today's blockers.
+
+    ``blocked_by`` is derived from incomplete predecessors and therefore drops
+    an edge as soon as its predecessor closes.  The dashboard must still show
+    the edge that was actually declared, with its direction and explanation.
+    """
+    repo, log_file, _base = board
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    events = [
+        _at(0, "task", "planner", 5, {"task": "api", "title": "Build the API"}),
+        _at(0, "task", "planner", 4, {"task": "ui", "title": "Connect the interface"}),
+        _at(0, "task_edge", "planner", 3, {
+            "from": "api", "to": "ui", "kind": "consumes", "provides": "stable schema",
+        }),
+    ]
+    events.sort(key=lambda event: event.ts)
+    with open(log_file, "wb") as fh:
+        for event in events:
+            fh.write(event.encode())
+
+    snap = cserver._snapshot(repo, log_file)
+
+    assert snap["task_edges"] == [{
+        "from": "api", "to": "ui", "kind": "consumes", "provides": "stable schema",
+    }]
+    assert snap["code_map_available"] is False
+
+
 def test_a_quiet_board_says_so_rather_than_showing_nothing(board):
     """No alerts must be a statement, not an absence: the reader has to be able
     to tell "nothing is wrong" from "the board did not load"."""
@@ -357,6 +576,141 @@ def test_the_graphs_cost_nothing_until_somebody_asks_for_them(board):
     assert "src=" not in frame, ("a graph loads on every page view: " + frame)
     assert "/tasks.html" in body and "/map.html" in body
     assert 'id="gTasks"' in body and 'id="gMap"' in body
+
+
+def _exercise_graph_clicks(board, initial_search, actions):
+    """Run the served page script and click its real graph controls."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed; cannot exercise the served page script")
+
+    _repo, _log_file, base = board
+    _, body = _get(base + "/")
+    script = body.split("<script>", 1)[1].split("</script>", 1)[0]
+    harness = r'''
+const elements = {};
+const frameLoads = [];
+function fakeElement(id) {
+  const handlers = {};
+  const element = {
+    innerHTML: "", textContent: "", value: "", hidden: false,
+    disabled: false, scrollTop: 0, scrollHeight: 0, clientHeight: 0,
+    classList: {add() {}, remove() {}, toggle() {}, contains() { return false; }},
+    addEventListener(type, handler) {
+      (handlers[type] || (handlers[type] = [])).push(handler);
+    },
+    click() {
+      (handlers.click || []).forEach(function (handler) {
+        handler({target: element});
+      });
+    },
+    getAttribute() { return ""; }, setAttribute() {},
+    querySelector() { return null; }, querySelectorAll() { return []; },
+    closest() { return null; }
+  };
+  let src = "";
+  Object.defineProperty(element, "src", {
+    get() { return src; },
+    set(value) {
+      src = String(value);
+      if (id === "dagFrame") frameLoads.push(src);
+    }
+  });
+  return element;
+}
+const document = {
+  documentElement: fakeElement("documentElement"),
+  getElementById(id) { return elements[id] || (elements[id] = fakeElement(id)); },
+  addEventListener() {}
+};
+const location = {search: "", reload() {}};
+const window = {
+  location: location, prompt() { return null; },
+  addEventListener() {}, dispatchEvent() {}, ResizeObserver: null
+};
+const localStorage = {getItem() { return null; }, setItem() {}};
+const history = {replaceState() {}};
+function EventSource() {}
+function alert() {}
+function setInterval() {}
+function setTimeout() {}
+'''
+    exercise = (
+        "\nlocation.search = " + json.dumps(initial_search) + ";\n"
+        "const loadsBeforeOpening = frameLoads.slice();\n"
+        "const graphActions = " + json.dumps(actions) + ";\n"
+        "graphActions.forEach(function (action) {\n"
+        "  if (Object.prototype.hasOwnProperty.call(action, 'search')) {\n"
+        "    location.search = action.search;\n"
+        "  } else {\n"
+        "    elements[action.click].click();\n"
+        "  }\n"
+        "});\n"
+        "process.stdout.write(JSON.stringify({\n"
+        "  before: loadsBeforeOpening, loads: frameLoads\n"
+        "}));\n"
+    )
+    with tempfile.NamedTemporaryFile("w", suffix=".js") as fh:
+        fh.write(harness + script + exercise)
+        fh.flush()
+        out = subprocess.run([node, fh.name], capture_output=True, text=True)
+
+    assert out.returncode == 0, out.stderr
+    return json.loads(out.stdout)
+
+
+def test_graph_tabs_forward_only_the_encoded_selected_store_and_cache_reopens(board):
+    store = "repo / one&actor=intruder?view=all"
+    encoded = quote(store, safe="")
+    result = _exercise_graph_clicks(
+        board,
+        "?actor=viewer&store=" + encoded + "&panel=activity",
+        [
+            {"click": "dagBtn"},
+            {"click": "dagClose"},
+            {"click": "gTasks"},
+            {"click": "gMap"},
+            {"click": "dagClose"},
+            {"click": "gMap"},
+        ],
+    )
+
+    assert result["before"] == [], "a graph navigated before it was opened"
+    assert result["loads"] == [
+        "/tasks.html?store=" + encoded,
+        "/map.html?store=" + encoded,
+    ]
+
+
+def test_graph_tabs_keep_default_project_urls_when_no_store_is_selected(board):
+    result = _exercise_graph_clicks(
+        board,
+        "?actor=viewer&panel=activity",
+        [{"click": "gTasks"}, {"click": "gMap"}],
+    )
+
+    assert result["before"] == []
+    assert result["loads"] == ["/tasks.html", "/map.html"]
+
+
+def test_reopening_a_graph_after_store_changes_loads_the_new_project(board):
+    result = _exercise_graph_clicks(
+        board,
+        "?store=first-project&actor=alice",
+        [
+            {"click": "gTasks"},
+            {"click": "dagClose"},
+            {"click": "gTasks"},
+            {"search": "?actor=bob&store=second-project"},
+            {"click": "dagClose"},
+            {"click": "gTasks"},
+        ],
+    )
+
+    assert result["loads"] == [
+        "/tasks.html?store=first-project",
+        "/tasks.html?store=second-project",
+    ]
 
 
 
@@ -524,7 +878,8 @@ def test_the_board_refuses_a_release_with_no_reason(board, monkeypatch):
 
 def test_a_board_with_no_actor_cannot_release_at_all(board, monkeypatch):
     """A release with no author is worse than no release: the ground is gone and
-    the log cannot say who took it."""
+    the log cannot say who took it. Neither the process nor the request names
+    anyone here, so it must still refuse, and the claim must still be held."""
     import urllib.error
     import urllib.request
 
@@ -534,10 +889,90 @@ def test_a_board_with_no_actor_cannot_release_at_all(board, monkeypatch):
     req = urllib.request.Request(
         base + "/api/release", method="POST",
         headers={"Content-Type": "application/json"},
-        data=json.dumps({"id": cid, "reason": "why not"}).encode())
+        data=json.dumps({"id": cid, "reason": "why not", "actor": " @ "}).encode())
     with pytest.raises(urllib.error.HTTPError) as e:
         urllib.request.urlopen(req, timeout=20)
     assert e.value.code == 403
+    from comms_graph import state as cstate
+    st = cstate.fold(clog.read(log_file))
+    assert cid in {c.id for c in st.claims.values()}, "refused, yet the claim is gone"
+
+
+def test_the_board_takes_the_releasers_name_from_the_request(board, monkeypatch):
+    """IF THIS FAILS: a board started without COMMS_ACTOR cannot free anything.
+
+    That is how it shipped: the author came from the server process alone, so a
+    board launched by an app or a plain `comms-graph ui` answered every "Free
+    all" with 403, once per claim. The person clicking is the one making the
+    judgement, so the page asks for their name and sends it. It is recorded
+    the way `release --force` records it: under THEIR name, with the holder as
+    original_actor and them as arbitrator, never signed as the holder.
+    """
+    import urllib.request
+
+    repo, log_file, base = board
+    monkeypatch.delenv("COMMS_ACTOR", raising=False)
+    cid = _claim_as(repo, log_file, "alice", "src/a.py")
+
+    _, status = _get(base + "/api/status")
+    assert json.loads(status)["board_actor"] == "", (
+        "the page cannot tell it has to ask for a name")
+
+    req = urllib.request.Request(
+        base + "/api/release", method="POST",
+        headers={"Content-Type": "application/json"},
+        data=json.dumps({"id": cid, "reason": "session ended",
+                         "actor": "@human-eli"}).encode())
+    with urllib.request.urlopen(req, timeout=20) as r:
+        body = json.loads(r.read())
+    assert body["ok"] and body["was"] == "alice"
+
+    from comms_graph import state as cstate
+    st = cstate.fold(clog.read(log_file))
+    assert cid not in {c.id for c in st.claims.values()}, "the claim is still held"
+    rel = [e for e in clog.read(log_file) if e.type == clog.TYPE_RELEASE][-1]
+    assert rel.actor == "human-eli", "the @ is display, never identity"
+    assert rel.data.get("original_actor") == "alice"
+    assert rel.data.get("arbitrator") == "human-eli"
+    assert rel.data.get("via") == "board"
+    folded = st.releases[-1]
+    assert folded.arbitrator == "human-eli" and folded.original_actor == "alice", (
+        "the fold shows 'they finished' where it should show 'somebody took it off them'")
+
+
+def test_a_process_actor_is_the_fallback_and_is_announced(board, monkeypatch):
+    """A board started WITH COMMS_ACTOR keeps signing as itself when the request
+    names nobody, and says so in the snapshot so the page does not ask."""
+    import urllib.request
+
+    repo, log_file, base = board
+    monkeypatch.setenv("COMMS_ACTOR", "@human-eli")
+    cid = _claim_as(repo, log_file, "alice", "src/a.py")
+    _, status = _get(base + "/api/status")
+    assert json.loads(status)["board_actor"] == "human-eli"
+    req = urllib.request.Request(
+        base + "/api/release", method="POST",
+        headers={"Content-Type": "application/json"},
+        data=json.dumps({"id": cid, "reason": "session ended", "actor": ""}).encode())
+    with urllib.request.urlopen(req, timeout=20) as r:
+        assert json.loads(r.read())["ok"]
+    rel = [e for e in clog.read(log_file) if e.type == clog.TYPE_RELEASE][-1]
+    assert rel.actor == "human-eli"
+
+
+def test_the_page_asks_who_is_at_the_keyboard_and_sends_it(board):
+    """The server side is only half of it. The page has to ask, remember, and
+    put the name in the request. Each confirmation now targets exactly one
+    hold, so a refusal stays in that form rather than repeating per file."""
+    repo, log_file, base = board
+    _, body = _get(base + "/")
+    js = body.split("<script>", 1)[1].split("</script>", 1)[0]
+    assert "D.board_actor" in js, "the page never checks whether the server can sign"
+    assert 'localStorage.getItem("comms.actor")' in js, "the name is not remembered"
+    assert "actor: me" in js, "the name never reaches the request"
+    assert "id: pending.id" in js, "the confirmed hold does not reach the request"
+    assert 'id="releaseActor"' in body and 'id="releaseReason"' in body
+    assert 'id="releaseError" role="alert"' in body, "refusals have no inline home"
 
 
 def test_the_board_serves_no_other_write(board):

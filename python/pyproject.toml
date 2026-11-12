@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "comms-graph"
-version = "0.1.0"
+dynamic = ["version"]
 description = "comms rebuilt on graphify: claims, a task graph with a review gate, and a board for the person watching"
 # 3.11, not 3.10: the packaging test reads pyproject with `tomllib`, which is
 # 3.11+. Claiming a floor no job ever exercises is how a version claim quietly
@@ -25,17 +25,17 @@ dependencies = ["graphifyy>=0.9.47", "networkx>=3.0"]
 dev = ["pytest>=7.0", "build>=1.0"]
 
 [project.scripts]
-# NOT `comms` — that name belongs to the Go binary in this same repo, which is
-# what the installed PreToolUse hook still runs. The two coexist deliberately:
-# they share one store and read each other's events, so switching is a one-line
-# edit and is reversible.
 comms-graph = "comms_graph.__main__:main"
+comms = "comms_graph.__main__:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "comms_graph.__version__"}
 
 [tool.setuptools.packages.find]
 include = ["comms_graph*"]
 
 [tool.setuptools.package-data]
-comms_graph = ["instructions.md"]
+comms_graph = ["instructions.md", "data/using-comms/SKILL.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,176 +1,190 @@
-# Design notes
+# Why comms is built this way
 
-## Why this shape
-
-`comms` is the third generation of multi-agent coordination at DPA+. The first two failed in different ways; this design is the synthesis.
-
-### What we kept
-
-- **Concept of agent identity** (from `mcp-agent-mail`). Without it, conflict detection is impossible.
-- **Markdown docs for shared knowledge** (from the `COMMS.md` era). Letting agents write to a wiki turned out to be valuable.
-- **Append-only log** (from both). Easy to reason about, easy to recover, easy to grep.
-
-### What we cut
-
-- **Severity ladders, threaded inboxes, registration tokens, deputies**: `mcp-agent-mail` had all of these. They added ceremony that agents kept skipping.
-- **An MCP server**: cut for the same reason, and later *reversed*. See below.
-- **A single unbounded markdown file**: `COMMS.md` grew to 1632 lines, had no targeted reads, and iCloud forked it on concurrent writes.
-- **Heartbeats and TTLs**: agents don't have a sense of time, so claims would expire mid-session. We replaced this with "user arbitrates dead sessions" (see below).
-
-### What we cut and then brought back
-
-**The MCP server.** It was cut with the rest of `mcp-agent-mail`'s apparatus, on
-the grounds that it was ceremony agents skipped. The ceremony judgement was
-right. The transport judgement was wrong, and the log says so: across 4,356 real
-claims exactly **one** carried a task. Not because the task graph was broken:
-because the instruction to use it lived in a skill that forbids auto-triggering
-and only loads when a human types its name. A CLI an agent has to be told to run
-loses to a tool sitting in its tool list every turn.
-
-`comms mcp` is therefore the same protocol with none of what was actually
-objectionable: six verbs mapping one-to-one onto existing commands, no
-registration, no inbox, no severity ladder. It speaks JSON-RPC over stdio with no
-SDK, because the subset a tool server needs is small and stable and comms would
-rather own 300 lines than carry a dependency.
-
-One thing had to change underneath it. `COMMS_ACTOR` is per process, and an MCP
-server is one long-lived process that may act for several agents, so every tool
-takes an `actor` argument and `Open` accepts a per-request override. The
-environment variable remains the default.
-
-## Key decisions
-
-### Per-session actors, not per-user actors
-
-If Claude, Codex, and the human shell all run as `$COMMS_ACTOR=eli`, `comms check` treats every other live agent's claim as "held by same actor" and waves through edits. The whole conflict system collapses.
-
-So:
-
-- `$COMMS_ACTOR` MUST be a concrete per-session identifier: `claude-3a1f`, `codex-9b2c`, `human-eli`.
-- Generic names (`eli`, `claude`, `codex`, `agent`, `user`, `$USER`) are rejected by default. Override with `COMMS_ALLOW_GENERIC_ACTOR=1` for emergencies.
-- We use shell wrappers (`cc`, `cdx`) that inject `COMMS_ACTOR=claude-<random>` per launch. The env var inherits through the whole process tree.
-- Human shells use `COMMS_ACTOR=human-eli` directly: the human's identity doesn't rotate.
-
-The hook approach (`SessionStart` does `export COMMS_ACTOR=...`) doesn't work because each hook fires in an isolated subshell: the export doesn't propagate to other tool subprocesses.
-
-### No TTL, no heartbeat, no daemon
-
-Agents don't have a clock: they can't send heartbeats reliably. Adding a timeout means an agent's claim expires mid-session, surprising it.
-
-Instead:
-
-- Claims are open-ended until explicitly released.
-- When an agent hits a conflict, it surfaces to the user. The user verifies whether the other session is alive.
-- If dead, the user authorizes `comms claim --steal <id> --reason "user verified prior session ended"`.
-
-No background process, no cron, no clock-based expiry.
-
-### Atomic steal as a single event
-
-A two-event steal (release + claim) leaves a window where both claims are inactive. We encode it as **one** `claim` event with `data.steals=<old-id>` and `data.steal_reason="..."`. The reducer treats `steals` as "the referenced claim becomes inactive at THIS event's timestamp".
-
-One log line, atomic, no race window.
-
-### `flock(2)` for serialization
-
-We need exactly-one-winner semantics for concurrent `claim` invocations. `flock(2)` is:
-
-- POSIX-portable (works on macOS + Linux).
-- Released by the kernel on FD close: including `kill -9`. No stale-lock cleanup needed.
-- Simple Go API via `golang.org/x/sys/unix.Flock`.
-
-The lock is per-repo (the log directory's `.lock` file). Every mutating command acquires-then-appends-then-releases.
-
-Read-only `comms check` deliberately skips the lock: it reads the log without writing, so blocking on a long-running `claim` would defeat the point of being fast in the PreToolUse hook.
-
-### JSONL, not SQLite
-
-JSONL is grep-friendly, append-only-friendly, and easy to recover from corruption (skip a bad line, keep going). SQLite would give us indexed queries but at the cost of a more opaque on-disk format and a fork-bomb risk if iCloud touches the journal file.
-
-A `comms compact` operation (future) can rotate or summarize old events without changing the on-disk shape.
-
-### Log lives OUTSIDE iCloud, docs live INSIDE the repo
-
-iCloud Drive forks files that are written concurrently: we got `log 2.jsonl`-style filename collisions in the `COMMS.md` era. To avoid that, the JSONL log lives at `~/Library/Application Support/comms/<repo-hash>/log.jsonl` (per-machine, outside iCloud).
-
-But docs (`.comms/docs/*.md`) are committed and need to travel with the repo via git. They're rarely concurrent-written (only `comms doc --edit` writes them, and that's flocked).
-
-### Segment-aware glob intersection (no FS expansion)
-
-When two scopes are claimed, we need to know if they could match the same path. We can't FS-expand because:
-
-- The files might not exist yet (someone's about to create them).
-- It would be slow at scale.
-- It would diverge across machines if the trees aren't identical.
-
-So we compute glob ∩ glob purely as a string operation. `src/**` overlaps `src/foo.ts` (yes), `src/**` does NOT overlap `srcs/foo.ts` (different first segment).
-
-### `comms doc` has three forms only
-
-`--list`, `<slug>`, `<slug> --edit`. The `--edit` form takes a sidecar flock so two editors can't clobber each other. No `--diff`, `--history`, `--delete`, `--rename` in MVP: docs are plain Markdown in git, so use `git log .comms/docs/` for history and `git rm` for deletion.
-
-## What's deliberately out of scope
-
-- Cross-project view (per-repo is the design).
-- Cross-machine sync (Eli works on one Mac for now).
-- LSP integration for symbol anchors (string equality is good enough).
-- Web UI (CLI + grep + `git log` are sufficient).
-- Replacing this design is cheap if it doesn't work: the on-disk shape is JSONL + Markdown, both of which any tool can read.
-
----
+comms keeps coding agents that share a working tree off each other's files. This
+page explains the choices behind it, both the ones that have held since the start
+and the ones 0.5.0 made after measuring how agents really use the tool.
 
 ## Where comms came from
 
-This is the third generation of multi-agent coordination at DPA+. The first was
-a single 1,632-line `COMMS.md` markdown file. It worked, but grew without bound,
-had no targeted reads, relied on agents remembering to update it, and iCloud
-sync kept forking the file. The second was `mcp-agent-mail`, a heavy MCP server
-with severity ladders and seven identities: too much ceremony, and agents kept
-forgetting the protocol. comms is the small version that learned from both.
+comms replaced two earlier attempts. The first was one shared Markdown file that
+agents were asked to keep up to date. It grew without limit, could not be read in
+parts, and iCloud forked it whenever two agents wrote at once. The second was a
+heavy MCP server with severity levels, inboxes and registration, and agents skipped
+its steps. comms keeps what worked in both, an agent identity and an append-only
+record, and drops the ceremony.
 
-## Why comms reads git, and not only its own log
+## The log is the whole system
 
-Every guard here used to ask one question, *is this path claimed by somebody
-else*, and report "no" as safety. It is not. "Nobody has declared anything" and
-"nothing is happening" are different facts. Four measured incidents, all failing
-in the reassuring direction:
+Every fact comms knows is one line in one file per repository, `log.jsonl`. A claim,
+a release, a note and a task change are each an event appended to it. Nothing is
+ever edited or deleted. Every view, from `comms status` to the board, replays the log
+from the start.
 
-1. The board printed "no active claims in this repo" while `git status` showed
-   fifteen changed files. Four of those paths appear zero times in the log.
-2. `check --staged` passed a commit carrying a staged deletion left behind by a
-   departed agent. The check was true on its own terms, the file was unclaimed,
-   and the deletion shipped.
-3. An agent committed a translation file while another agent **held the claim on
-   it**, and seventeen of the holder's in-flight keys shipped inside somebody
-   else's commit.
-4. One agent ran zero comms commands after a context compaction and edited
-   heavily anyway. In its own words: *a rule that only exists as prose decays
-   exactly this way.*
+This makes the log the interface. Any tool that reads JSON lines can read it, a
+broken view cannot corrupt it, and history and audit cost nothing extra.
 
-Two of those look identical and are not. (2) was a **detection** failure: the
-check asked the wrong question, and reading `git status` fixes it. (3) was not.
-`check --staged` would have refused it by name, with the holder's claim id in the
-message. That is an **enforcement** failure, and no amount of better checking
-closes it, which is why `guard install` exists.
+**JSON lines, not SQLite.** A JSONL file can be read with `grep`, appended to without
+a schema, and repaired by skipping a bad line. SQLite would give indexed queries,
+but the file would be opaque, and a sync tool touching its journal can damage it.
 
-The rule that falls out, and it generalises past this tool: prefer the signal
-nobody has to remember to emit, and never render "we could not establish
-anything" as "all clear".
+**The log lives outside the repository and outside iCloud.** iCloud Drive resolves
+two concurrent writes by forking the file, which for an append-only log means two
+diverging histories. So the log sits in the per-user data home
+(`~/Library/Application Support/comms/<repo-hash>/` on macOS), keyed by a hash of
+the repository path. All git worktrees of one repository hash to the same store,
+because worktree-per-agent is the most common way to run several agents on one
+repository, and separate logs per worktree would coordinate nothing. Notes written
+with `comms doc` are the exception: they go in `.comms/docs/` and travel with the
+repository through git.
 
-## What the task tag buys
+**One lock, held briefly.** Every write takes `flock` on the store's `.lock`, reads
+the log, decides, appends and releases. `flock` works on macOS and Linux, and the
+kernel releases it when the process exits, even after `kill -9`, so a crashed agent
+never leaves a stale lock. Reads take no lock, which keeps the pre-edit check fast.
+
+**A steal is one event.** Taking over a claim could be a release followed by a new
+claim, but between the two the file would be free and a third agent could take it.
+So a steal is one `claim` event that names the claim it replaces. The log never
+shows a moment when nobody or both hold the file.
+
+**Overlap is computed from the strings.** To decide whether `src/**` and
+`src/auth.ts` overlap, comms compares the two patterns segment by segment and never
+looks at the disk. The file may not exist yet, scanning would be slow on a large
+tree, and two machines with different trees would get different answers.
+
+## Why comms reads git
+
+A claim only records what an agent chose to declare. For a long time every guard
+asked "is this path claimed by somebody else?" and treated "no" as safe. It is not.
+"Nobody declared anything" and "nothing is happening" are different facts, and
+several real incidents failed in exactly that direction: a board reporting no
+claims over a tree full of changed files, a commit that carried a staged deletion
+left by an agent that had gone, and an agent that ran no comms command at all after
+its context was compacted and edited heavily anyway.
+
+So comms reads `git status` itself and shows changed files next to claimed files.
+It never guesses who made an unclaimed change, because "we do not know who did
+this" is the finding. The general rule is to prefer a signal nobody has to remember
+to send, and never to show "could not check" as "all clear". The same rule makes
+the pre-edit check refuse an edit when it cannot read the log.
+
+## Claims do not expire on a clock
+
+Agents have no reliable sense of time, so a claim that expired after a timeout
+would vanish in the middle of a long task. No claim ends by itself. A claim ends
+when its holder releases it or someone steals it with a reason. A claim made by an
+edit also ends when its session ends or when the same session claims the file by
+hand.
+
+The clock is used only to advise. A holder's silence is judged by its last event
+and by a marker file the edit hook touches on every edit. When a claim is over an
+hour old and its holder has been silent that long, `status` marks it STALE, and an
+edit refused by a holder silent for an hour prints the exact `--steal` command. The
+decision to take the file stays with an agent or the person watching.
+
+## What changed in 0.5.0, and why
+
+0.5.0 was shaped by replaying how agents used comms: 26,349 tool calls from agent
+transcripts, 53,599 logged events and the owner's messages to agents, all from the
+author's machine. The numbers below come from that replay.
+
+### One build
+
+comms had a Go binary and a Python build that read the same log. They had drifted
+apart in eight behaviors, and agents made only 13 calls to the Go build in the
+month before the release. The Python build had no version and no release path, and
+a stale install was the owner's most repeated complaint. Keeping two builds meant
+fixing every bug twice and still shipping disagreement, so the Go build was
+retired. `comms` and `comms-graph` are now the same Python program, with one version
+number, installed by `install.sh` from the wheel attached to each release. The log
+format did not change, so every existing log still loads.
+
+### Identity comes from the session
+
+Before 0.5.0, an agent had to say who it was on every call, through `COMMS_ACTOR`
+or `--as`. In practice the session-start hook that was supposed to name the agent
+failed on all 725 recorded runs. 11 of the first 21 hook blocks stopped an agent
+from editing a file it had claimed itself, and all 4 recorded cases of an agent
+writing a file through the shell to get around a block followed one of those false
+blocks. Agents passed the name by hand on 95% of calls, and the owner had to tell
+agents to "join and claim" about 35 times.
+
+Now Claude Code tells comms which session is calling, and comms names the session
+the first time it sees it, for example `claude-4f9a1c`. `--as` and `COMMS_ACTOR`
+still win when given. Every claim records the session that made it. On the edit
+check a claim is yours when your session made it, whatever name it carries, so a
+session is never blocked by its own claim, and two sessions that share a name still
+block each other. Subagents share their parent's session, so the edit check cannot
+tell them apart. On the command line a claim under a different name does conflict,
+which is why the skill asks for `--as <name>` when subagents work in parallel.
+
+### The first edit claims the file
+
+Claiming before the first edit stayed at about 65% across model generations, and
+67% of the subagents that edited files in the busiest project used comms not at all.
+Agents that did start using comms handled the rest well. Releasing at the end rose
+from 30% to 68%, and tagging claims with a task from 22% to 73%. The weak point was
+the first step, so comms now takes it for them. The pre-edit hook claims a free file
+the first time a session edits it.
+
+A claim made this way must not hoard the file. It ends when the session ends. It
+also gives way to another agent once it is five minutes old and its file has nothing
+uncommitted in any worktree of the repository. The five minutes cover the moment
+between the claim and the edit it was made for, when the file is still clean. A
+claim the agent makes by hand behaves as before.
+
+### Short output
+
+`status` printed a median of 1.5k characters, 9.7k at the 95th percentile, and up
+to 19k. `board` reached 40k. 46% of recent calls piped the output through `head` or
+`grep`. Long output costs an agent context and hides the one line it needed. Now
+`status` and `board` print the caller's view by default: its claims, how many files
+each other agent holds, and notes to it. `--all` prints everything, and `--json` is
+unchanged.
+
+### Commands that accept what agents type
+
+Agents lost many calls to the command line itself: 279 full usage dumps after a bad
+call since 15 October, 48 notes over the length limit, 44 task ids refused as "not
+a slug", 49 "no task called X", and 1,574 help lookups. They also guessed verbs that
+did not exist, such as `task show`, `task list`, `claims` and `whoami`. Those
+guesses now work. A mistake is answered in at most three lines that name the valid
+form. Global flags work before or after the verb. Notes take up to 1000 characters,
+and task ids up to 64, in any case. An unknown flag is refused, because silently
+dropping it, as `claim x --reason y` used to, is worse than an error.
+
+### What was cut
+
+`lesson`, `plan` and `completion` were removed. None of the three was called after
+September 2026, and no lesson was ever written. Tests used to write into the real
+data home, and 251 of the 258 store folders on the author's machine were test
+leftovers. Tests now point `COMMS_HOME` at a temporary folder,
+and any repository under the system temp folder keeps its store there.
+
+## Tasks are written for people
 
 A claim says who is on a file. A task says what the work is, and tagging claims
-to it with `--task <slug>` is what lets the board answer "which files did this
-touch" and "whose work sits next to mine". It costs one flag on a command you
-were running anyway, and it is the only bookkeeping in the tool that is not
-derived for you.
+with `--task <id>` is what lets the board answer "which files did this touch". The
+`--title` is the one line about a task that a person outside the code reads, so it
+is plain English with no file or function names: "Round money the same way
+everywhere", not "money-rounding refactor in toCents". A task that asks for review
+closes only when a different agent checks it, because a task its author marks
+finished and a task somebody verified are different claims.
 
-When it was phrased as a suggestion, agents skipped it: across 4,356 real claims
-exactly one carried a task. It is a rule in the skill now, and stated as one.
+## The MCP server came back
 
-## Task titles are written for people
+The MCP server was cut along with the rest of the earlier server's ceremony, and
+later brought back. The ceremony was the problem, not the transport. A tool that
+sits in an agent's tool list every turn gets used more than a command the agent has
+to be told about. `comms mcp` serves six tools that map one to one onto `check`,
+`claim`, `release`, `status`, `note` and `find`, with no registration and no inbox.
+It speaks JSON-RPC over stdio without an SDK, and every tool takes an `actor`
+argument because one server process may act for several agents.
 
-`--title` is the only line about a task that somebody outside the code ever
-reads. It is plain English, in English, with no file names, function names or
-jargon, and the technical detail goes in the notes, the checks and the files.
-"Round money the same way everywhere", not "money-rounding refactor in toCents".
+## Still out of scope
+
+- Sync between machines. Each machine has its own logs.
+- Windows. comms stores its logs on macOS and Linux only, and refuses to guess a
+  third layout.
+- Symbol-aware overlap. A symbol anchor such as `src/auth.ts#login` is compared as
+  a string, without a language server.

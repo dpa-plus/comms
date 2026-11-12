@@ -14,78 +14,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: test (${{ matrix.os }}, go ${{ matrix.go.label }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        # comms is unix-only today (internal/lock uses flock); no windows-latest.
-        os: [ubuntu-latest, macos-latest]
-        # Stable labels preserve branch-protection check names while each job
-        # uses an exact patched toolchain release.
-        go:
-          - label: '1.25.x'
-            version: '1.25.13'
-          - label: '1.26.x'
-            version: '1.26.6'
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version: ${{ matrix.go.version }}
-          cache: true
-      - name: gofmt
-        run: |
-          files=$(gofmt -l .)
-          if [ -n "$files" ]; then
-            echo "::error::These files are not gofmt-clean:"; echo "$files"; exit 1
-          fi
-      - name: go vet
-        run: go vet ./...
-      - name: go build
-        run: go build ./...
-      - name: go test -race
-        run: go test -race ./...
-      - name: go.mod is tidy
-        run: |
-          go mod tidy
-          git diff --exit-code go.mod go.sum
-
-  lint:
-    name: lint
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version: '1.26.6'
-          cache: true
-      # Pin the exact golangci-lint v2 version validated locally (the v6 action
-      # targets golangci-lint v1; installing directly avoids that mismatch).
-      - name: golangci-lint
-        run: |
-          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
-          golangci-lint run --timeout=5m
-
-  vuln:
-    name: govulncheck
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version: '1.26.6'
-          cache: true
-      - name: govulncheck
-        run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck ./...
-
   python:
+    # Job names are the required-check names in branch protection. Do not rename.
     name: python (${{ matrix.os }}, py ${{ matrix.python }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
@@ -93,7 +23,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        python: ['3.11', '3.12']
+        python: ['3.11', '3.13']
     defaults:
       run:
         working-directory: python
@@ -132,8 +62,12 @@ jobs:
           /tmp/clean/bin/pip install python/dist/*.whl
           cd /
           /tmp/clean/bin/comms-graph version
+          /tmp/clean/bin/comms version
+          /tmp/clean/bin/python -m comms_graph.doctor --help
+          /tmp/clean/bin/comms-graph doctor --help
+          /tmp/clean/bin/comms-graph --version
           /tmp/clean/bin/comms-graph --help > /tmp/verbs.txt
-          for v in claim release check board status task tasks plan next brief \
-                   session doc find note log hello lesson mcp ui version; do
+          for v in claim release check board status task tasks next brief \
+                   session doc find note log hello mcp ui version doctor hook guard whoami; do
             grep -qE "^  $v" /tmp/verbs.txt || { echo "wheel lost the '$v' verb"; exit 1; }
           done

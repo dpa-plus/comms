@@ -555,19 +555,18 @@ def test_every_command_the_briefing_teaches_actually_exists():
 
     root = Path(__file__).resolve().parents[1]
     briefing = (root / "comms_graph" / "instructions.md").read_text(encoding="utf-8")
-    cli_src = (root / "comms_graph" / "cli.py").read_text(encoding="utf-8")
 
     # Every "comms-graph <verb>" the briefing shows, plus any "task <sub>".
     verbs = set(re.findall(r"comms-graph ([a-z-]+)", briefing))
     subs = set(re.findall(r"comms-graph task ([a-z-]+)", briefing))
     assert verbs, "the briefing should show at least one command"
 
-    dispatched = set(re.findall(r'sub == "([a-z-]+)"', cli_src))
-    dispatched |= set(re.findall(r'verb == "([a-z-]+)"', cli_src))
+    from comms_graph import verbs as cverbs
 
-    missing = {v for v in verbs if v not in dispatched}
+    missing = {v for v in verbs if cverbs.lookup(v) is None}
     assert not missing, f"briefing teaches {sorted(missing)}, which the CLI does not dispatch"
-    missing_subs = {v for v in subs if v not in dispatched}
+    task_subs = {s.name for s in cverbs.lookup("task").subs}
+    missing_subs = subs - task_subs
     assert not missing_subs, f"briefing teaches 'task {sorted(missing_subs)}', not dispatched"
 
 
@@ -602,7 +601,7 @@ def test_the_hook_path_is_the_one_the_cli_dispatches():
     root = Path(__file__).resolve().parents[1]
     cli_src = (root / "comms_graph" / "cli.py").read_text(encoding="utf-8")
 
-    assert 'sub == "check"' in cli_src
+    assert '"check": _cmd_check' in cli_src
     assert "_cmd_check_inner" in cli_src, "the fail-closed wrapper must still be there"
     assert not re.search(r"^\s*from \. import commands", cli_src, re.M), \
         "cli.py must not import the superseded command layer"
@@ -614,8 +613,26 @@ def test_the_hook_path_is_the_one_the_cli_dispatches():
 
 def _package_docs():
     """Every prose file that ships with or documents this package."""
-    root = Path(__file__).resolve().parents[1]
-    return [root / "README.md", *sorted((root / "docs").glob("*.md"))]
+    package = Path(__file__).resolve().parents[1]
+    repo = package.parent
+    return [repo / "README.md", *sorted((repo / "docs").glob("*.md")),
+            repo / "examples" / "AGENTS.md.template",
+            package / "comms_graph" / "data" / "using-comms" / "SKILL.md"]
+
+
+def _shown_commands(text: str) -> set[str]:
+    """Verbs in code spans and code blocks. Prose such as "comms is" is not a command."""
+    import re
+
+    code = re.findall(r"`([^`\n]+)`", text)
+    for block in re.findall(r"```[a-z]*\n(.*?)```", text, re.S):
+        code.extend(block.splitlines())
+    shown = set()
+    for line in code:
+        m = re.match(r"\s*(?:[A-Z_]+=\S+ )*comms(?:-graph)?((?: --(?:repo|root|as) \S+)*) ([a-z][a-z-]*)", line)
+        if m:
+            shown.add(m.group(2))
+    return shown
 
 
 def test_no_document_teaches_a_command_from_the_tree_this_was_split_out_of():
@@ -642,13 +659,11 @@ def test_every_command_the_documents_show_is_one_the_cli_dispatches():
     import re
 
     root = Path(__file__).resolve().parents[1]
-    cli_src = (root / "comms_graph" / "cli.py").read_text(encoding="utf-8")
-    dispatched = set(re.findall(r'sub == "([a-z-]+)"', cli_src))
-    dispatched |= set(re.findall(r'verb == "([a-z-]+)"', cli_src))
+    from comms_graph import verbs as cverbs
 
     for doc in _package_docs():
-        shown = set(re.findall(r"comms-graph ([a-z-]+)", doc.read_text(encoding="utf-8")))
-        missing = {v for v in shown if v not in dispatched}
+        shown = _shown_commands(doc.read_text(encoding="utf-8"))
+        missing = {v for v in shown if cverbs.lookup(v) is None}
         assert not missing, f"{doc.name} shows {sorted(missing)}, which the CLI does not dispatch"
 
 

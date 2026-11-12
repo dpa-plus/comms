@@ -1,108 +1,114 @@
 # The board
 
-The README has the short version. This is the rest of it.
-
-
-```bash
-COMMS_ACTOR=human-you comms-graph ui   # http://127.0.0.1:7878, every project in one tab
-```
-
-It opens on **what just happened**, newest first, with the things that need
-somebody pulled to the top. Around it: who is holding which files right now, the
-roster of who is actually here, the tasks with the files each one touches, and
-every project on this machine down the left side.
-
-**It reads. It does not write**, with exactly one exception. The log is appended
-under a lock, through a fold that enforces the rules, and a dashboard writing
-around either would be a second writer with none of those guarantees. So the only
-button that changes anything is **Release**, which frees a claim somebody else is
-holding, and it goes through the same lock and appends the same event the CLI
-does. It asks for a reason and refuses without one, because the release is
-recorded under your name permanently and "who freed this and why" is the only
-question anybody asks afterwards.
-
-> **Start it with `COMMS_ACTOR` set** (e.g. `human-you`). Without an actor the
-> board refuses to release at all: a release with no author is worse than no
-> release, because the ground is gone and the log cannot say who took it.
-
-It is **unified by default**: one window for every comms project on the machine. The **Projects** rail lists them and clicking one scopes the whole view. It lists real projects only. A store whose directory has been deleted, or which lives in a temp folder, is not a project, and before that filter existed two real projects sat among 213 that were not.
-
-The **Roster** shows who is here, meaning the last hour, plus anyone holding a claim whatever their age, because a stale claim is the one thing on the board that needs a person, and hiding its holder would hide the only name that can free it. Agents take a fresh name each session, so everyone who has ever said hello is a much longer and much less useful list; it is one click away.
-
-Run it **once** and watch every repo. Agents never open anything. They write to their logs, which this board already sees.
-
-The **work graph** shows the tasks in the selected project: an arrow means the
-task it points at comes afterwards, and tasks joined to nothing sit apart from
-the rest, because they are. Finished work compresses to a dashed outline so the
-board shrinks as the project progresses; work waiting for a verifier is the
-loudest thing on it, because it is finished *and* holding up everything
-downstream. Layout is computed on the server, so an arrow can only point
-rightward, so there is no geometry to get wrong in the browser.
-
-It updates by **push, not polling.** A file watcher inside `comms ui` is notified by the operating system the instant any project's `log.jsonl` changes; it rebuilds the snapshot once and streams it to every open browser tab over [Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events). So when any agent anywhere appends an event, the right project lights up in the sidebar **immediately**, and your laptop isn't burning cycles re-reading logs on a timer.
-
-Every snapshot carries the server's **front-end build fingerprint**, and the page remembers the one it loaded with. So when you replace the binary and restart `comms ui`, every open tab notices the new build on the next push and **reloads itself** to the new dashboard, so no stale UI is lingering after an upgrade.
-
-It **opens your browser automatically** when run interactively (`--no-open` to suppress). On macOS you can also double-click a **Comms Dashboard** launcher instead of using the terminal. The header shows the active **session name** (the name agents use, e.g. `acme-build`) next to the repo.
-
-**One dashboard, two entry points.** `comms ui` and `comms-graph ui` are the
-same board: the Go build no longer serves a dashboard of its own and hands the
-job straight to the Python build, replacing its own process so Ctrl-C and any
-supervisor still work.
-
-There were two once, reading the same log and drawing different pictures. The
-second fell behind and nobody noticed until it was opened, by which point it was
-listing 176 projects by hash while the other had had real names for a week.
-Building every improvement twice is a cost that gets paid in exactly that way.
+The board is a web page for the person watching the agents. The README has the
+short version. This page has the rest.
 
 ```bash
-comms ui                       # the board, on 127.0.0.1:7878
-comms ui --addr 0.0.0.0:9000   # split into --host and --port for you
-comms --repo /path/to/repo ui  # scope it to one repository
-comms-graph ui --graph out/graph.json   # every flag the board itself takes
+comms ui                  # http://127.0.0.1:7878, every project in one tab
+comms ui --port 7879      # another port
+comms --repo /path/to/repo ui
 ```
 
-`--demo`, `--all`, `--open` and `--stale-after` are accepted and ignored. They
-live in muscle memory and in a committed launchd template, and refusing them
-would turn a rename into an outage for whoever least expected one.
+`comms ui` and `comms-graph ui` are the same board. To keep it running all the
+time on macOS, see [Run it at login](#run-it-at-login-macos).
 
-### Run the dashboard as a login service (macOS)
+## What it shows
 
-So the dashboard is always up. It survives reboots, and is restarted automatically if it ever exits. Install it as a per-user `launchd` agent. The template sets `COMMS_ACTOR` (so the operator buttons work, see the note above); change it from `operator` to your own name first:
+It opens on **the work**: a graph of open tasks, labelled by their titles rather
+than their ids. **Show completed** adds finished work without hiding open tasks,
+and **List** shows the same tasks as a list. The **Team** panel shows who has
+reported recently and who holds files. The **Projects** rail scopes the view to one
+project. A last-reported time shows that an agent sent an update, not that it is
+still running.
+
+Click a node to focus its connections, then **Details** for its checks, files and
+history. Each node names its owner and how many files it holds. **History** opens
+the project timeline, and the history button next to an agent filters it to that
+agent. **Load earlier** fetches older events, including those of agents that have
+left the Team panel. Technical details stay collapsed until you open them.
+
+The board lists every comms project on the machine. It leaves out stores whose
+repository folder was deleted and stores that live in a temp folder, because those
+are not projects anyone is working on.
+
+The **Team** panel includes agents that reported within the last hour, plus anyone
+holding a claim, however old. A quiet claim is only a hint, and nothing expires on its
+own. The panel also separates changed files nobody claimed from claimed work, so an
+empty list of claims does not suggest that nobody is working.
+
+## Arrows and lines
+
+Solid arrows run from a task to the task it unlocks. Dashed lines connect tasks
+whose code is related in the code map, and say nothing about order. Code lines
+appear around the selected task, up to twelve at first, with an option to show
+more. Links to hidden completed tasks are counted separately. When there is no code
+map, the board says so instead of showing the tasks as unrelated.
+
+**Connections** opens the selected project's **Task graph** or **Code map** for a
+closer look. Build the code map with `graphify extract . --code-only` in the
+repository.
+
+## It reads, with one exception
+
+The log is written under a lock, through a fold that enforces the rules. A board
+that wrote around both would be a second writer with none of those guarantees. So
+the only button that changes anything is **Release**, which frees a claim somebody
+else holds. It takes the same lock and appends the same event that
+`comms release <claim-id> --force` does.
+
+The confirmation shows the exact file and its holder, and asks for your name and a
+reason. The name field is filled from `?actor=name` in the URL, from your last
+successful release in this browser, or from the board's `COMMS_ACTOR`, and you can
+change it. The release is recorded with your name as `arbitrator` and the holder as
+`original_actor`. **Cancel** changes nothing. Releasing a claim does not stop the
+agent and does not undo its edits.
+
+## Live updates
+
+The browser receives snapshots over Server-Sent Events. The server checks for a
+change every half second, and sends a fresh snapshot after about ten seconds
+without one. **Live** appears only after a valid snapshot has rendered. A failed
+update keeps the previous view and shows a warning, and a delayed stream is labelled
+as delayed.
+
+Search, selection, zoom and scroll stay in place through live updates within one
+project. Switching projects resets them. Titles wrap instead of being cut off, and
+the layout does not move on its own.
+
+## Upgrades refresh it
+
+Every snapshot carries a fingerprint of the page, and the server also fingerprints
+the installed comms source files. When the installed files change and stay stable
+for a moment, the board restarts itself on the new code. Under `launchd`, the
+service starts a fresh process. A board started by hand replaces its own process.
+Every open tab reconnects, sees the new fingerprint, and reloads. Nothing is lost,
+because the board only reads the log again.
+
+`comms doctor --fix`, which the installer runs, also restarts the board service when
+it reports an older version than the one installed.
+
+## Run it at login (macOS)
 
 ```bash
-# Set your operator name (and point at your binary if it is not Homebrew, `which comms`):
-#   sed -i '' "s#<string>operator</string>#<string>human-you</string>#" contrib/launchd/plus.dpa.comms-ui.plist
-install -m644 contrib/launchd/plus.dpa.comms-ui.plist ~/Library/LaunchAgents/
-launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/plus.dpa.comms-ui.plist
+comms doctor --fix --board
 ```
 
-After installing a new binary, restart the service to pick it up (open tabs then auto-reload, see above):
+This writes `~/Library/LaunchAgents/plus.dpa.comms-ui.plist`, which runs
+`comms-graph ui` from your install, and loads it with `launchctl`. The board then
+starts at login and restarts if it stops. Its output goes to `/tmp/comms-ui.log`.
+`comms doctor` reports whether the service is loaded and on the current version.
+
+To stop it and remove it:
 
 ```bash
-launchctl kickstart -k "gui/$(id -u)/plus.dpa.comms-ui"
+launchctl bootout "gui/$(id -u)/plus.dpa.comms-ui"
+rm ~/Library/LaunchAgents/plus.dpa.comms-ui.plist
 ```
 
-To remove it: `launchctl bootout "gui/$(id -u)/plus.dpa.comms-ui"` then delete the plist.
+## Upgrades and running agents
 
----
-
----
-
-## Upgrading, and what happens to a running session
-
-Because `comms` is just a binary that runs fresh on every command, upgrading is painless and **never disturbs an in-flight session**:
-
-- **The session lives in the log file, not in the binary.** Claims, findings, and notes are on disk. Replacing the binary doesn't touch them.
-- **CLI commands pick up the new version instantly**: the *next* `comms …` an agent runs uses the new binary. No restart, no re-join.
-- **Only the dashboard's *process* needs a nudge.** `comms ui` is the one long-running process; it holds the old binary until you restart it. But once you do, the browser doesn't: every open tab sees the new build fingerprint on the next push and **reloads itself** (see [The live dashboard](#the-live-dashboard)). Restarting loses nothing. It just re-reads the same log.
-
-```bash
-go install github.com/dpa-plus/comms/cmd/comms@latest   # agents use it on their next command
-# then restart the one long-running dashboard process; open tabs auto-reload:
-launchctl kickstart -k "gui/$(id -u)/plus.dpa.comms-ui"  # if installed as a login service
-# (otherwise: stop your `comms ui` and run it again)
-```
-
----
-
+Upgrading never disturbs an agent's work. Claims, tasks and notes live in the log,
+not in the program, and the log format does not change between versions. Each comms
+command starts fresh, so an agent uses the new version on its next command with no
+restart. The board is the one long-running process, and it refreshes itself as
+described above.

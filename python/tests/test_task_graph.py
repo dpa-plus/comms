@@ -412,16 +412,12 @@ def test_the_whole_lifecycle_through_the_cli(tmp_path, monkeypatch):
     run are not. plan -> next -> done -> review -> unblocked is the path every
     piece of work takes, and it has to hold end to end."""
     repo = _repo(tmp_path, monkeypatch)
-    plan = repo / "plan.json"
-    plan.write_text(
-        '{"tasks":[{"id":"auth-api","title":"Auth API","checks":["test"]},'
-        '{"id":"login-ui","title":"Login"}],'
-        '"edges":[{"from":"auth-api","to":"login-ui","kind":"interface",'
-        '"provides":"POST /session returns a JWT"}]}'
-    )
-    code, out = _cli(repo, "plan", "--from", str(plan), "--as", "planner")
+    assert _cli(repo, "task", "add", "auth-api", "--title", "Auth API", "--check", "test",
+                "--as", "planner")[0] == 0
+    assert _cli(repo, "task", "add", "login-ui", "--title", "Login", "--as", "planner")[0] == 0
+    code, out = _cli(repo, "task", "edge", "auth-api", "login-ui", "--kind", "consumes",
+                     "--provides", "POST /session returns a JWT", "--as", "planner")
     assert code == 0, out
-    assert "2 task(s), 1 edge(s)" in out
 
     code, out = _cli(repo, "next", "--as", "claude-dev")
     assert "auth-api" in out and "login-ui" not in out, "a blocked task is not startable"
@@ -454,13 +450,10 @@ def test_brief_carries_the_upstream_decision_to_whoever_picks_up_next(tmp_path, 
     reason this verb exists is that what somebody worked out while building A is
     exactly what whoever builds B needs, and nothing else moves it across."""
     repo = _repo(tmp_path, monkeypatch)
-    plan = repo / "plan.json"
-    plan.write_text(
-        '{"tasks":[{"id":"auth-api","checks":[],"review":true},{"id":"login-ui"}],'
-        '"edges":[{"from":"auth-api","to":"login-ui","kind":"interface",'
-        '"provides":"POST /session returns a JWT"}]}'
-    )
-    _cli(repo, "plan", "--from", str(plan), "--as", "planner")
+    _cli(repo, "task", "add", "auth-api", "--review", "--as", "planner")
+    _cli(repo, "task", "add", "login-ui", "--as", "planner")
+    _cli(repo, "task", "edge", "auth-api", "login-ui", "--kind", "consumes",
+         "--provides", "POST /session returns a JWT", "--as", "planner")
     _cli(repo, "task", "done", "auth-api", "--as", "claude-dev",
          "--note", "15 minute expiry, refresh via cookie")
 
@@ -472,21 +465,21 @@ def test_brief_carries_the_upstream_decision_to_whoever_picks_up_next(tmp_path, 
 
 
 def test_a_cycle_is_refused_before_anything_is_written(tmp_path, monkeypatch):
-    """IF THIS FAILS: a plan can put itself into a state the board can only
+    """IF THIS FAILS: an edge can put the graph into a state the board can only
     describe as unreachable. The fold survives a cycle, but surviving it is not
     the same as it being usable."""
     repo = _repo(tmp_path, monkeypatch)
-    bad = repo / "bad.json"
-    bad.write_text('{"tasks":[{"id":"x"},{"id":"y"}],'
-                   '"edges":[{"from":"x","to":"y"},{"from":"y","to":"x"}]}')
-    code, out = _cli(repo, "plan", "--from", str(bad), "--as", "planner")
+    for tid in ("x", "y"):
+        _cli(repo, "task", "add", tid, "--as", "planner")
+    assert _cli(repo, "task", "edge", "x", "y", "--as", "planner")[0] == 0
+    code, out = _cli(repo, "task", "edge", "y", "x", "--as", "planner")
     assert code == 2
     assert "loop" in out
 
     from comms_graph import log as _l
     from comms_graph import state as _s
     st = _s.fold(_l.read(_l.log_path(repo)))
-    assert "x" not in st.tasks and "y" not in st.tasks, "a refused plan must write nothing"
+    assert [(e.from_, e.to) for e in st.task_edges] == [("x", "y")], "a refused edge must write nothing"
 
 
 def test_an_id_that_is_not_speakable_is_refused(tmp_path, monkeypatch):
@@ -494,9 +487,21 @@ def test_an_id_that_is_not_speakable_is_refused(tmp_path, monkeypatch):
     is not: measured on a real store, 99.5% of 11,049 event ids shared their
     six-character prefix, so there was nothing short to say."""
     repo = _repo(tmp_path, monkeypatch)
-    for bad in ("Not A Slug", "has_underscore", "x" * 40, "-leading", ""):
+    for bad in ("x" * 65, "-leading", "", "no/slashes", "emoji-\u2603"):
         code, out = _cli(repo, "task", "add", bad, "--as", "p")
         assert code == 2, f"{bad!r} should have been refused: {out}"
+    assert len(out.strip().splitlines()) <= 3
+
+
+def test_an_id_is_normalized_instead_of_refused(tmp_path, monkeypatch):
+    """Agents typed `Fix_Login`, `fix login` and 40-character ids and were told
+    "not a slug" 44 times."""
+    repo = _repo(tmp_path, monkeypatch)
+    for typed in ("Not A Slug", "has_underscore", "x" * 40, "Fix_Login-Flow"):
+        code, out = _cli(repo, "task", "add", typed, "--as", "p")
+        assert code == 0, f"{typed!r}: {out}"
+    code, out = _cli(repo, "brief", "fix login flow")
+    assert code == 0 and "fix-login-flow" in out
 
 
 def test_a_task_id_is_matched_the_way_a_person_would_say_it(tmp_path, monkeypatch):
@@ -1349,7 +1354,7 @@ def test_a_full_task_is_not_offered(tmp_path, monkeypatch):
     direction."""
     repo = _repo(tmp_path, monkeypatch)
     (repo / "b.py").write_text("y = 2\n")
-    _cli(repo, "task", "add", "solo", "--slots", "1", "--as", "p", session="agent-P")
+    _cli(repo, "task", "add", "solo", "--as", "p", session="agent-P")
     _cli(repo, "claim", "a.py", "--as", "carol", "--intent", "z", "--task", "solo",
          session="agent-C")
     code, out = _cli(repo, "next", "--as", "dave", session="agent-D")
@@ -1388,7 +1393,6 @@ def test_help_on_a_leaf_verb_explains_it_instead_of_running_it(tmp_path, monkeyp
         ("task", "review", "--help"),
         ("brief", "--help"),
         ("next", "--help"),
-        ("plan", "--help"),
         ("claim", "--help"),
         ("board", "--help"),
         ("tasks", "--out", str(out_file), "--help"),
@@ -1396,9 +1400,10 @@ def test_help_on_a_leaf_verb_explains_it_instead_of_running_it(tmp_path, monkeyp
         code, out = _cli(repo, *args)
         assert code == 0, (args, out)
         assert out.startswith("Usage: comms-graph"), (args, out[:90])
-        if args[0] == "task":
-            # the task block is the only place the per-flag detail lives
+        if args[:2] == ("task", "review"):
             assert "--acknowledge-self-review" in out, args
+        if args[:2] == ("task", "add"):
+            assert "--title" in out and "--probe" in out, args
 
     assert not out_file.exists(), "`tasks --help` wrote its output file"
 
@@ -1584,13 +1589,13 @@ def test_reclaiming_ground_you_hold_replaces_it_rather_than_stacking(tmp_path, m
     _cli(repo, "claim", "a.py", "--as", "bob", "--intent", "first", session="sB")
     _cli(repo, "claim", "a.py", "--as", "bob", "--intent", "second", session="sB")
 
-    _, out = _cli(repo, "board", "--as", "bob", session="sB")
+    _, out = _cli(repo, "board", "--all", "--as", "bob", session="sB")
     assert "active claims (1)" in out, out
     assert "second" in out and "first" not in out, out
 
     # a symbol inside the file is different ground; holding both is legitimate
     _cli(repo, "claim", "a.py#parse", "--as", "bob", "--intent", "narrower", session="sB")
-    _, out = _cli(repo, "board", "--as", "bob", session="sB")
+    _, out = _cli(repo, "board", "--all", "--as", "bob", session="sB")
     assert "active claims (2)" in out, out
 
     # and somebody else is still refused
@@ -1626,7 +1631,7 @@ def test_a_claim_taken_after_a_sign_off_does_not_unsign_it(tmp_path, monkeypatch
     repo = _repo(tmp_path, monkeypatch)
     for f in ("a.py", "c.py"):
         (repo / f).write_text("x = 1\n")
-    _cli(repo, "task", "add", "ta", "--as", "p", "--title", "TA", "--slots", "2", session="sP")
+    _cli(repo, "task", "add", "ta", "--as", "p", "--title", "TA", session="sP")
     _cli(repo, "task", "add", "tb", "--as", "p", "--title", "TB", session="sP")
     _cli(repo, "task", "edge", "ta", "tb", "--as", "p", "--kind", "interface", session="sP")
     _cli(repo, "claim", "a.py", "--as", "alice", "--task", "ta", "--intent", "A", session="sA")
@@ -1717,7 +1722,7 @@ def test_an_abandoned_claim_can_be_taken_over(tmp_path, monkeypatch):
     _, out = _cli(repo, "brief", "t6b", "--as", "x", session="sX")
     assert "phase: blocked" in out, out
 
-    _, board = _cli(repo, "board", "--as", "x", session="sX")
+    _, board = _cli(repo, "board", "--all", "--as", "x", session="sX")
     kid = board.split("[")[1].split("]")[0]
 
     code, out = _cli(repo, "release", kid, "--as", "nate", "--force", session="sN")
@@ -1862,21 +1867,21 @@ def test_a_person_can_free_ground_an_agent_abandoned(tmp_path, monkeypatch):
     repo = _repo(tmp_path, monkeypatch)
     (repo / "a.py").write_text("x = 1\n")
     _cli(repo, "claim", "a.py", "--as", "ghost", "--intent", "then crashed", session="sG")
-    _, board = _cli(repo, "board", "--as", "x", session="sX")
+    _, board = _cli(repo, "board", "--all", "--as", "x", session="sX")
     cid = board.split("[")[1].split("]")[0]
 
-    code, out = _cli(repo, "release", cid, "--as", "eli", "--force", session="sE")
+    code, out = _cli(repo, "release", cid, "--as", "eli-desk", "--force", session="sE")
     assert code != 0 and "--reason" in out, out
-    code, out = _cli(repo, "release", "a.py", "--as", "eli", "--force",
+    code, out = _cli(repo, "release", "a.py", "--as", "eli-desk", "--force",
                      "--reason", "gone", session="sE")
     assert code != 0, ("a path was accepted; it can match more than was meant:\n" + out)
 
-    code, out = _cli(repo, "release", cid, "--as", "eli", "--force",
+    code, out = _cli(repo, "release", cid, "--as", "eli-desk", "--force",
                      "--reason", "session died 4h ago", session="sE")
     assert code == 0, out
     assert "was @ghost" in out and "@eli" in out, out
 
-    _, board = _cli(repo, "board", "--as", "x", session="sX")
+    _, board = _cli(repo, "board", "--all", "--as", "x", session="sX")
     assert "no active claims" in board, board
 
     # and the log says who took it off whom, rather than reading as ghost's own
@@ -1885,17 +1890,17 @@ def test_a_person_can_free_ground_an_agent_abandoned(tmp_path, monkeypatch):
     log_file, _ = ccli._store(ccli._repo_root(str(repo)), create=False)
     st = cstate.fold(clog2.read(log_file))
     rel = st.releases[-1]
-    assert rel.actor == "eli", rel
+    assert rel.actor == "eli-desk", rel
     assert rel.original_actor == "ghost", ("an arbitrated handover folded as an ordinary "
                                            "release: " + repr(rel))
-    assert rel.arbitrator == "eli", rel
+    assert rel.arbitrator == "eli-desk", rel
 
 
 def test_releasing_your_own_claim_does_not_need_force(tmp_path, monkeypatch):
     repo = _repo(tmp_path, monkeypatch)
     (repo / "a.py").write_text("x = 1\n")
     _cli(repo, "claim", "a.py", "--as", "alice", "--intent", "w", session="sA")
-    _, board = _cli(repo, "board", "--as", "x", session="sX")
+    _, board = _cli(repo, "board", "--all", "--as", "x", session="sX")
     cid = board.split("[")[1].split("]")[0]
     code, out = _cli(repo, "release", cid, "--as", "alice", "--force",
                      "--reason", "x", session="sA")

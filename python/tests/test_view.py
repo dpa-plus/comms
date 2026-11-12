@@ -5,7 +5,7 @@ being edited by other people right now.
 
 The assertions that matter most here are the NEGATIVE ones: the picture must not
 contain a word that reads as an order or a verdict. That is not style policing:
-docs/COMMS.md records that order derived from this map was measured at coin-flip
+the README (the task graph and the code map) records that order derived from this map was measured at coin-flip
 accuracy and cut, and a picture is the most persuasive place to reintroduce it by
 accident.
 """

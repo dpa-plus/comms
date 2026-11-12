@@ -20,9 +20,11 @@ from contextlib import redirect_stderr, redirect_stdout
 
 import pytest
 
+from comms_graph import __version__
 from comms_graph import cli as ccli
 from comms_graph import hello as chello
 from comms_graph import log as clog
+from comms_graph import verbs as cverbs
 from comms_graph import state as cstate
 
 
@@ -52,7 +54,7 @@ def _run(repo, *args, session=None, env=None):
         os.environ.update(env or {})
         with redirect_stdout(out), redirect_stderr(err):
             try:
-                code = chello.main(list(args))
+                code = ccli.main(list(args))
             except SystemExit as exc:
                 code = exc.code if isinstance(exc.code, int) else 1
     finally:
@@ -102,7 +104,7 @@ def test_hello_lets_the_pre_edit_hook_recognise_the_actor(tmp_path, monkeypatch)
     code, out, err = _run(repo, "hello", "--as", "claude-dev", session="sess-1")
     assert code == 0, out + err
     st = _state_of(repo)
-    assert ccli._hook_actor(st, "sess-1", "") == "claude-dev"
+    assert st.families["sess-1"].first_actor == "claude-dev"
 
 
 def test_an_explicit_hello_is_written_exactly_like_the_automatic_one(tmp_path, monkeypatch):
@@ -216,14 +218,20 @@ def test_a_positional_name_overrides_the_environment(tmp_path, monkeypatch):
     assert set(_state_of(repo).sessions) == {"alice"}
 
 
-def test_hello_with_no_actor_anywhere_refuses_rather_than_guessing(tmp_path, monkeypatch):
-    """IF THIS FAILS: an unnamed agent gets a default identity, and two agents
-    sharing one name cannot detect a conflict between them: the exact failure
-    the actor requirement exists to prevent."""
+def test_hello_with_no_actor_and_no_session_refuses_rather_than_guessing(tmp_path, monkeypatch):
+    """IF THIS FAILS: an agent with no name and no host session gets a shared
+    default identity, and two agents sharing one name cannot detect a conflict."""
     repo = _repo(tmp_path, monkeypatch)
-    code, out, err = _run(repo, "hello", session="s1")
+    code, out, err = _run(repo, "hello")
     assert code == 2 and "no actor" in err
     assert _events_of(repo) == []
+
+
+def test_hello_in_a_session_with_no_name_uses_the_session_auto_name(tmp_path, monkeypatch):
+    repo = _repo(tmp_path, monkeypatch)
+    code, out, err = _run(repo, "hello", session="5f3a9c-rest-of-id")
+    assert code == 0, out + err
+    assert out.startswith("@claude-5f3a9c registered."), out
 
 
 def test_hello_names_the_actor_on_the_first_line(tmp_path, monkeypatch):
@@ -275,20 +283,8 @@ def test_version_prints_the_version_as_the_second_field(tmp_path, monkeypatch):
     assert code == 0
     fields = out.split()
     assert fields[0] == "comms-graph"
-    assert fields[1] and fields[1][0].isdigit() or fields[1] == "dev"
+    assert fields[1] == chello._version() == __version__
     assert len(out.strip().splitlines()) == 1, "one line, so it stays greppable"
-
-
-def test_version_from_a_source_checkout_says_dev_rather_than_failing(monkeypatch):
-    """IF THIS FAILS: running from a checkout: how everyone working ON comms runs
-    it: raises out of a command whose entire job is to answer a question."""
-    from importlib.metadata import PackageNotFoundError
-
-    def _missing(_name):
-        raise PackageNotFoundError(_name)
-
-    monkeypatch.setattr("importlib.metadata.version", _missing)
-    assert chello._version() == "dev"
 
 
 def test_version_refuses_arguments_instead_of_ignoring_them(tmp_path, monkeypatch):
@@ -306,7 +302,8 @@ def test_help_prints_the_same_usage_the_bare_command_does(tmp_path, monkeypatch)
     repo = _repo(tmp_path, monkeypatch)
     code, out, err = _run(repo, "help")
     assert code == 0
-    assert out.strip() == ccli.USAGE.strip()
+    assert out.strip() == cverbs.global_usage().strip()
+    assert _run(repo, "claim", "--help")[1].startswith("Usage: comms-graph claim")
 
 
 def test_an_unknown_verb_is_a_usage_error_not_a_silent_success(tmp_path, monkeypatch):

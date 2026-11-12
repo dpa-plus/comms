@@ -1,27 +1,28 @@
 {
-  "_comment": "Merge this `hooks` block into your existing ~/.claude/settings.json.",
-  "_comment_shape": "Note the NESTED `hooks` array inside each entry. A flat {matcher, type, command} does not match the settings schema and is silently ignored — the hook simply never runs.",
-  "_comment_actor": "COMMS_ACTOR does NOT need to be set before Claude Code launches. `comms hello` records the agent session id, and the PreToolUse hook resolves the caller from the session id in its payload, so it can tell your own claims from a peer's without inheriting any environment.",
+  "_comment": "Merge this `hooks` block into ~/.claude/settings.json, or just run `comms-graph doctor --fix`, which does it for you and keeps a timestamped backup.",
+  "_comment_shape": "Note the NESTED `hooks` array inside each entry. A flat {matcher, type, command} does not match the settings schema and is silently ignored: the hook simply never runs.",
+  "_comment_path": "Use the absolute path of your comms-graph (`which comms-graph`) so the hook works from any directory.",
 
   "hooks": {
     "SessionStart": [
       {
         "hooks": [
-          {
-            "type": "command",
-            "command": "comms hello && comms status --since 24h"
-          }
+          { "type": "command", "command": "/Users/YOU/.local/bin/comms-graph hook session-start" }
         ]
       }
     ],
     "PreToolUse": [
       {
-        "matcher": "Edit|Write",
+        "matcher": "Edit|Write|NotebookEdit",
         "hooks": [
-          {
-            "type": "command",
-            "command": "comms check --stdin-json"
-          }
+          { "type": "command", "command": "/Users/YOU/.local/bin/comms-graph hook pre-edit" }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          { "type": "command", "command": "/Users/YOU/.local/bin/comms-graph hook session-end" }
         ]
       }
     ]
