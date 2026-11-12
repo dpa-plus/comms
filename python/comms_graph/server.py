@@ -1024,7 +1024,7 @@ body:has(#connectionNotice:not([hidden])) .shell { height: calc(100vh - 100px); 
 .attention p { margin: 0; color: var(--ink-2); }
 .project-details { padding: 12px 14px; color: var(--ink-3); }
 .project-details summary { cursor: pointer; }
-.tdet-note { color: var(--ink-3); line-height: 1.6; overflow-wrap: anywhere; }
+.hint-note { color: var(--ink-3); line-height: 1.6; overflow-wrap: anywhere; }
 .release-wrap { position: fixed; inset: 0; z-index: 80; padding: 20px; background: #0008; display: grid; place-items: center; }
 .release-wrap[hidden] { display: none; }
 .release-box { width: min(460px, 100%); max-height: 95vh; overflow-y: auto; padding: 24px; }
@@ -1126,8 +1126,8 @@ body:has(#connectionNotice:not([hidden])) .shell { height: calc(100vh - 100px); 
 <section class="release-wrap" id="releaseWrap" hidden role="dialog" aria-modal="true" aria-labelledby="releaseTitle" aria-describedby="releaseHelp">
   <form class="card release-box" id="releaseForm">
     <h2 id="releaseTitle">Release this hold?</h2>
-    <div id="releaseScope"></div><p class="tdet-note" id="releaseOwner"></p>
-    <p class="tdet-note" id="releaseHelp">This does not stop the agent or delete its work. A quiet agent may still be running.</p>
+    <div id="releaseScope"></div><p class="hint-note" id="releaseOwner"></p>
+    <p class="hint-note" id="releaseHelp">This does not stop the agent or delete its work. A quiet agent may still be running.</p>
     <label for="releaseActor">Your name</label><input id="releaseActor" required autocomplete="off">
     <label for="releaseReason">Reason</label><textarea id="releaseReason" required placeholder="Why is this hold no longer needed?"></textarea>
     <div id="releaseError" role="alert"></div>
@@ -1692,7 +1692,7 @@ function renderSession() {
   });
   h += "</div>";
   (D.alerts || []).filter(function (a) { return a.kind === "stale-map"; }).forEach(function (a) {
-    h += '<p class="tdet-note">' + esc(a.text) + "</p>";
+    h += '<p class="hint-note">' + esc(a.text) + "</p>";
   });
   h += '<div class="sgen">read ' + esc(D.generated || "") + "</div>";
   el("session").innerHTML = h;
