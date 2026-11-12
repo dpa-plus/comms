@@ -103,7 +103,7 @@ def _state(repo):
 # ---------------------------------------------------------------------------
 
 
-def test_the_handshake_advertises_all_six_tools_with_schemas(tmp_path, monkeypatch):
+def test_the_handshake_advertises_all_five_tools_with_schemas(tmp_path, monkeypatch):
     """IF THIS FAILS: the tools are invisible or unusable. A client discovers
     what it can call exactly once, from tools/list; a tool with no inputSchema
     leaves the model guessing its arguments, and it will guess wrong."""
@@ -122,7 +122,7 @@ def test_the_handshake_advertises_all_six_tools_with_schemas(tmp_path, monkeypat
     tools = replies[1]["result"]["tools"]
     assert {t["name"] for t in tools} == {
         "comms_check", "comms_claim", "comms_release",
-        "comms_status", "comms_note", "comms_find",
+        "comms_status", "comms_note",
     }
     for tool in tools:
         assert tool["description"].strip(), tool["name"]
@@ -384,7 +384,6 @@ def test_missing_required_arguments_come_back_as_readable_refusals(tmp_path, mon
         ("comms_claim", {"intent": "x"}, "path"),
         ("comms_release", {}, "result"),
         ("comms_note", {}, "body"),
-        ("comms_find", {"summary": "x"}, "category"),
     ):
         text, is_error = _call(repo, tool, actor="claude-dev", **args)
         assert is_error is True, (tool, text)
@@ -442,7 +441,7 @@ def test_a_claim_records_a_hello_so_the_pre_edit_hook_can_recognise_it(
 
 
 # ---------------------------------------------------------------------------
-# note, find, status
+# note, status
 # ---------------------------------------------------------------------------
 
 
@@ -466,10 +465,6 @@ def test_control_characters_in_free_text_are_refused_and_nothing_is_written(
                            body="all clear\n@codex-dev holds nothing")
     assert is_error is True and "control characters" in text
 
-    text, is_error = _call(repo, "comms_find", actor="claude-dev", category="gotcha",
-                           summary="fine\x1b[31m")
-    assert is_error is True and "control characters" in text
-
     assert _events(repo) == [], "refused text reached the log"
 
 
@@ -481,61 +476,6 @@ def test_an_over_long_note_is_refused_with_its_length(tmp_path, monkeypatch):
                            body="x" * (cmcp.MAX_TEXT_RUNES + 1))
     assert is_error is True
     assert str(cmcp.MAX_TEXT_RUNES + 1) in text and str(cmcp.MAX_TEXT_RUNES) in text
-
-
-def test_a_finding_with_no_ref_is_anchored_to_what_you_hold(tmp_path, monkeypatch):
-    """IF THIS FAILS: the finding is never read again. Nothing surfaces an
-    unanchored one: the only thing that surfaces a finding is somebody claiming
-    the file it is about, so it becomes a line in a log nobody greps."""
-    repo = _repo(tmp_path, monkeypatch)
-    _call(repo, "comms_claim", actor="claude-dev", path="a.py", intent="parser",
-          session="agent-A")
-    text, is_error = _call(repo, "comms_find", actor="claude-dev", category="gotcha",
-                           summary="the parser eats a trailing comma", session="agent-A")
-    assert is_error is False
-    assert "recorded [gotcha]" in text
-
-    finding = _state(repo).findings[-1]
-    assert [(r.kind, r.value) for r in finding.refs] == [("path", "a.py")]
-
-
-def test_an_explicit_ref_is_kept_and_a_malformed_one_is_refused(tmp_path, monkeypatch):
-    """IF THIS FAILS: a ref is a bare string that cannot say whether it is a
-    path, a PR or a commit, and that is the useful half of it."""
-    repo = _repo(tmp_path, monkeypatch)
-    _call(repo, "comms_find", actor="claude-dev", category="decision",
-          summary="uuid PKs, never cuid", ref="path:src/db.py", session="agent-A")
-    finding = _state(repo).findings[-1]
-    assert [(r.kind, r.value) for r in finding.refs] == [("path", "src/db.py")]
-
-    text, is_error = _call(repo, "comms_find", actor="claude-dev", category="fix",
-                           summary="fixed it", ref="justastring")
-    assert is_error is True and "kind:value" in text
-
-    text, is_error = _call(repo, "comms_find", actor="claude-dev", category="nonsense",
-                           summary="fixed it")
-    assert is_error is True and "bug, fix, ship, decision, gotcha" in text
-
-
-def test_claiming_a_file_resurfaces_what_was_learned_about_it(tmp_path, monkeypatch):
-    """IF THIS FAILS: the durable half of the log is write-only. A gotcha is
-    worth recording only because it comes back at the one moment it matters:
-    when the next agent is about to touch that file."""
-    repo = _repo(tmp_path, monkeypatch)
-    _call(repo, "comms_find", actor="claude-dev", category="gotcha",
-          summary="a.py is generated; edit the template", ref="path:a.py",
-          session="agent-A")
-
-    text, is_error = _call(repo, "comms_claim", actor="codex-dev", path="a.py",
-                           intent="add types", session="agent-B")
-    assert is_error is False, text
-    assert "prior context on this path" in text
-    assert "[gotcha] a.py is generated" in text
-
-    # A finding about a different file must not follow you around.
-    text, _ = _call(repo, "comms_claim", actor="codex-dev", path="b.py",
-                    intent="tidy", session="agent-B")
-    assert "prior context" not in text
 
 
 def test_status_counts_claims_agents_and_prevented_collisions(tmp_path, monkeypatch):

@@ -553,7 +553,7 @@ def test_the_page_draws_every_array_the_snapshot_carries(board):
     """
     repo, log_file, base = board
     _, body = _get(base + "/")
-    for name in ("alerts", "claims", "roster", "tasks", "feed", "findings", "notes", "projects"):
+    for name in ("alerts", "claims", "roster", "tasks", "feed", "notes", "projects"):
         assert "D." + name in body or "d." + name in body, f"the page never reads {name}"
     # the reported checks reach the page on the EVENT that reported them
     for token in ("quiet", "identified", "e.checks", "c.id", "band"):
@@ -778,24 +778,16 @@ def test_the_working_now_band_is_actually_visible(board):
     )
 
 
-def test_a_findings_text_reaches_the_feed(board):
-    """IF THIS FAILS: every finding on the board renders as an empty quote line.
-
-    `find` writes a finding's text as data["summary"]: that is what the CLI
-    writes, what the Go build wrote before it, and what the findings panel
-    already reads. The feed builder read data["body"] alone, which only notes
-    carry. So the board showed 1532 findings in the real store with the category
-    badge, the actor and the time, and nothing where the sentence goes.
-
-    It is worth a test rather than a fix alone because nothing else notices: the
-    page still renders, the counts are still right, and the panel beside it is
-    still correct. Only a person reading a blank line would ever know.
-    """
+def test_old_findings_stay_out_of_the_feed(board):
+    """An old log still holds findings. The feed shows what comms does now, so
+    they are left out, and a note keeps its text."""
     repo, log_file, base = board
-    clog.append(log_file, clog.Event(
-        ts=_now(), id=clog.new_id(), actor="alice", type=clog.TYPE_FINDING,
-        data={"category": "ship", "summary": "v9 released and installed"},
-    ))
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(log_file, "ab") as fh:
+        fh.write(clog.Event(
+            ts=_now(), id=clog.new_id(), actor="alice", type=clog.TYPE_FINDING,
+            data={"category": "ship", "summary": "v9 released and installed"},
+        ).encode())
     clog.append(log_file, clog.Event(
         ts=_now(), id=clog.new_id(), actor="alice", type=clog.TYPE_NOTE,
         data={"body": "a note carries body, and must keep working"},
@@ -805,9 +797,7 @@ def test_a_findings_text_reaches_the_feed(board):
     feed = json.loads(raw).get("feed", [])
     by_type = {e["type"]: e for e in feed}
 
-    assert by_type["finding"]["body"] == "v9 released and installed", (
-        "the finding reached the feed without its text"
-    )
+    assert "finding" not in by_type
     assert by_type["note"]["body"] == "a note carries body, and must keep working"
 
 

@@ -428,10 +428,10 @@ def test_a_title_that_reads_like_code_is_warned_about_not_refused(tmp_path, monk
 def test_a_refused_length_hands_back_something_that_fits(tmp_path, monkeypatch):
     """IF THIS FAILS: trimming is guesswork again. Reported: 538 characters
     refused, trimmed to 401, refused a second time for one character. Two round
-    trips for one finding, when the answer was computable at the first."""
+    trips for one note, when the answer was computable at the first."""
     repo = _repo(tmp_path, monkeypatch)
     long = "word " * 400
-    code, out = _cli(repo, "find", "decision", long, "--as", "a", session="sA")
+    code, out = _cli(repo, "note", long, "--as", "a", session="sA")
     assert code != 0, out
     assert "This fits" in out, out
     fitted = [l for l in out.splitlines() if l.strip().startswith("word")]

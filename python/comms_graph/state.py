@@ -2,7 +2,7 @@
 
 Port of comms' internal/state/state.go (the coordination half: the task graph
 lands separately). Given the events, it answers, which claims are live, who is
-still around, what was found, and which claims were refused.
+still around, what was said, and which claims were refused.
 
 Two properties are load-bearing and everything below is arranged around them:
 
@@ -29,9 +29,11 @@ from typing import Any
 
 from . import task as _task
 from .scope import Scope
-from .log import KNOWN_TYPES as _LOG_TYPES
+from .log import WRITTEN_TYPES
 
-KNOWN_TYPES = frozenset(_LOG_TYPES)
+# Only the types this build writes are folded. Older types in old logs are
+# dropped at the trust boundary, like any type the fold does not know.
+KNOWN_TYPES = frozenset(WRITTEN_TYPES)
 from .scope import overlaps as scopes_overlap
 from .scope import parse as parse_scope
 
@@ -39,39 +41,13 @@ __all__ = [
     "Blocked",
     "Claim",
     "EndedCommsSession",
-    "Finding",
     "Note",
-    "Ref",
     "Release",
     "Session",
     "State",
     "fold",
 ]
 
-
-# The types this build understands. An event of any other type is dropped, the
-# way Go's Decode rejects it, but the task types stay in the set even though
-# the task graph is not folded yet, because a dropped event is also a lost
-# heartbeat and a lost entry in the session window counts.
-# Imported, never re-listed. log.py keeps the single ordered tuple precisely
-# because the Go port had two hand-maintained whitelists in two packages and
-# adding a type meant remembering both, and this module had quietly become the
-# second one. When the two drift, the reader accepts events the reducer silently
-# drops, and a dropped event is a lost heartbeat that can suppress a legitimate
-# steal.
-_UNUSED_LOCAL_TYPES = frozenset(
-    {
-        "hello",
-        "claim",
-        "release",
-        "note",
-        "finding",
-        "blocked",
-        "task",
-        "task_edge",
-        "task_state",
-    }
-)
 
 # Go rejects a zero time.Time, which is what an absent `ts` unmarshals to. The
 # same string reaching us from a Go writer means the same thing: no timestamp.
@@ -156,26 +132,6 @@ class Session:
 
 
 @dataclass
-class Ref:
-    """A `kind:value` pair attached to a finding."""
-
-    kind: str
-    value: str
-
-
-@dataclass
-class Finding:
-    id: str
-    ts: datetime
-    actor: str
-    category: str = ""
-    summary: str = ""
-    refs: list[Ref] = field(default_factory=list)
-    session_id: str = ""
-    session_name: str = ""
-
-
-@dataclass
 class Note:
     id: str
     ts: datetime
@@ -250,7 +206,6 @@ class EndedCommsSession:
     released_refs: list[str] = field(default_factory=list)
     event_count: int = 0
     claim_count: int = 0
-    finding_count: int = 0
     note_count: int = 0
 
 
@@ -264,7 +219,6 @@ class State:
     # Most recent hello per actor.
     sessions: dict[str, Session] = field(default_factory=dict)
     # Chronological feeds. Callers filter by `since`.
-    findings: list[Finding] = field(default_factory=list)
     notes: list[Note] = field(default_factory=list)
     releases: list[Release] = field(default_factory=list)
     blocked: list[Blocked] = field(default_factory=list)
@@ -393,7 +347,6 @@ class _Window:
     actors: set[str] = field(default_factory=set)
     events: int = 0
     claims: int = 0
-    findings: int = 0
     notes: int = 0
 
 
@@ -451,7 +404,7 @@ def fold(events: Iterable[Any]) -> State:
     # The unnamed window: everything since the last global comms-session end.
     window_start: datetime | None = None
     window_actors: set[str] = set()
-    window_events = window_claims = window_findings = window_notes = 0
+    window_events = window_claims = window_notes = 0
     named_windows: dict[str, _Window] = {}
 
     # last_seen[actor] = that actor's most recent event of ANY type. Because
@@ -467,8 +420,6 @@ def fold(events: Iterable[Any]) -> State:
         last_seen[ev.actor] = ev.ts
         if ev.type == "claim":
             window_claims += 1
-        elif ev.type == "finding":
-            window_findings += 1
         elif ev.type == "note":
             window_notes += 1
 
@@ -483,8 +434,6 @@ def fold(events: Iterable[Any]) -> State:
             named.actors.add(ev.actor)
             if ev.type == "claim":
                 named.claims += 1
-            elif ev.type == "finding":
-                named.findings += 1
             elif ev.type == "note":
                 named.notes += 1
 
@@ -625,11 +574,11 @@ def fold(events: Iterable[Any]) -> State:
                 if session_id and named is not None:
                     started_at = named.start
                     actors = _sorted_actors(named.actors)
-                    counts = (named.events, named.claims, named.findings, named.notes)
+                    counts = (named.events, named.claims, named.notes)
                 else:
                     started_at = window_start
                     actors = _sorted_actors(window_actors)
-                    counts = (window_events, window_claims, window_findings, window_notes)
+                    counts = (window_events, window_claims, window_notes)
                 state.ended_comms_sessions.append(
                     EndedCommsSession(
                         id=ev.id,
@@ -643,8 +592,7 @@ def fold(events: Iterable[Any]) -> State:
                         released_refs=list(refs),
                         event_count=counts[0],
                         claim_count=counts[1],
-                        finding_count=counts[2],
-                        note_count=counts[3],
+                        note_count=counts[2],
                     )
                 )
                 if not session_id:
@@ -654,7 +602,7 @@ def fold(events: Iterable[Any]) -> State:
                     named_windows = {}
                     window_start = None
                     window_actors = set()
-                    window_events = window_claims = window_findings = window_notes = 0
+                    window_events = window_claims = window_notes = 0
                     # last_seen is window-scoped like window_actors: every
                     # surviving actor has to say hello again, so keeping its old
                     # heartbeat would let a pre-wipe timestamp resurrect a
@@ -690,20 +638,6 @@ def fold(events: Iterable[Any]) -> State:
                              if isinstance(h, (str, int))] if isinstance(ev.data, dict) else [],
                     task=_string_of(ev.data, "task"),
                     reason=_string_of(ev.data, "reason"),
-                    session_id=session_id,
-                    session_name=_string_of(ev.data, "comms_session_name"),
-                )
-            )
-
-        elif ev.type == "finding":
-            state.findings.append(
-                Finding(
-                    id=ev.id,
-                    ts=ev.ts,
-                    actor=ev.actor,
-                    category=_string_of(ev.data, "category"),
-                    summary=_string_of(ev.data, "summary"),
-                    refs=_parse_refs(ev.data),
                     session_id=session_id,
                     session_name=_string_of(ev.data, "comms_session_name"),
                 )
@@ -972,15 +906,3 @@ def _ref_list(data: Mapping[str, Any], key: str) -> list[str]:
     if isinstance(value, (list, tuple)):
         return [item for item in value if isinstance(item, str)]
     return []
-
-
-def _parse_refs(data: Mapping[str, Any]) -> list[Ref]:
-    """Read a finding's `refs`: a list of `{kind, value}` objects."""
-    value = data.get("refs")
-    if not isinstance(value, (list, tuple)):
-        return []
-    return [
-        Ref(kind=_string_of(item, "kind"), value=_string_of(item, "value"))
-        for item in value
-        if isinstance(item, Mapping)
-    ]

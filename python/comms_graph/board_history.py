@@ -1,5 +1,7 @@
 """Paged, human-readable history; the event log remains the source of truth."""
 
+from .log import WRITTEN_TYPES
+
 
 def text(data, key):
     value = data.get(key) if isinstance(data, dict) else None
@@ -13,6 +15,8 @@ def history_page(events, *, actor="", task="", before="", limit=60):
         raise ValueError("The history position is no longer available. Reload history.")
     rows = []
     for ev in events[:end]:
+        if ev.type not in WRITTEN_TYPES:
+            continue
         data = ev.data if isinstance(ev.data, dict) else {}
         refs = data.get("refs", [])
         if isinstance(refs, str):
@@ -33,8 +37,8 @@ def history_page(events, *, actor="", task="", before="", limit=60):
                "original_actors": list(dict.fromkeys(filter(None, owners + [original_actor]))),
                "tasks": tasks, "scopes": scopes, "scope": scopes[0] if scopes else "",
                "ts": ev.ts.isoformat().replace("+00:00", "Z"),
-               **{key: text(data, key) for key in ("task", "state", "intent", "reason", "result", "category", "steals", "from", "to", "kind")},
-               "body": text(data, "body") or text(data, "summary"),
+               **{key: text(data, key) for key in ("task", "state", "intent", "reason", "result", "steals", "from", "to", "kind")},
+               "body": text(data, "body"),
                "checks": {str(k): str(v) for k, v in data.get("checks", {}).items()}
                if isinstance(data.get("checks"), dict) else {}}
         previous = rows[-1] if rows else None

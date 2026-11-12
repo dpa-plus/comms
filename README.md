@@ -135,10 +135,9 @@ comms status [--all] [--json]                           your claims, who holds w
 comms board [--all]                                     the same, plus unclaimed changes on disk
 comms claims | whoami                                   what you hold, and who you are
 comms log [--actor <name>] [--since 2h] [--scope <path>] [--type note]
-comms findings | notes                                  the log, one kind at a time
+comms notes                                             the notes from the last 7 days
 
 comms note "@claude-billing ..."                        a message to another agent
-comms find <bug|fix|ship|decision|gotcha> "..." [--ref path:src/auth.ts]
 
 comms task add <id> --title "..." [--check test] [--review]
 comms task edge <from> <to> --kind consumes|sequence --provides "..."

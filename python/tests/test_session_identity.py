@@ -485,7 +485,7 @@ def test_a_log_with_every_old_event_type_still_folds_and_enforces(tmp_path):
     assert not st.claims["01K6F0000000000000000000A5"].auto
     assert st.families["old-s"].actors == {"old-dev"}
     assert set(st.tasks) == {"fix-auth", "ship-auth"}
-    assert len(st.blocked) == 1 and len(st.notes) == 1 and len(st.findings) == 1
+    assert len(st.blocked) == 1 and len(st.notes) == 1
 
     assert _run(repo, ["status"])[0] == 0
     assert _edit(repo, "src/a.py", "old-s")[0] == 0, "the old hello still identifies its session"

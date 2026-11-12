@@ -2135,72 +2135,10 @@ def _task_review(argv: list[str]) -> int:
 
 
 # ---------------------------------------------------------------------------
-# find / note: what an agent learned, for the person watching
+# note: a short FYI for the other agents and the person watching
 # ---------------------------------------------------------------------------
 
-#: The five that earn their own word. Not a taxonomy for its own sake: each one
-#: answers a different question a person asks the board, and a single "note"
-#: bucket collapses them into a wall the reader has to sort by hand.
-FINDING_CATEGORIES = {
-    "bug": "an open problem",
-    "fix": "a problem now resolved",
-    "ship": "released or deployed",
-    "decision": "an architectural choice and its reason",
-    "gotcha": "a trap the next agent would fall into",
-}
-
-
-def _cmd_find(argv: list[str]) -> int:
-    """Record something worth keeping. The fold has always stored these and
-    nothing in this build could write one, so `state.findings` was permanently
-    empty and the board's panel over it permanently blank."""
-    positional, flags = _parse_flags(argv)
-    if len(positional) < 2:
-        _err("error: find needs a category and a summary")
-        _err('  e.g. comms-graph find decision "uuid PKs, never cuid" --as me')
-        _err("  Categories: " + ", ".join(f"{k} ({v})" for k, v in FINDING_CATEGORIES.items()))
-        return EXIT_USAGE
-    category = positional[0].strip().lower()
-    if category not in FINDING_CATEGORIES:
-        _err(f"error: {category!r} is not a category")
-        _err("  Use one of: " + ", ".join(FINDING_CATEGORIES))
-        return EXIT_USAGE
-    summary = " ".join(positional[1:]).strip()
-    if not summary:
-        _err("error: find needs something to say")
-        return EXIT_USAGE
-    if len(summary) > NOTE_MAX:
-        return _too_long("finding", summary, NOTE_MAX)
-    actor = _actor(flags)
-    root, log_file, lock_file = _task_runtime(flags)
-
-    # `--ref path:src/auth.ts`, `--ref pr:#321`. Kind and value, because a bare
-    # string cannot say which it is and that is the useful half.
-    refs = []
-    for raw in _repeated(argv, "ref"):
-        kind, _, value = raw.partition(":")
-        if not value:
-            kind, value = "note", raw
-        refs.append({"kind": kind.strip(), "value": value.strip()})
-
-    data: dict = {"category": category, "summary": summary}
-    if refs:
-        data["refs"] = refs
-    with _lock.file_lock(lock_file):
-        st = _read_state(log_file)
-        greeting = _hello_if_unknown(st, actor)
-        event = _tagged(st, actor, _log.TYPE_FINDING, None, data)
-        if greeting is None:
-            _log.append(log_file, event)
-        else:
-            _log.append_batch(log_file, [greeting, event])
-    print(f"{category.upper()} recorded by @{actor}")
-    print(f"  {summary}")
-    return EXIT_OK
-
-
-
-#: Notes and findings are one line somebody reads later, not the writeup. Agents
+#: A note is one line somebody reads later, not the writeup. Agents
 #: hit the old 400 cap 48 times, so it is now 1000.
 NOTE_MAX = 1000
 
@@ -2225,7 +2163,7 @@ def _too_long(kind: str, text: str, cap: int) -> int:
     _err(f"    ⟨{over} more character{'s' if over != 1 else ''} after that⟩")
     # A version that FITS, cut at a word. Reported: an agent trimmed to 538, was
     # refused, trimmed again to 401, and was refused a second time for one
-    # character. Two round trips for one finding, when the answer was always
+    # character. Two round trips for one note, when the answer was always
     # computable here.
     fits = text[:cap].rsplit(" ", 1)[0] if " " in text[:cap] else text[:cap]
     if fits and len(fits) < len(text):
@@ -2239,9 +2177,7 @@ def _too_long(kind: str, text: str, cap: int) -> int:
 
 
 def _cmd_note(argv: list[str]) -> int:
-    """A short FYI. Deliberately separate from `find`: a note is something you
-    would say out loud and forget, a finding is something the next agent needs
-    six weeks from now, and mixing them buries the second in the first."""
+    """A short FYI, up to NOTE_MAX characters. Start with @name to address one agent."""
     positional, flags = _parse_flags(argv)
     body = " ".join(positional).strip()
     if not body:
@@ -2689,7 +2625,7 @@ def _deliver_addressed_notes(root: Path, actor: str, restate: bool = False) -> N
 
     waiting = []
     for ev in events:
-        if ev.type not in (_log.TYPE_NOTE, _log.TYPE_FINDING):
+        if ev.type != _log.TYPE_NOTE:
             continue
         if _task.base_actor((ev.actor or "").lstrip("@")).casefold() == \
                 _task.base_actor(actor.lstrip("@")).casefold():
@@ -2798,7 +2734,6 @@ _HANDLERS = {
     "next": _cmd_next,
     "brief": _cmd_brief,
     "tasks": _cmd_tasks,
-    "find": _cmd_find,
     "note": _cmd_note,
     "doc": _lazy("doc", "main"),
     "status": _lazy("status", "status_main"),

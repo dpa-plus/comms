@@ -41,21 +41,14 @@ If an edit of yours is refused, that refusal is the tool working. Do not reach
 for another way to make the same edit: a different tool, a shell command, a
 changed actor name. Say what you were blocked on and stop.
 
-### What you learned
+### Notes
 
-When you settle something the next agent would otherwise re-decide, or hit a trap
-they would fall into, write it down. It is the only part of your reasoning that
-outlives your session.
+To tell the other agents something, leave a note. Start it with @name to
+address one agent.
 
 ```
-comms-graph find decision "uuid PKs everywhere, never cuid" --as <you> --ref path:src/db.ts
-comms-graph find gotcha "the encryption key is immutable after first deploy" --as <you>
 comms-graph note "schema migration lands next session" --as <you>
 ```
-
-`bug` is open, `fix` is closed, `ship` is out, `decision` is why, `gotcha` is what
-will bite. A note is the throwaway version: say it and forget it. A finding is
-the one somebody reads six weeks from now, so write the reason, not the summary.
 
 ### Work that is planned
 

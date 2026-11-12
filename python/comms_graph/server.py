@@ -454,20 +454,6 @@ def _snapshot(root: Path, log_file: Path, graph_path: Path | None = None) -> dic
             "closed": sum(1 for t in tasks if t["phase"] == _task.PHASE_CLOSED),
             "cycle": sum(1 for t in tasks if t["phase"] == _task.PHASE_CYCLE),
         },
-        # `summary`, not `body`. The field was read by a name Finding does not
-        # have, so every finding would have rendered as a category and a blank
-        # line, and nothing caught it, because there was no way to write a
-        # finding in this build for a test to have one to render.
-        "findings": [
-            {"actor": f.actor, "category": getattr(f, "category", ""),
-             "body": getattr(f, "summary", ""),
-             # kind AND value: a bare "src/auth.ts" and a bare "#321" are both
-             # just strings, and which one it is is the useful half.
-             "refs": [f"{getattr(r, 'kind', '')}:{getattr(r, 'value', '')}".strip(":")
-                      for r in (getattr(f, "refs", []) or [])],
-             "ts": f.ts.isoformat().replace("+00:00", "Z")}
-            for f in list(st.findings)[-12:][::-1]
-        ],
         "notes": [
             {"actor": n.actor, "body": getattr(n, "body", ""),
              "ts": n.ts.isoformat().replace("+00:00", "Z")}
@@ -500,7 +486,7 @@ _PAGE = """<!doctype html>
    One live stream is the product. Everything else is a rail.
    Palette: warm paper + warm charcoal. Colour is SEMANTIC only:
      blue  = current / in progress   (also the brand accent)
-     amber = needs a human           (findings, awaiting-review)
+     amber = needs a human           (awaiting-review)
      red   = blocked / stale / error
      green = done
      grey  = inert information       (notes, ready, archive)
@@ -982,7 +968,6 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
 /* glyph shapes carry the type as well as the colour (not colour-only) */
 .g-claim i     { background: var(--accent); border-radius: 1px; }
 .g-release i   { background: transparent; border: 1.5px solid var(--green); border-radius: 1px; }
-.g-finding i   { background: var(--amber); border-radius: 99px; }
 .g-note i      { background: transparent; border: 1.5px solid var(--ink-4); border-radius: 99px; }
 .g-task i      { background: var(--accent); transform: rotate(45deg); }
 .g-task-blocked i { background: var(--red); transform: rotate(45deg); }
@@ -1014,7 +999,6 @@ button.danger:hover { color: var(--red); border-color: var(--red-line); backgrou
   border-radius: 0 3px 3px 0;
   font-size: 11.5px; color: var(--ink-2); line-height: 1.45;
 }
-.ev.k-finding .quote { border-left-color: var(--amber); }
 .ev.k-note .quote { border-left-color: var(--line-2); }
 .ev .quote code { font-family: var(--mono); font-size: 11px; background: var(--surface-3); padding: 0 3px; border-radius: 2px; }
 .sev {
@@ -2054,7 +2038,7 @@ function submitRelease(e) {
 /* ---------- the stream ------------------------------------------------- */
 
 var KINDS = [
-  ["all", "All"], ["claim", "Claims"], ["finding", "Findings"],
+  ["all", "All"], ["claim", "Claims"],
   ["note", "Notes"], ["task", "Tasks"], ["session", "Session"]
 ];
 function matchKind(e) {
@@ -2126,7 +2110,6 @@ function renderChips() {
 function glyphClass(e) {
   if (e.type === "claim") return "g-claim";
   if (e.type === "release") return "g-release";
-  if (e.type === "finding") return e.category === "bug" ? "g-task-blocked" : "g-finding";
   if (e.type === "note") return "g-note";
   if (e.type === "hello") return "g-agent";
   if (e.type === "blocked") return "g-stale";
@@ -2143,11 +2126,6 @@ function stateChip(v) {
   var label = v === "review" ? "awaiting-review" : v;
   return '<span class="state ' + cls + '">' + esc(label) + "</span>";
 }
-// A finding's CATEGORY, not a severity: this build records what kind of thing
-// it is, and colouring `decision` red because it sorts near `bug` would be a
-// lie dressed as a signal.
-function catClass(c) { return c === "bug" ? "high" : c === "gotcha" ? "med" : "low"; }
-
 function eventRow(e, isLast) {
   // `last` stops the timeline spine running past the final row of a group.
   var s = '<div class="ev k-' + esc(e.type) + (isLast ? " last" : "") + '">';
@@ -2209,12 +2187,6 @@ function eventRow(e, isLast) {
   } else if (e.type === "task" || e.type === "task_edge") {
     s += '<div class="l1"><span class="verb">' + (e.type === "task" ? "declared" : "ordered") + "</span>";
     s += '<span class="mono">' + esc(e.task || "") + "</span></div>";
-    s += '<div class="l2"><span class="actor">@' + esc(e.actor) + "</span></div>";
-
-  } else if (e.type === "finding") {
-    s += '<div class="l1"><span class="sev ' + catClass(e.category) + '">' + esc(e.category || "note") + "</span>";
-    s += '<span class="verb w">finding</span></div>';
-    s += '<div class="quote">' + esc(e.body || "") + "</div>";
     s += '<div class="l2"><span class="actor">@' + esc(e.actor) + "</span></div>";
 
   } else if (e.type === "note") {
@@ -2943,7 +2915,7 @@ function renderSession() {
   var h = '<div class="sroot mono" title="' + esc(root) + '">' + esc(shortRoot) + "</div>";
   h += '<div class="stats">';
   [["events", (D.feed || []).length], ["claims", c.claims || 0],
-   ["findings", (D.findings || []).length], ["notes", (D.notes || []).length]].forEach(function (kv) {
+   ["notes", (D.notes || []).length]].forEach(function (kv) {
     h += '<div class="scell"><div class="sn mono">' + kv[1] + '</div><div class="sl">' + kv[0].toUpperCase() + "</div></div>";
   });
   h += "</div>";

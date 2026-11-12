@@ -10,7 +10,7 @@ THE MECHANIC, WHICH IS NOT AN EVENT TYPE. There is no ``session`` event. A
 session exists because the actor's most recent ``hello`` carries
 ``comms_session_id`` / ``comms_session_name``, and because every event that
 actor writes afterwards repeats those two keys in its ``data``. The fold in
-``state.py`` already reads them everywhere. Claim, Note, Finding, Blocked,
+``state.py`` already reads them everywhere. Claim, Note, Blocked,
 Release and the ended-session archive all have the pair, so this module only
 has to WRITE them: the hello here, and :func:`stamp` for every other verb.
 
@@ -591,7 +591,7 @@ def _retire(argv: list[str]) -> int:
 def _lead(argv: list[str]) -> int:
     """`session lead [<actor>]`: move leadership to one active actor.
 
-    The leader's only extra privilege is posting priority notes and findings, so
+    The leader's only extra privilege is posting priority notes, so
     this is a small decision; it is a command rather than an election because
     the alternative: inferring it from who greeted first: cannot be corrected
     when the first one to greet is the one who has gone quiet.

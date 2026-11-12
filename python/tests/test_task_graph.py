@@ -1781,48 +1781,6 @@ def test_a_homoglyph_name_does_not_launder_a_sign_off(tmp_path, monkeypatch):
     assert st2.tasks["t7"].verified_by == "quinn"
 
 
-def test_a_finding_can_be_written_and_reaches_the_board(tmp_path, monkeypatch):
-    """IF THIS FAILS: the one place agents record what they learned is unwritable.
-
-    The fold has always folded `finding` and `note` events into state.findings
-    and state.notes, and this build had no verb to write either, so both lists
-    were permanently empty and the board's panels over them permanently blank.
-    The board also read the finding's text as `body`, a field Finding does not
-    have, so even a hand-written one would have rendered as a blank line.
-    """
-    from comms_graph import server as cserver
-
-    repo = _repo(tmp_path, monkeypatch)
-    code, out = _cli(repo, "find", "decision", "uuid PKs everywhere, never cuid",
-                     "--as", "claude-dev", "--ref", "path:src/db.ts", "--ref", "pr:#321",
-                     session="sA")
-    assert code == 0, out
-    code, out = _cli(repo, "note", "schema migration lands next session",
-                     "--as", "claude-dev", session="sA")
-    assert code == 0, out
-
-    from comms_graph import cli as ccli
-    log_file, _ = ccli._store(ccli._repo_root(str(repo)), create=False)
-    snap = cserver._snapshot(repo, log_file)
-    assert len(snap["findings"]) == 1, snap["findings"]
-    f = snap["findings"][0]
-    assert f["category"] == "decision"
-    assert f["body"] == "uuid PKs everywhere, never cuid", f
-    assert f["refs"] == ["path:src/db.ts", "pr:#321"], f
-    assert snap["notes"][0]["body"] == "schema migration lands next session"
-
-
-def test_a_finding_needs_a_category_that_means_something(tmp_path, monkeypatch):
-    """Five categories, each answering a different question. A free-text bucket
-    collapses them into a wall the reader has to sort by hand."""
-    repo = _repo(tmp_path, monkeypatch)
-    code, out = _cli(repo, "find", "musing", "hmm", "--as", "a", session="sA")
-    assert code != 0
-    assert "not a category" in out and "gotcha" in out, out
-    code, out = _cli(repo, "find", "decision", "--as", "a", session="sA")
-    assert code != 0, out
-
-
 def test_the_board_carries_what_a_person_needs_to_see(tmp_path, monkeypatch):
     """IF THIS FAILS: the board shows activity but not whether it is stuck.
 

@@ -191,8 +191,8 @@ agent checks it. That is a choice of the thread that added it, never of comms.
 The MCP server was cut along with the rest of the earlier server's ceremony, and
 later brought back. The ceremony was the problem, not the transport. A tool that
 sits in an agent's tool list every turn gets used more than a command the agent has
-to be told about. `comms mcp` serves six tools that map one to one onto `check`,
-`claim`, `release`, `status`, `note` and `find`, with no registration and no inbox.
+to be told about. `comms mcp` serves five tools that map one to one onto `check`,
+`claim`, `release`, `status` and `note`, with no registration and no inbox.
 It speaks JSON-RPC over stdio without an SDK, and every tool takes an `actor`
 argument because one server process may act for several agents.
 
