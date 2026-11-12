@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-12
+
+### Fixed
+
+- The board run as a login service opened on its own empty folder and said
+  nobody holds a file, even when a project on the rail had holders. With no
+  project chosen it now opens the most recently active project.
+
 ## [0.6.0] - 2026-11-12
 
 comms does one job: it keeps agents that share a repository off each other's
