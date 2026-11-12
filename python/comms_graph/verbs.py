@@ -103,7 +103,8 @@ _TASK_DONE = Verb(
     usage=('task done <id> [--check name=pass]... [--note "..."]...',),
     flags=(
         Flag("check", "name=pass", "result of a declared check (repeatable)"),
-        Flag("note", "<text>", "a decision worth carrying forward (repeatable)"),
+        Flag("note", "<text>", "a decision worth carrying forward (repeatable)",
+             aliases=("summary", "result")),
     ))
 _TASK_REVIEW = Verb(
     "review", "verify or reject somebody else's finished task", writes=True,
@@ -132,12 +133,13 @@ VERBS: tuple[Verb, ...] = (
              Flag("map", "", "also print how this ground sits on the code map"),
          )),
     Verb("release", "give ground back", writes=True,
-         usage=('release [<scope|claim-id>...] [--result "..."]   no scope: everything you hold',
+         usage=('release [<scope|claim-id>...] [--task <id>] [--result "..."]   no scope: everything you hold',
                 '  release <claim-id> --force --reason "..."   free ground somebody else abandoned'),
          flags=(
              Flag("result", "<text>", "one line on how it went"),
              Flag("all-mine", "", "release everything you hold (the default with no scope)"),
              Flag("latest", "", "release only your most recent claim"),
+             Flag("task", "<id>", "release only your claims tagged to this task"),
              Flag("force", "", "end a claim that is not yours (needs a claim id)"),
              Flag("reason", "<text>", "why it is not theirs to hold", needs="force",
                   hint='To say how it went, use --result "...".'),

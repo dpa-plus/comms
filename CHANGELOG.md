@@ -31,9 +31,11 @@ events. Upgrading has one step, `sh install.sh`, described in
 - **The first edit claims the file.** `hook pre-edit` records a claim the first
   time a session edits a free file through Edit, Write or NotebookEdit. Claims
   made this way are released at session end, when the same session claims the
-  file by hand, or when someone else wants the file and it has nothing
-  uncommitted. Claiming before the first edit had stayed at about 65% across
-  model generations.
+  file by hand, or when someone else wants the file, the claim is more than
+  five minutes old, and the file has nothing uncommitted in any worktree. When
+  two sessions edit one free file at the same moment, one gets the claim and
+  the other is blocked. Claiming before the first edit had stayed at about 65%
+  across model generations.
 - `status` and `board` print a short view by default: your claims, who else
   holds how many files, notes to you. `--all` prints everything and `--json`
   is unchanged.

@@ -34,7 +34,8 @@ In a repository that uses comms, a Claude Code agent gets this for free:
 - **A check on every edit.** If another agent holds the file, the edit is refused
   and the agent is told who holds it. If the file is free, the first edit claims it.
 - **A clean exit.** When the session ends, the claims made by editing are given back.
-  One is also given back early if its file is committed and another agent wants it.
+  One is also given back early when another agent wants the file, the claim is
+  more than five minutes old, and the file has nothing uncommitted in any worktree.
 - **A check on every commit**, once the commit guard is installed in the repository.
   A commit that would include another agent's claimed file is refused.
 
@@ -121,7 +122,7 @@ repository share one store.
 ```
 comms claim <path> [<path> ...] --intent "..." [--task <id>]
 comms claim <path> --steal <claim-id> --reason "..."    take a claim over, saying why
-comms release [<path> ...] [--all-mine] --result "..."
+comms release [<path> ...] [--all-mine] [--task <id>] --result "..."
 comms release <claim-id> --force --reason "..."         free a claim someone abandoned
 comms check <path> [<path> ...]                         would an edit here be refused?
 comms check --staged                                    would this commit be refused?

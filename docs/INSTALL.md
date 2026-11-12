@@ -48,7 +48,9 @@ every check passes and 1 when something still needs fixing.
 `comms doctor --fix` repairs what it can and prints each change:
 
 - It links the two commands into `~/.local/bin`.
-- It writes three hooks into `~/.claude/settings.json`. It saves a timestamped
+- It writes three hooks into `~/.claude/settings.json`. If the hooks in that file
+  are not in a shape it can rewrite safely, it says so and leaves the file alone.
+  Otherwise it saves a timestamped
   backup first, keeps every hook that is not a comms hook, and replaces old comms
   hooks:
   - `SessionStart` runs `comms-graph hook session-start`.

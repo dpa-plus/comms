@@ -211,3 +211,34 @@ def test_the_python_module_entry_point_agrees(tmp_path):
     run = subprocess.run([sys.executable, "-m", "comms_graph", "--as", "a1", "status"],
                          cwd=repo, env={**os.environ, **env}, capture_output=True, text=True)
     assert run.returncode == 0 and "you are @a1" in run.stdout, run.stdout + run.stderr
+
+
+def test_task_done_takes_summary_and_result_as_the_note(tmp_path, monkeypatch):
+    from comms_graph import cli, log as clog, state as cstate
+    import subprocess
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    monkeypatch.chdir(repo)
+    assert cli.main(["task", "add", "demo", "--title", "Show the demo", "--as", "a1"]) == 0
+    assert cli.main(["task", "done", "demo", "--summary", "kept the old cookie name", "--as", "a1"]) == 0
+    events = clog.read(clog.log_path(repo))
+    assert any("kept the old cookie name" in str(e.data) for e in events)
+
+
+def test_release_task_frees_only_the_claims_tagged_to_it(tmp_path, monkeypatch, capsys):
+    from comms_graph import cli
+    import subprocess
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    monkeypatch.chdir(repo)
+    assert cli.main(["task", "add", "demo", "--title", "Show the demo", "--as", "a1"]) == 0
+    assert cli.main(["claim", "a.txt", "--task", "demo", "--intent", "x", "--as", "a1"]) == 0
+    assert cli.main(["claim", "b.txt", "--intent", "y", "--as", "a1"]) == 0
+    capsys.readouterr()
+    assert cli.main(["release", "--task", "demo", "--result", "done", "--as", "a1"]) == 0
+    out = capsys.readouterr().out
+    assert "RELEASED a.txt" in out and "b.txt" not in out

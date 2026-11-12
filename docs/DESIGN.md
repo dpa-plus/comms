@@ -111,10 +111,12 @@ agents to "join and claim" about 35 times.
 
 Now Claude Code tells comms which session is calling, and comms names the session
 the first time it sees it, for example `claude-4f9a1c`. `--as` and `COMMS_ACTOR`
-still win when given. Every name used inside one session counts as the same owner,
-so a session is never blocked by its own claim. Subagents share their parent's
-session, which is why the skill asks for `--as <name>` when subagents work in
-parallel.
+still win when given. Every claim records the session that made it. On the edit
+check a claim is yours when your session made it, whatever name it carries, so a
+session is never blocked by its own claim, and two sessions that share a name still
+block each other. Subagents share their parent's session, so the edit check cannot
+tell them apart. On the command line a claim under a different name does conflict,
+which is why the skill asks for `--as <name>` when subagents work in parallel.
 
 ### The first edit claims the file
 
@@ -125,9 +127,11 @@ from 30% to 68%, and tagging claims with a task from 22% to 73%. The weak point 
 the first step, so comms now takes it for them. The pre-edit hook claims a free file
 the first time a session edits it.
 
-A claim made this way must not hoard the file. It ends when the session ends, and
-it gives way to another agent as soon as its file has nothing uncommitted in git.
-A claim the agent makes by hand behaves as before.
+A claim made this way must not hoard the file. It ends when the session ends. It
+also gives way to another agent once it is five minutes old and its file has nothing
+uncommitted in any worktree of the repository. The five minutes cover the moment
+between the claim and the edit it was made for, when the file is still clean. A
+claim the agent makes by hand behaves as before.
 
 ### Short output
 

@@ -684,14 +684,14 @@ def _claim_obstacles(st, root: Path, scope, scope_str: str, actor: str,
                      agent_session: str) -> tuple[list, list]:
     """What stands in the way of a CLI claim, and the releases that clear the rest.
 
-    The caller's own claims never block it: those under its name, and on the
-    edit path's rule those of its agent session under any name. The session's
-    auto-claims under another name are superseded. Writes nothing, so a refused
-    claim leaves the log as it was.
+    A claim under the caller's name never blocks it. A claim under any other
+    name does, even from the caller's own session: names are the only thing
+    that separates a lead from its subagents. The one exception is the session's
+    own auto-claim, which the hand claim supersedes. Writes nothing, so a
+    refused claim leaves the log as it was.
     """
     def mine(claim) -> bool:
-        return claim.actor == actor or (
-            bool(agent_session) and _identity.owns(st, claim, agent_session))
+        return claim.actor == actor
 
     overlapping = sorted((c for c in st.claims.values() if _scope.overlaps(c.scope, scope)),
                          key=lambda c: c.ts)
@@ -1196,6 +1196,9 @@ def _cmd_release(argv: list[str]) -> int:
             return _release_somebody_elses(
                 st, log_file, actor, target, flags.get("reason", "").strip())
         mine = sorted((c for c in st.claims.values() if c.actor == actor), key=lambda c: c.ts)
+        if flags.get("task"):
+            tagged = _slug_or_exit(flags["task"])
+            mine = [c for c in mine if c.task == tagged]
         targets = [p for p in positional if p]
         if not targets:
             if not mine:

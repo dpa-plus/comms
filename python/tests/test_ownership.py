@@ -214,15 +214,17 @@ def test_a_session_renamed_twice_by_an_older_build_still_agrees_with_release(tmp
 
 
 @pytest.mark.parametrize("scopes", [["src/a.py"], ["src/a.py", "src/b.py"]])
-def test_a_claim_is_not_blocked_by_its_sessions_claim_under_another_name(tmp_path, scopes):
+def test_two_names_in_one_session_conflict_on_claim(tmp_path, scopes):
     repo = _repo(tmp_path)
     env = {"CLAUDE_CODE_SESSION_ID": SESSION_A}
     code, out, err = _run(repo, ["claim", "src/a.py", "--as", "lead-x"], env=env)
     assert code == 0, out + err
     code, out, err = _run(repo, ["claim", *scopes, "--as", "sub-y", "--intent", "x"], env=env)
+    assert code == 1, "a subagent's name is what keeps it off its lead's file"
+    assert "lead-x" in out + err
+    assert _claims(repo)["src/a.py"].actor == "lead-x"
+    code, out, err = _run(repo, ["claim", *scopes, "--as", "lead-x", "--intent", "x"], env=env)
     assert code == 0, out + err
-    assert _run(repo, ["claim", "src/a.py", "--as", "sub-y"], env={
-        "CLAUDE_CODE_SESSION_ID": SESSION_B})[0] == 1, "another session is still blocked"
 
 
 def test_a_failed_batch_claim_writes_no_release(tmp_path):

@@ -11,7 +11,7 @@ comms keeps agents that share one working tree off each other's files. Each repo
 
 - At session start, in a repository that uses comms, you get a short briefing with your actor name, the files other agents hold, and notes addressed to you.
 - Every Edit, Write and NotebookEdit is checked. If another session holds the file, the edit is refused and you are told who holds it. If the file is free, your first edit claims it for your session.
-- At session end, the claims made that way are released. One also lapses once its file is committed and someone else wants it.
+- At session end, the claims made that way are released. One also lapses when someone else wants the file, the claim is over five minutes old, and the file has nothing uncommitted.
 - Where the commit guard is installed, a commit that would take another agent's claimed file is refused.
 
 You do not need to say hello, and you do not need `--as` on every call. Your session already has a name.

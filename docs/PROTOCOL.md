@@ -43,7 +43,6 @@ Ties an actor to a host agent session and records who it is.
 | `vendor` | Who made the model, for example `anthropic` or `openai`. From `--vendor` or `COMMS_VENDOR`. Used to tell an independent review from a same-family one. |
 | `model` | From `--model`, `COMMS_MODEL`, or the session-start payload. |
 | `hostname` | The machine name. |
-| `primary` | `true` on a hello written by the `hello` verb with `--as`. It names the session. See [Session families](#session-families). |
 | `leader`, `base_name`, `tty` | Read for display. Written by older builds. |
 
 comms writes a hello on its own the first time a session uses a name. That happens at session
@@ -59,6 +58,7 @@ start, on the first auto-claim, or on the first write under an auto-name.
 |---|---|
 | `intent` | One line on what the holder is about to do. |
 | `task` | The task this claim works on. |
+| `agent_session` | The host session that made the claim. Absent on claims written before 0.5.0 and on calls made outside an agent session. |
 | `auto` | `true` when the pre-edit hook made the claim on a first edit. Its intent is `auto: edited`. |
 | `agent_id`, `agent_type` | On an auto-claim, copied from the hook payload when Claude Code sends them, which it does for a subagent. |
 | `steals` | The id of the claim this one takes over. |
@@ -205,11 +205,14 @@ Every verb resolves the actor in this order:
 2. `COMMS_ACTOR`.
 3. The session's own name in this repository's log, when `CLAUDE_CODE_SESSION_ID`
    is set. See [Session families](#session-families).
-4. An auto-name, `<prefix>-<first 6 characters of the session id>`. The prefix is
+4. An auto-name, `<prefix>-<first 6 characters of the session id>`, lengthened
+   when another session already uses that name. The prefix is
    `claude` when `COMMS_VENDOR` is `anthropic` or unset, `codex` when it is
    `openai`, and the vendor itself otherwise. comms records a hello the first time
    the auto-name writes.
 5. Otherwise a write fails with a one-line error. A read runs without an actor.
+
+The hooks ignore a generic `COMMS_ACTOR` and use the session's own name instead.
 
 A leading `@` is dropped. A write under a generic name is refused unless
 `COMMS_ALLOW_GENERIC_ACTOR=1`. The generic names include `claude`, `codex`,
@@ -217,19 +220,24 @@ A leading `@` is dropped. A write under a generic name is refused unless
 
 ### Session families
 
-A session family is every actor whose hello carries the same `agent_session`. All
-of them count as one owner:
+A session family is every actor whose hello carries the same `agent_session`.
 
-- The pre-edit hook never blocks a file held by any actor of the caller's family.
-- An auto-claim gives way to a hand claim from the same family.
-- The review gate treats two actors of one family as the same agent.
+The session's own name, used in step 3 above, is the first actor the session was
+tied to. A later `hello --as` adds a name to the family and does not change it, so a
+subagent cannot rename its parent.
 
-The session's own name, used in step 3 above, is the actor of the latest hello
-with `primary: true`. Without one, it is the first actor the session was tied to.
-A subagent that passes its own `--as` therefore does not rename its parent.
+Ownership depends on the path:
 
-The CLI's `claim` still reports a conflict between two differently named actors of
-one family, so parallel subagents with their own names keep off each other's files.
+- **The edit check** (`hook pre-edit`, `check <path>`). A claim is the caller's when
+  its `agent_session` equals the caller's session. A claim with no `agent_session`
+  is the caller's when its holder is in the caller's family. Two sessions that share
+  a name therefore still block each other.
+- **The command line** (`claim`, `release`, `status`). A claim is the caller's when
+  it is held under the caller's name. A claim under another name conflicts, even
+  from the same session, so parallel subagents with their own names keep off each
+  other's files. The one exception is the session's own auto-claim, which a hand
+  claim replaces.
+- **The review gate** treats two actors of one family as the same agent.
 
 ### Liveness markers
 
@@ -312,23 +320,25 @@ Each hook reads Claude Code's hook JSON on stdin.
 |---|---|---|
 | `hook session-start` | `SessionStart` | Always 0. Prints a briefing of at most 900 characters in a repository with a store, and nothing elsewhere. |
 | `hook pre-edit` | `PreToolUse` for `Edit\|Write\|NotebookEdit` | 2 blocks the edit and the reason goes to stderr. 0 allows it. |
-| `hook session-end` | `SessionEnd` | Always 0. Releases the session family's auto-claims with result `session ended`. |
+| `hook session-end` | `SessionEnd` | Always 0. Releases the auto-claims this session made, with result `session ended`. |
 
 `hook pre-edit` reads `tool_input.file_path` or `tool_input.notebook_path`. It
 exits 2 when:
 
-- another family holds an overlapping claim and that claim does not give way,
+- another session holds an overlapping claim and that claim does not give way,
 - the payload is empty or not JSON, or
 - the log exists but cannot be reached or read.
 
 It exits 0 when the file is outside a repository, when the repository has no store,
-and when the payload names no file. On an allowed first edit of a file that no actor
-of the family holds, it appends an auto-claim, taking the lock for at most one
-second. If that write fails, the edit is still allowed.
+and when the payload names no file. On an allowed first edit of a file the session
+does not hold yet, it appends an auto-claim, taking the lock for at most one second.
+It checks again under the lock: if another session claimed the file in the meantime,
+the edit is blocked. If the write itself fails, the edit is still allowed.
 
-An auto-claim that blocks someone gives way when its file is tracked and
-`git status --porcelain` shows no change to it. The release is recorded with result
-`auto-claim: file is clean in git`.
+An auto-claim that blocks someone gives way when it is at least five minutes old and
+its file is tracked with no change in `git status --porcelain`, in every worktree of
+the repository. A worktree that cannot be asked keeps the claim. The release is
+recorded with result `auto-claim: file is clean in git`.
 
 `check --stdin-json` is the older name for `hook pre-edit` without the auto-claim,
 with the same exit codes.
