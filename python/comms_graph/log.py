@@ -43,11 +43,9 @@ TYPE_HELLO = "hello"
 TYPE_CLAIM = "claim"
 TYPE_RELEASE = "release"
 TYPE_NOTE = "note"
-TYPE_FINDING = "finding"
 
-# The task graph. A task is what should happen; an edge is the order it must
-# happen in and what the later task consumes from the earlier one; a state event
-# moves a task along its two steps: do it, then a DIFFERENT agent verifies it.
+# Written by comms 0.5 and earlier: findings and the task graph.
+TYPE_FINDING = "finding"
 TYPE_TASK = "task"
 TYPE_TASK_EDGE = "task_edge"
 TYPE_TASK_STATE = "task_state"
@@ -67,15 +65,12 @@ WRITTEN_TYPES: tuple[str, ...] = (
     TYPE_CLAIM,
     TYPE_RELEASE,
     TYPE_NOTE,
-    TYPE_TASK,
-    TYPE_TASK_EDGE,
-    TYPE_TASK_STATE,
     TYPE_BLOCKED,
 )
 
 # Types older builds wrote. Read from old logs so `log` can still list them,
 # skipped by the fold, never written.
-RETIRED_TYPES: tuple[str, ...] = (TYPE_FINDING,)
+RETIRED_TYPES: tuple[str, ...] = (TYPE_FINDING, TYPE_TASK, TYPE_TASK_EDGE, TYPE_TASK_STATE)
 
 KNOWN_TYPES: tuple[str, ...] = WRITTEN_TYPES + RETIRED_TYPES
 

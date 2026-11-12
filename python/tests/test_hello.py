@@ -150,23 +150,16 @@ def test_saying_hello_again_updates_the_label(tmp_path, monkeypatch):
     assert _state_of(repo).sessions["claude-dev"].label == "New"
 
 
-def test_hello_records_the_vendor_so_independence_is_not_guessed(tmp_path, monkeypatch):
-    """IF THIS FAILS: "verified" stops distinguishing an independent check from a
-    second opinion by the same model. independence_of reads vendor off each
-    actor's hello; a vendor that is dropped, or stored under a different case,
-    reads as a different vendor and manufactures independence that does not exist."""
+def test_hello_records_the_vendor_as_given_and_never_guesses_it(tmp_path, monkeypatch):
+    """The board shows the vendor. One vendor in two cases must read as one, and
+    an unset vendor must stay absent rather than be inferred from the name."""
     repo = _repo(tmp_path, monkeypatch)
     _run(repo, "hello", "--as", "claude-dev", session="s1", env={"COMMS_VENDOR": "Anthropic"})
-    _run(repo, "hello", "--as", "codex-dev", session="s2", env={"COMMS_VENDOR": "openai"})
-    st = _state_of(repo)
-    assert st.sessions["claude-dev"].vendor == "anthropic", "case must not split one vendor"
-    assert st.independence_of("codex-dev", "claude-dev") == "independent"
+    assert _state_of(repo).sessions["claude-dev"].vendor == "anthropic"
 
     repo2 = _repo(tmp_path / "two", monkeypatch)
     _run(repo2, "hello", "--as", "claude-dev", session="s1")
-    _run(repo2, "hello", "--as", "codex-dev", session="s2")
-    assert _state_of(repo2).independence_of("codex-dev", "claude-dev") == "unknown", \
-        "an unset vendor must stay absent, not be inferred from the name"
+    assert _state_of(repo2).sessions["claude-dev"].vendor == ""
 
 
 def test_a_label_that_could_forge_an_output_line_is_refused(tmp_path, monkeypatch):

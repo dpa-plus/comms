@@ -250,10 +250,9 @@ def test_collisions_prevented_is_reported_all_time(tmp_path, monkeypatch):
     assert "@bob was stopped from editing a.py (held by @alice)" in out
 
 
-def test_a_task_refusal_is_not_rendered_as_an_editing_collision(tmp_path, monkeypatch):
-    """IF THIS FAILS: a refused self-review prints "stopped from editing  (held
-    by @)": an empty scope and an empty holder, which reads as a bug in comms
-    rather than as the review gate doing its job."""
+def test_an_old_task_refusal_is_not_rendered_as_an_editing_collision(tmp_path, monkeypatch):
+    """An old log holds refusals on tasks, which have no scope. They must not
+    print "stopped from editing  (held by @)", which reads as a bug."""
     repo = _repo(tmp_path, monkeypatch)
     _write(repo, [
         _ev("blocked", "solo", data={"task": "auth", "attempted": "verified",
@@ -264,7 +263,7 @@ def test_a_task_refusal_is_not_rendered_as_an_editing_collision(tmp_path, monkey
 
     assert code == 0, out
     assert "stopped from editing" not in out
-    assert "@solo was refused on task auth (self-review)" in out
+    assert "@solo was refused" in out
 
 
 def test_notes_outside_the_window_are_not_shown(tmp_path, monkeypatch):

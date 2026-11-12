@@ -1,18 +1,14 @@
-"""A local dashboard: both graphs, the live claims, and who is here.
+"""A local dashboard: who holds which files, what changed unclaimed, the code map.
 
-WHY A SERVER AND NOT JUST FILES. ``view.py`` and ``taskview.py`` each write a
-complete standalone page, which is the right shape for sending somebody a
-snapshot. What they cannot do is change when the log changes, and the whole
+WHY A SERVER AND NOT JUST FILES. ``view.py`` writes a complete standalone page,
+which is the right shape for sending somebody a snapshot. What they cannot do is change when the log changes, and the whole
 value of a coordination board is that you leave it open while agents work. This
 adds the one thing files cannot have: it notices a write and pushes.
 
-WHY THE TWO GRAPHS ARE IFRAMES. Each is a finished page with its own vis-network
-instance, its own layout, and its own interaction state. Inlining them into one
-document would mean two vis instances fighting over one global, and: worse:
-every push would have to avoid destroying pan, zoom and selection in both of
-them. An iframe reloads only when its own data changed, and its internal state
-is its own business. The cost is two extra requests; the alternative was
-re-implementing both graphs.
+WHY THE CODE MAP IS AN IFRAME. It is a finished page with its own vis-network
+instance, its own layout and its own interaction state. Inlined, every push
+would have to avoid destroying its pan, zoom and selection. An iframe reloads
+only when its own data changed.
 
 BINDS TO LOOPBACK ONLY, and deliberately has no mutating endpoints. The board
 shows what the log says; anything that changes the log goes through the CLI,
@@ -39,10 +35,8 @@ from . import __version__
 from . import lock as _lock
 from . import log as _log
 from . import state as _state
-from . import task as _task
 from . import guard as _guard
 from . import tree as _tree
-from . import taskcode as _taskcode
 from .board_history import history_page
 
 #: How often the watcher stats the log. The log is appended under a lock and a
@@ -141,7 +135,7 @@ def _snapshot(root: Path, log_file: Path, graph_path: Path | None = None) -> dic
         idle = max(0.0, (now - heard).total_seconds())
         claims.append({
             "id": c.id, "actor": c.actor, "scope": str(c.scope),
-            "intent": c.intent, "task": c.task,
+            "intent": c.intent, "auto": c.auto,
             "ts": c.ts.isoformat().replace("+00:00", "Z"),
             "idle_seconds": int(idle),
             "quiet": idle >= QUIET_AFTER_SECONDS,
@@ -159,8 +153,7 @@ def _snapshot(root: Path, log_file: Path, graph_path: Path | None = None) -> dic
     # four agents work in it.
     #
     # A hello still matters and is still shown: it is what ties an actor to a
-    # process, which is what the review gate compares. An actor without one is
-    # present but unidentified, and the panel says which.
+    # process. An actor without one is present but unidentified.
     acted = last_by_actor
 
     roster = []
@@ -175,112 +168,14 @@ def _snapshot(root: Path, log_file: Path, graph_path: Path | None = None) -> dic
             "actor": actor,
             "label": getattr(s, "label", "") if s else "",
             "vendor": getattr(s, "vendor", "") if s else "",
+            "model": getattr(s, "model", "") if s else "",
             "host": getattr(s, "hostname", "") if s else "",
             "identified": s is not None,
             "last_seen": last.isoformat().replace("+00:00", "Z") if last else "",
             "holding": sum(1 for c in st.claims.values() if c.actor == actor),
         })
 
-    # WHICH FILES A TASK TOUCHES. Nothing carried this, and it is the first
-    # question anybody opening a task asks. It is not stored on the task: it is
-    # derived from claims tagged `--task <id>`, which is the point of that flag:
-    # the task tracks itself from work the agent was doing anyway.
-    #
-    # Built from the LOG, not from live claims alone, so a file stays on the task
-    # after it is released. A task whose files vanish the moment the work is
-    # finished answers "what did this touch" with "nothing", which is exactly
-    # backwards.
-    held_now = {(c.actor, str(c.scope)) for c in st.claims.values()}
-    task_files: dict[str, dict[str, dict]] = {}
-    for ev in events:
-        if ev.type != _log.TYPE_CLAIM or not ev.scope:
-            continue
-        tag = _string(ev.data, "task")
-        if not tag:
-            continue
-        scope = ev.scope[0]
-        row = task_files.setdefault(tag, {}).setdefault(
-            scope, {"scope": scope, "actor": ev.actor, "held": False, "intent": ""})
-        row["actor"] = ev.actor
-        row["intent"] = _string(ev.data, "intent") or row["intent"]
-        row["held"] = (ev.actor, scope) in held_now
-
-    latest_task_activity = {}
-    for ev in events:
-        task_id = _string(ev.data, "task")
-        if task_id:
-            latest_task_activity[task_id] = ev.ts.isoformat().replace("+00:00", "Z")
-    tasks = []
-    for t in sorted(st.tasks.values(), key=lambda t: t.id):
-        files = sorted(task_files.get(t.id, {}).values(), key=lambda r: r["scope"])
-        tasks.append({
-            "files": files,
-            "files_held": sum(1 for f in files if f["held"]),
-            "id": t.id, "title": t.title, "phase": t.phase,
-            "last_activity": latest_task_activity.get(t.id, ""),
-            "doers": t.doers, "did": t.did, "verified_by": t.verified_by,
-            "independence": t.independence,
-            "blocked_by": t.blocked_by, "rejections": t.rejections,
-            # The facts a person needs to answer "is this stuck, and was it
-            # really checked". Every one of these is already in the fold and
-            # none of them reached the page. `verification` is what the
-            # reviewer says they ran, which is the difference between a
-            # sign-off and a tick.
-            "verification": getattr(t, "verification", ""),
-            "checks": list(getattr(t, "checks", []) or []),
-            "check_results": dict(getattr(t, "check_results", {}) or {}),
-            "ever_verified": bool(getattr(t, "ever_verified", False)),
-            "findings": [
-                {"what": getattr(f, "what", ""), "where": getattr(f, "where", "")}
-                for f in (getattr(t, "findings", []) or [])
-            ],
-        })
-
-    # THE JOIN. The log knows which files a task touched; the map knows how files
-    # reach each other. Neither knew the other, so the task graph could only show
-    # dependencies somebody typed by hand, and nobody ever typed one: eight
-    # tasks, zero declared edges, in a log with thousands of events. Derived, it
-    # is true whether or not anybody noticed.
-    #
-    # Failure here must never take the board down. The map is optional, may be
-    # stale, may be absent, and is somebody else's file format; a board that
-    # disappears because a graph would not load is worse than one that says it
-    # has no map.
-    #
-    # `alerts` is created HERE, above everything that can raise one. It was
-    # created a hundred lines further down, next to the dependency-loop check,
-    # and the two alerts raised before that point (a map that would not load,
-    # a map older than a day) each hit an unbound name. The second is the
-    # ordinary state of any repo whose map is a week old, so on such a repo
-    # every snapshot raised, /api/status answered nothing, and the board was
-    # blank: exactly the failure the "never raises" promise above exists to
-    # prevent. The tests never saw it because their map is fresh or absent.
     alerts: list[dict] = []
-    code_map_available = False
-    try:
-        from .cli import _load_graph  # the one loader, undirected view and all
-        graph = _load_graph(graph_path) if graph_path else None
-        code_map_available = graph is not None
-        links = _taskcode.link(
-            graph, {t["id"]: t for t in tasks},
-            {t["id"]: [f["scope"] for f in t.get("files") or []] for t in tasks},
-            root,
-            {t["id"]: {f["actor"] for f in t.get("files") or []} for t in tasks},
-            # The board's viewer is the operator, not one of the agents, so
-            # nothing is "your own" here and the label correctly never appears.
-            os.environ.get("COMMS_ACTOR", "").strip(),
-        ) if graph is not None else {}
-    except Exception as exc:  # pragma: no cover - defensive by intent
-        links = {}
-        alerts.append({
-            "kind": "map",
-            "text": f"the code map could not be read, so tasks are not linked to it: {exc}",
-            "hint": "Rebuild it with `graphify extract . --code-only`.",
-        })
-    for t in tasks:
-        info = links.get(t["id"]) or {}
-        t["touches"] = info.get("touches", 0)
-        t["related"] = info.get("related", [])
 
     # HOW OLD THE MAP IS. Raised by an agent that called `explain` on a symbol
     # and got a line number ~100 lines stale and three of its connections: the
@@ -297,48 +192,15 @@ def _snapshot(root: Path, log_file: Path, graph_path: Path | None = None) -> dic
     if map_age is not None and map_age > 86400:
         alerts.append({
             "kind": "stale-map",
-            "text": f"the code map is {map_age // 86400} day(s) old, so what tasks "
-                    f"'meet in the code' may be out of date",
+            "text": f"the code map is {map_age // 86400} day(s) old, so it may not "
+                    f"match the code",
             "hint": "Rebuild it with `graphify extract . --code-only`.",
         })
 
-    # One serializer for the live preview and paged history; released holds
-    # remain attached to their original task and owner.
+    # One serializer for the live preview and paged history; a release stays
+    # attached to the owner of the claims it ended.
     feed = history_page(events)["events"]
 
-    # Things that are WRONG with the plan itself, as opposed to slow. Both are
-    # computed by the task-graph page and both live inside its side panel,
-    # which the board hides to give the drawing room, so a dependency loop, the
-    # one state a plan cannot recover from on its own, was invisible on the
-    # surface somebody actually watches.
-    cycles = [t["id"] for t in tasks if t["phase"] == _task.PHASE_CYCLE]
-    if cycles:
-        alerts.append({
-            "kind": "cycle",
-            "text": f"{len(cycles)} task(s) in a dependency loop: " + ", ".join(cycles[:6]),
-            "hint": "Nothing in the loop can ever start. An edge has to go.",
-        })
-    declared = {t["id"] for t in tasks}
-    dangling = sorted({
-        e.from_ if e.from_ not in declared else e.to
-        for e in (st.task_edges or [])
-        if e.from_ not in declared or e.to not in declared
-    })
-    if dangling:
-        alerts.append({
-            "kind": "dangling",
-            "text": f"{len(dangling)} edge(s) name a task that was never declared: "
-                    + ", ".join(dangling[:6]),
-            "hint": "Ordering was recorded against something that does not exist.",
-        })
-    stuck = [t for t in tasks if t["phase"] == _task.PHASE_REVIEW]
-    if stuck:
-        alerts.append({
-            "kind": "review",
-            "text": f"{len(stuck)} task(s) finished and waiting for somebody to check them: "
-                    + ", ".join(t["id"] for t in stuck[:6]),
-            "hint": "Nothing downstream moves until one of these is verified.",
-        })
     quiet_claims = [c for c in claims if c["quiet"]]
     if quiet_claims:
         alerts.append({
@@ -430,45 +292,16 @@ def _snapshot(root: Path, log_file: Path, graph_path: Path | None = None) -> dic
         "store_key": here,
         "claims": claims,
         "roster": roster,
-        "tasks": tasks,
-        # The main dashboard draws the recorded plan itself.  ``blocked_by``
-        # is only today's derived state and drops a predecessor after it is
-        # verified; it is not a substitute for the edge somebody declared.
-        "task_edges": [
-            {"from": edge.from_, "to": edge.to, "kind": edge.kind,
-             "provides": edge.provides}
-            for edge in (st.task_edges or [])
-        ],
-        # An empty relation set means something only when a map was loaded.
-        # Keep that distinct from the ordinary first-run state with no map.
-        "code_map_available": code_map_available,
         "feed": feed,
-        "counts": {
-            "claims": len(claims),
-            "agents": len(roster),
-            "tasks": len(tasks),
-            "blocked": sum(1 for t in tasks if t["phase"] == _task.PHASE_BLOCKED),
-            "review": sum(1 for t in tasks if t["phase"] == _task.PHASE_REVIEW),
-            "ready": sum(1 for t in tasks if t["phase"] == _task.PHASE_READY),
-            "doing": sum(1 for t in tasks if t["phase"] == _task.PHASE_DOING),
-            "closed": sum(1 for t in tasks if t["phase"] == _task.PHASE_CLOSED),
-            "cycle": sum(1 for t in tasks if t["phase"] == _task.PHASE_CYCLE),
-        },
+        "counts": {"claims": len(claims), "agents": len(roster)},
         "notes": [
             {"actor": n.actor, "body": getattr(n, "body", ""),
              "ts": n.ts.isoformat().replace("+00:00", "Z")}
             for n in list(getattr(st, "notes", []) or [])[-12:][::-1]
         ],
-        # Carry the task and the reason too. A refusal recorded against a TASK
-        # (a self-review, a failing check) has no scope, so the panel rendered
-        # rows saying only "@alice was refused": the two facts worth having,
-        # what and why, were dropped on the way out. It also called those
-        # "collisions prevented", which a failed check is not.
         "blocked_events": [
             {"actor": b.actor, "scope": getattr(b, "scope", ""),
              "holder": getattr(b, "holder", ""),
-             "task": getattr(b, "task", ""),
-             "reason": getattr(b, "reason", ""),
              "ts": b.ts.isoformat().replace("+00:00", "Z")}
             for b in list(st.blocked)[-12:][::-1]
         ],
@@ -1673,8 +1506,7 @@ body:has(#connectionNotice:not([hidden])) .shell { height: calc(100vh - 100px); 
   <div class="dagwrap" id="dagWrap" hidden>
   <div class="dagbox">
     <div class="dagbar">
-      <button class="ghost gtab on" id="gTasks" data-src="/tasks.html">Task graph</button>
-      <button class="ghost gtab" id="gMap" data-src="/map.html">Code map</button>
+      <button class="ghost gtab on" id="gMap" data-src="/map.html">Code map</button>
       <div class="grow"></div><button id="dagClose" class="ghost">Close</button>
     </div>
     <iframe id="dagFrame" title="graph"></iframe>
@@ -2963,7 +2795,7 @@ function renderAll(d) {
 }
 
 function acceptSnapshot(d) {
-  if (!d || typeof d !== "object" || d.error || !Array.isArray(d.tasks) ||
+  if (!d || typeof d !== "object" || d.error ||
       !Array.isArray(d.claims) || !Array.isArray(d.feed)) {
     throw new Error(d && d.error ? d.error : "The board received an unreadable update.");
   }
@@ -3044,11 +2876,9 @@ document.addEventListener("keydown", function (e) {
     // vis-network pages; mounting them behind a closed overlay would pay for
     // two graph layouts on every page load for a view most days nobody opens.
     if (shown !== src) { frame.src = src; shown = src; }
-    [el("gTasks"), el("gMap")].forEach(function (b) { b.classList.toggle("on", b === btn); });
     wrap.hidden = false;
   }
-  el("dagBtn").addEventListener("click", function () { show("/tasks.html", el("gTasks")); });
-  el("gTasks").addEventListener("click", function () { show("/tasks.html", el("gTasks")); });
+  el("dagBtn").addEventListener("click", function () { show("/map.html", el("gMap")); });
   el("gMap").addEventListener("click", function () { show("/map.html", el("gMap")); });
   el("dagClose").addEventListener("click", function () { wrap.hidden = true; });
   document.addEventListener("keydown", function (e) { if (e.key === "Escape") { wrap.hidden = true; } });
@@ -3209,7 +3039,7 @@ class _Handler(BaseHTTPRequestHandler):
             params = parse_qs(query)
             try:
                 payload = board.history(store, actor=params.get("actor", [""])[0],
-                                        task=params.get("task", [""])[0], before=params.get("before", [""])[0])
+                                        before=params.get("before", [""])[0])
                 self._send(json.dumps(payload).encode("utf-8"), "application/json; charset=utf-8")
             except (ValueError, OSError) as exc:
                 self._send(json.dumps({"error": str(exc)}).encode("utf-8"), "application/json", 400)
@@ -3218,8 +3048,6 @@ class _Handler(BaseHTTPRequestHandler):
                        "application/json; charset=utf-8")
         elif path == "/map.html":
             self._send(board.map_html(store).encode("utf-8"), "text/html; charset=utf-8")
-        elif path == "/tasks.html":
-            self._send(board.tasks_html(store).encode("utf-8"), "text/html; charset=utf-8")
         elif path == "/events":
             self._stream(board, store)
         else:
@@ -3288,8 +3116,8 @@ class Board:
         self.frontend_build = _frontend_build_token(self._page)
         self._lock = threading.Lock()
         self._cache: dict[str, tuple[str, str]] = {}
-        #: One lock per page key, so a slow map build does not hold up the task
-        #: frame. Guarded by _lock while being created.
+        #: One lock per page key, so a slow map build for one project does not
+        #: hold up another. Guarded by _lock while being created.
         self._builders: dict[str, threading.Lock] = {}
 
     def stamp(self) -> str:
@@ -3445,11 +3273,11 @@ class Board:
             return (root, log_file) if log_file.exists() else None
         return None
 
-    def history(self, store: str = "", *, actor: str = "", task: str = "", before: str = "") -> dict:
+    def history(self, store: str = "", *, actor: str = "", before: str = "") -> dict:
         if store and store != _log.repo_hash(self.root) and self._store_by_key(store) is None:
             raise ValueError("The selected project is unavailable.")
         _key, _root, log_file = self._for_store(store)
-        return history_page(_log.read(log_file), actor=actor, task=task, before=before)
+        return history_page(_log.read(log_file), actor=actor, before=before)
 
     def page(self) -> str:
         # Returned verbatim. _PAGE is NOT a format string: it is full of CSS and
@@ -3536,21 +3364,6 @@ class Board:
                     ": claims still record and still block without it.",
                     str(exc))
         return self._cached("map:" + (store or ""), build)
-
-    def tasks_html(self, store: str = "") -> str:
-        def build() -> str:
-            from . import taskview as _taskview
-
-            key, _root, log_file = self._for_store(store)
-            out = self._render_dir(key) / "tasks.comms.html"
-            try:
-                st = _state.fold(_log.read(log_file))
-                res = _taskview.render(st, out, generated=_now_text())
-                return Path(res.output_path).read_text(encoding="utf-8") + _EMBED_CSS
-            except Exception as exc:
-                return _placeholder("The task graph could not be drawn.", "", str(exc))
-        return self._cached("tasks:" + (store or ""), build)
-
 
 def _placeholder(title: str, hint: str, detail: str = "") -> str:
     return (

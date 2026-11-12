@@ -1,7 +1,6 @@
 """Fold the comms event log into the current state of the world.
 
-Port of comms' internal/state/state.go (the coordination half: the task graph
-lands separately). Given the events, it answers, which claims are live, who is
+Port of comms' internal/state/state.go. Given the events, it answers which claims are live, who is
 still around, what was said, and which claims were refused.
 
 Two properties are load-bearing and everything below is arranged around them:
@@ -27,7 +26,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from . import task as _task
 from .scope import Scope
 from .log import WRITTEN_TYPES
 
@@ -68,7 +66,6 @@ class Claim:
     actor: str
     scope: Scope
     intent: str = ""
-    task: str = ""
     session_id: str = ""
     session_name: str = ""
     # Set when this claim displaced another one (an arbitrated steal).
@@ -123,9 +120,8 @@ class Session:
     agent_session: str = ""
     session_id: str = ""
     session_name: str = ""
-    # Model identity, best effort. Recorded so a later reader can say whether a
-    # verification was genuinely independent or came from something with the
-    # same blind spots. Absent on any hello written before comms 0.3.0.
+    # Model identity, best effort, shown on the board. Absent on any hello
+    # written before comms 0.3.0.
     model: str = ""
     vendor: str = ""
     tier: int = 0
@@ -176,17 +172,6 @@ class Blocked:
     intent: str = ""
     holder: str = ""
     holder_scope: str = ""
-    #: What the actor was trying to do ("verified", "rejected") when a TASK
-    #: transition was refused, and every holder rather than only the first.
-    #: Both are written and neither was read, so a refusal panel could say who
-    #: was stopped but not what they were stopped from doing.
-    attempted: str = ""
-    holders: list[str] = field(default_factory=list)
-    #: A refusal against a TASK rather than a scope: a self-review, a failing
-    #: check: has no scope at all. Without these two the board could only say
-    #: "@alice was refused", dropping the only facts worth having.
-    task: str = ""
-    reason: str = ""
     session_id: str = ""
     session_name: str = ""
 
@@ -223,14 +208,6 @@ class State:
     releases: list[Release] = field(default_factory=list)
     blocked: list[Blocked] = field(default_factory=list)
     ended_comms_sessions: list[EndedCommsSession] = field(default_factory=list)
-    # The work half. Keyed by slug because a task has a lifecycle (the claims
-    # precedent); edges are a list because an edge is an append-only fact.
-    tasks: dict[str, "_task.Task"] = field(default_factory=dict)
-    task_edges: list["_task.TaskEdge"] = field(default_factory=list)
-    # Transitions the fold would not make. Kept, not dropped: a refusal is the
-    # moment the rule did its job, and a rule that enforces itself in silence
-    # looks exactly like a rule nobody wrote.
-    refused_task_states: list["_task.RefusedTransition"] = field(default_factory=list)
     # Keyed by host agent session id. Never wiped by a comms-session end: who
     # an agent session is does not change when a coordination window closes.
     families: dict[str, SessionFamily] = field(default_factory=dict)
@@ -258,21 +235,6 @@ class State:
         return sorted((c for c in self.claims.values()
                        if c.auto and agent_session and c.agent_session == agent_session),
                       key=lambda c: c.ts)
-
-    def independence_of(self, verifier: str, doer: str) -> str:
-        """Whether a verification came from something with different blind spots.
-
-        Read from each actor's hello. "Verified" and "verified by another
-        instance of the same model" are different claims and must not read
-        alike; when we cannot tell, say so rather than implying the stronger one.
-        """
-        vs = self.sessions.get(verifier)
-        ds = self.sessions.get(doer)
-        v = (vs.vendor if vs else "") or ""
-        d = (ds.vendor if ds else "") or ""
-        if not v or not d:
-            return "unknown"
-        return "independent" if v != d else "same-family"
 
     def conflicts_for(self, scope: Scope, actor: str = "") -> list[Claim]:
         """Active claims overlapping `scope` that are held by somebody else.
@@ -380,13 +342,7 @@ def fold(events: Iterable[Any]) -> State:
     # steal and a release are different facts: a release is the holder letting
     # go, a steal is somebody taking it off them, and only the second one has to
     # survive being folded BEFORE the claim it displaces.
-    # Workers seen before their task folded; see the claim branch below.
-    pending_workers: dict[str, list[str]] = {}
     stolen_ids: set[str] = set()
-    # (from, to) -> position in state.task_edges, so an edge upsert is a lookup
-    # rather than a walk. Local to the fold: it is scaffolding for building the
-    # list, not state anybody reads afterwards.
-    task_edge_index: dict[tuple[str, str], int] = {}
     # session_id -> claim ids opened under it. Ending a NAMED session has to
     # drop that session's claims, and doing it by scanning every open claim made
     # the fold quadratic: 8,000 session ends over 8,000 claims took 8s, on the
@@ -495,26 +451,6 @@ def fold(events: Iterable[Any]) -> State:
                 # permanently, or hand out a second copy of held ground.
                 continue
             state.claims[claim.id] = claim
-            # Taking ground for a task makes you one of its authors, and that
-            # is permanent. Recorded HERE, in log order, so the review gate
-            # sees it on the very next event: `doers` is derived after the
-            # fold has finished, far too late for a rule the fold enforces.
-            if claim.task:
-                _t = state.tasks.get(claim.task)
-                if _t is not None:
-                    if claim.actor not in _t.workers:
-                        _t.workers.append(claim.actor)
-                else:
-                    # The task has not folded yet. fold() sorts by TIMESTAMP, so
-                    # a claim from a machine whose clock runs two seconds behind
-                    # arrives before the `task` event that declares what it is
-                    # tagged to. Dropping it here lost the author record
-                    # PERMANENTLY: unlike a claim, nothing later repairs it:
-                    # and the co-worker's sign-off then recorded as a genuine
-                    # independent review. The steal and release paths in this
-                    # same loop already carry sets forward for exactly this
-                    # reason; this one had no equivalent.
-                    pending_workers.setdefault(claim.task, []).append(claim.actor)
             if claim.session_id:
                 claims_by_session.setdefault(claim.session_id, set()).add(claim.id)
 
@@ -633,11 +569,6 @@ def fold(events: Iterable[Any]) -> State:
                     intent=_string_of(ev.data, "intent"),
                     holder=_string_of(ev.data, "holder"),
                     holder_scope=_string_of(ev.data, "holder_scope"),
-                    attempted=_string_of(ev.data, "attempted"),
-                    holders=[str(h) for h in (ev.data.get("holders") or [])
-                             if isinstance(h, (str, int))] if isinstance(ev.data, dict) else [],
-                    task=_string_of(ev.data, "task"),
-                    reason=_string_of(ev.data, "reason"),
                     session_id=session_id,
                     session_name=_string_of(ev.data, "comms_session_name"),
                 )
@@ -655,26 +586,6 @@ def fold(events: Iterable[Any]) -> State:
                 )
             )
 
-        elif ev.type == "task":
-            _task.apply_task(state.tasks, ev, _string_of, _int_of, _ref_list)
-            waiting = pending_workers.pop(_string_of(ev.data, "task"), None)
-            if waiting:
-                _t = state.tasks.get(_string_of(ev.data, "task"))
-                if _t is not None:
-                    for who in waiting:
-                        if who not in _t.workers:
-                            _t.workers.append(who)
-
-        elif ev.type == "task_edge":
-            _task.apply_task_edge(state.task_edges, ev, _string_of, task_edge_index)
-
-        elif ev.type == "task_state":
-            _task.apply_task_state(
-                state.tasks, state.refused_task_states, ev,
-                _string_of, _ref_list, state.independence_of,
-                state.sessions,
-            )
-
     # Stamp the heartbeat onto whichever sessions survived. A hello is itself
     # one of the actor's events, so last_seen can only be >= ts; the guard is
     # there for a log where it somehow is not.
@@ -682,13 +593,6 @@ def fold(events: Iterable[Any]) -> State:
         seen = last_seen.get(session.actor)
         session.last_seen = seen if seen is not None and seen > session.ts else session.ts
     state.last_seen = last_seen
-
-    # Last, because it reads the finished claim map and the finished sessions:
-    # who is doing a task comes from live claims, and whether a verification was
-    # independent comes from the verifier's hello.
-    _task.derive_phases(state.tasks, state.task_edges, state.claims.values(),
-                        state.sessions)
-
     return state
 
 
@@ -710,7 +614,6 @@ def _claim_from_event(ev: _Event) -> Claim | None:
         actor=ev.actor,
         scope=parsed,
         intent=_string_of(ev.data, "intent"),
-        task=_string_of(ev.data, "task"),
         session_id=_string_of(ev.data, "comms_session_id"),
         session_name=_string_of(ev.data, "comms_session_name"),
         stolen_from_id=_string_of(ev.data, "steals"),

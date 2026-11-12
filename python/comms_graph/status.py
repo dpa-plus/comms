@@ -548,15 +548,9 @@ def _emit_blocked_summary(st: _state.State, cutoff: datetime, since_raw: str) ->
         line += f", {recent} in the last {since_raw}"
     print(line)
     for b in st.blocked[-3:]:
-        # A refusal against a TASK: a self-review, a failing check: has no
-        # scope and no holder. Rendering it through the claim sentence printed
-        # "stopped from editing  (held by @)", which reads as a bug in comms
-        # rather than as the rule doing its job.
+        # An old log also holds refusals on tasks, which have no scope.
         if b.scope:
             print(f"  @{b.actor} was stopped from editing {b.scope} (held by @{b.holder})")
-        elif b.task:
-            why = f" ({b.reason})" if b.reason else ""
-            print(f"  @{b.actor} was refused on task {b.task}{why}")
         else:
             print(f"  @{b.actor} was refused")
 

@@ -649,12 +649,9 @@ def _hello_if_unknown(st, actor: str) -> "object | None":
     label = os.environ.get("COMMS_LABEL", "").strip()
     if label:
         data["label"] = label
-    # Who made this agent. Read from the environment because nothing else can
-    # know it, and left ABSENT when unset rather than guessed: independence_of
-    # reports "unknown" for a missing vendor and that is the honest answer.
-    # Verified, and verified by another instance of the same model, are
-    # different claims: inferring the stronger one from a naming convention
-    # would be manufacturing evidence.
+    # Who made this agent, shown on the board. Read from the environment
+    # because nothing else can know it, and left ABSENT when unset rather than
+    # guessed from a naming convention.
     vendor = os.environ.get("COMMS_VENDOR", "").strip()
     if vendor:
         data["vendor"] = vendor

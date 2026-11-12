@@ -21,35 +21,18 @@ def test_history_pages_old_events_without_duplicates_when_new_work_arrives():
 
 
 @pytest.mark.parametrize("refs", [["0"], "0"])
-def test_released_holds_stay_in_both_owner_and_task_history(refs):
+
+
+def test_a_released_hold_stays_in_its_owner_s_history(refs):
     from comms_graph.board_history import history_page
-    events = [event("0", "claim", scope=["src/a.py"], task="contacts", intent="Contact form"),
+    events = [event("0", "claim", scope=["src/a.py"], intent="Contact form"),
               event("1", "release", actor="human", refs=refs, result="Session ended")]
-    for filters in ({"actor": "sol"}, {"task": "contacts"}):
+    for filters in ({"actor": "sol"},):
         rows = history_page(events, **filters)["events"]
         assert [r["type"] for r in rows] == ["release", "claim"]
         assert rows[0]["actor"] == "human"
         assert rows[0]["original_actor"] == "sol"
         assert rows[0]["scopes"] == ["src/a.py"]
-
-
-def test_same_agent_claiming_two_different_tasks_does_not_merge_their_history():
-    from comms_graph.board_history import history_page
-    a = event("0", "claim", scope=["a.py"], task="one", intent="Fix layout")
-    b = event("1", "claim", scope=["b.py"], task="two", intent="Fix layout")
-    b.ts = a.ts
-    assert len(history_page([a, b])["events"]) == 2
-
-
-def test_task_connections_appear_in_both_tasks_histories():
-    from comms_graph.board_history import history_page
-    edge = event("0", "task_edge", **{"from": "contacts", "to": "map", "kind": "consumes"})
-    for task in ("contacts", "map"):
-        rows = history_page([edge], task=task)["events"]
-        assert len(rows) == 1
-        assert rows[0]["from"] == "contacts"
-        assert rows[0]["to"] == "map"
-        assert rows[0]["kind"] == "consumes"
 
 
 def test_multi_owner_release_keeps_every_original_owner():
