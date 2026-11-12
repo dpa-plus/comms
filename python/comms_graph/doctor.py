@@ -179,9 +179,13 @@ def _check_hooks() -> Check:
     settings, why = _read_settings()
     if settings is None:
         return Check("claude hooks", False, why, "fix the JSON by hand, then run doctor --fix")
+    bad_shape = _malformed(settings)
+    if bad_shape:
+        return Check("claude hooks", False, bad_shape,
+                     f"repair {_settings_path()} by hand, then run doctor --fix")
     missing = [f"{event}" for event, matcher, verb in HOOKS
                if not _hook_ok(settings, event, matcher, verb)]
-    stale = any(_COMMS_HOOK.search(c) for event, _m, _v in HOOKS
+    stale = any(_runs_comms(c) for event, _m, _v in HOOKS
                 for entry in _entries(settings, event) for c in _commands(entry)
                 if c not in {_expected_command(v) for _e, _mm, v in HOOKS})
     if not missing and not stale:
@@ -191,24 +195,56 @@ def _check_hooks() -> Check:
     return Check("claude hooks", False, detail, _fix_hint(), _fix_hooks)
 
 
-_COMMS_HOOK = re.compile(r"(^|[/\s'\"])comms(-graph)?['\"]?\s+(hook|hello|check|status)\b")
+_PROGRAMS = frozenset({"comms", "comms-graph"})
+_SEPARATORS = frozenset({"&&", "||", ";", "|"})
+
+
+def _runs_comms(command: str) -> bool:
+    """Is comms the program of some command in this line, not just a word in it?"""
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|")
+    lexer.whitespace_split = True
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        return False
+    starts = True
+    for token in tokens:
+        if token in _SEPARATORS:
+            starts = True
+            continue
+        if starts and os.path.basename(token) in _PROGRAMS:
+            return True
+        starts = False
+    return False
 
 
 def _is_comms_hook(h: object) -> bool:
-    """A hook that runs this tool, not any command that merely mentions it."""
     return (isinstance(h, dict) and isinstance(h.get("command"), str)
-            and bool(_COMMS_HOOK.search(h["command"])))
+            and _runs_comms(h["command"]))
+
+
+def _malformed(settings: dict) -> str:
+    """Why the hooks in ``settings`` are not a shape doctor can safely rewrite."""
+    hooks = settings.get("hooks")
+    if hooks is None:
+        return ""
+    if not isinstance(hooks, dict):
+        return '"hooks" is not an object'
+    for event, entries in hooks.items():
+        if not isinstance(entries, list):
+            return f'"hooks.{event}" is not a list'
+        for entry in entries:
+            if isinstance(entry, dict) and not isinstance(entry.get("hooks", []), list):
+                return f'a "hooks" value under "{event}" is not a list'
+    return ""
 
 
 def _rewrite_hooks(settings: dict) -> dict:
     """Drop every comms hook, keep all other hooks, add the three we want."""
     hooks = settings.setdefault("hooks", {})
-    if not isinstance(hooks, dict):
-        hooks = settings["hooks"] = {}
     for event, matcher, verb in HOOKS:
-        entries = hooks.get(event)
         kept: list = []
-        for entry in entries if isinstance(entries, list) else []:
+        for entry in hooks.get(event, []):
             inner = entry.get("hooks") if isinstance(entry, dict) else None
             if isinstance(inner, list) and any(_is_comms_hook(h) for h in inner):
                 rest = [h for h in inner if not _is_comms_hook(h)]
@@ -236,11 +272,16 @@ def _fix_hooks() -> list[str]:
     settings, why = _read_settings()
     if settings is None:
         return [why]
+    if _malformed(settings):
+        return [f"left {path} alone: {_malformed(settings)}"]
     raw = path.read_text(encoding="utf-8") if path.exists() else ""
     updated = _rewrite_hooks(json.loads(raw) if raw.strip() else {})
     text = json.dumps(updated, indent=_indent_of(raw), ensure_ascii=False) + "\n"
     out: list[str] = []
     path.parent.mkdir(parents=True, exist_ok=True)
+    # A dotfiles setup links settings.json elsewhere: write the file the link
+    # names, so the link survives and the real file gets the hooks.
+    path = path.resolve()
     if path.exists():
         stamp = _dt.datetime.now().strftime("%Y%m%dT%H%M%S%f")
         backup = path.with_name(f"{path.name}.bak-{stamp}")

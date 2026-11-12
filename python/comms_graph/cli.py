@@ -305,6 +305,9 @@ def _tagged(st, actor: str, etype: str, scope: list[str] | None, data: dict) -> 
 
 
 def _event(actor: str, etype: str, scope: list[str] | None, data: dict) -> _log.Event:
+    if etype == _log.TYPE_CLAIM and "agent_session" not in data and _identity.host_session():
+        # Ownership on the edit path is by session; a name alone can be shared.
+        data = {**data, "agent_session": _identity.host_session()}
     return _log.Event(
         ts=datetime.now(timezone.utc),
         id=_log.new_id(),
@@ -485,7 +488,7 @@ def _same_file_by_name(a: str, b: str) -> bool:
     return na == nb
 
 
-def _uncreated_twin(st, scope_str: str, root: Path, actor: "str | frozenset[str]"):
+def _uncreated_twin(st, scope_str: str, root: Path, is_mine):
     """A live claim naming the same not-yet-created file under another spelling.
 
     THE HOLE THIS CLOSES. Everything below the deepest existing directory is
@@ -513,9 +516,8 @@ def _uncreated_twin(st, scope_str: str, root: Path, actor: "str | frozenset[str]
         probe = probe.parent
     if not _case_blind_here(probe):
         return None
-    mine = actor if isinstance(actor, frozenset) else frozenset((actor,))
     for claim in st.claims.values():
-        if claim.actor in mine:
+        if is_mine(claim):
             continue
         other = str(claim.scope).split("#", 1)[0]
         if other != path_part and _same_file_by_name(other, path_part):
@@ -678,6 +680,31 @@ def _parse_scope_or_exit(raw: str) -> _scope.Scope:
 # ---------------------------------------------------------------------------
 
 
+def _claim_obstacles(st, root: Path, scope, scope_str: str, actor: str,
+                     agent_session: str) -> tuple[list, list]:
+    """What stands in the way of a CLI claim, and the releases that clear the rest.
+
+    The caller's own claims never block it: those under its name, and on the
+    edit path's rule those of its agent session under any name. The session's
+    auto-claims under another name are superseded. Writes nothing, so a refused
+    claim leaves the log as it was.
+    """
+    def mine(claim) -> bool:
+        return claim.actor == actor or (
+            bool(agent_session) and _identity.owns(st, claim, agent_session))
+
+    overlapping = sorted((c for c in st.claims.values() if _scope.overlaps(c.scope, scope)),
+                         key=lambda c: c.ts)
+    candidates = [c for c in overlapping
+                  if not mine(c) or (c.auto and c.actor != actor)]
+    conflicts, releases = _hooks.give_way(st, root, candidates, actor, agent_session)
+    if not conflicts:
+        twin = _uncreated_twin(st, scope_str, root, mine)
+        if twin is not None:
+            conflicts = [twin]
+    return conflicts, releases
+
+
 def _render_conflicts(conflicts: list, scope_str: str) -> str:
     lines = [
         "CLAIM CONFLICT: not recorded. Somebody else already holds this ground.",
@@ -765,13 +792,12 @@ def _cmd_claim_many(positional: list[str], flags: dict) -> int:
         # EVERY scope first. The whole point is that nothing is written until we
         # know all of them are free.
         blocked: list[tuple[str, object]] = []
+        releases: dict[str, object] = {}
         for scope_str, scope in scopes:
-            conflicts = _hooks.yield_auto_claims(
-                st, log_file, root, st.conflicts_for(scope, actor), actor,
-                _identity.family(st, _identity.host_session(), actor))
-            if not conflicts:
-                twin = _uncreated_twin(st, scope_str, root, actor)
-                conflicts = [twin] if twin is not None else []
+            conflicts, gives_way = _claim_obstacles(
+                st, root, scope, scope_str, actor, _identity.host_session())
+            for event in gives_way:
+                releases.setdefault(event.data["refs"][0], event)
             if conflicts:
                 blocked.append((scope_str, conflicts[0]))
 
@@ -804,6 +830,7 @@ def _cmd_claim_many(positional: list[str], flags: dict) -> int:
             claim_data["task"] = task_tag
         greeting = _hello_if_unknown(st, actor)
         batch = [greeting] if greeting is not None else []
+        batch.extend(releases.values())
         superseded = [c for c in st.claims.values()
                       if c.actor == actor and str(c.scope) in seen]
         if superseded:
@@ -883,7 +910,8 @@ def _cmd_claim(argv: list[str]) -> int:
                 for c in holders[:3]:
                     _err(f"    @{c.actor} holds {c.scope}  [{c.id}]")
                 return EXIT_CONFLICT
-        conflicts = st.conflicts_for(scope, actor)
+        conflicts, gives_way = _claim_obstacles(
+            st, root, scope, scope_str, actor, _identity.host_session())
         # Taking ground off somebody who is not coming back. The fold has always
         # understood this: a claim carrying `steals` displaces the named one
         # atomically, and nothing wrote it, so an abandoned claim could only be
@@ -921,13 +949,6 @@ def _cmd_claim(argv: list[str]) -> int:
             conflicts = [c for c in conflicts if c.id != target.id]
         else:
             claim_data_steal = {}
-        conflicts = _hooks.yield_auto_claims(
-            st, log_file, root, conflicts, actor,
-            _identity.family(st, _identity.host_session(), actor))
-        if not conflicts:
-            twin = _uncreated_twin(st, scope_str, root, actor)
-            if twin is not None:
-                conflicts = [twin]
         if conflicts:
             # Write down the refusal. A prevented collision that leaves no trace
             # is why a log of thousands of claims can honestly report having
@@ -994,7 +1015,7 @@ def _cmd_claim(argv: list[str]) -> int:
         # it are different ground and holding both is legitimate.
         superseded = [c for c in st.claims.values()
                       if c.actor == actor and str(c.scope) == str(scope)]
-        batch = ([greeting] if greeting is not None else [])
+        batch = ([greeting] if greeting is not None else []) + gives_way
         if superseded:
             batch.append(_tagged(st, actor, _log.TYPE_RELEASE, None, {
                 "refs": [c.id for c in superseded],
@@ -1174,16 +1195,14 @@ def _cmd_release(argv: list[str]) -> int:
         if force:
             return _release_somebody_elses(
                 st, log_file, actor, target, flags.get("reason", "").strip())
-        agent_session = _identity.host_session()
-        names = {actor}
-        family = st.families.get(agent_session)
-        if family is not None and family.own_actor == actor:
-            names.add(_identity.auto_name(agent_session))
-        mine = sorted((c for c in st.claims.values() if c.actor in names), key=lambda c: c.ts)
+        mine = sorted((c for c in st.claims.values() if c.actor == actor), key=lambda c: c.ts)
         targets = [p for p in positional if p]
         if not targets:
             if not mine:
                 print(f"nothing to release: @{actor} holds no claims here")
+                also = _identity.other_names_line(st, _identity.host_session(), actor)
+                if also:
+                    print(also)
                 return EXIT_OK
             chosen = mine[-1:] if "latest" in flags else mine
             unmatched: list[str] = []
@@ -1192,7 +1211,7 @@ def _cmd_release(argv: list[str]) -> int:
             for target in targets:
                 found: list = []
                 by_id = st.claim_by_id(target)
-                if by_id is not None and by_id.actor in names:
+                if by_id is not None and by_id.actor == actor:
                     found = [by_id]
                 else:
                     # Rooted the same way claim roots it, and for the same
@@ -1218,6 +1237,9 @@ def _cmd_release(argv: list[str]) -> int:
                 _err("  Held: " + shown + (f" (+{len(mine) - 8} more)" if len(mine) > 8 else ""))
             else:
                 _err(f"  @{actor} holds no claims here.")
+            also = _identity.other_names_line(st, _identity.host_session(), actor)
+            if also:
+                _err("  " + also)
         if chosen:
             data: dict = {"refs": [c.id for c in chosen]}
             if flags.get("result"):
@@ -1545,8 +1567,8 @@ def _cmd_check_staged(flags: dict) -> int:
     # `--as` cannot be the answer on its own: a pre-commit hook does not know
     # which agent is committing, so it has nothing to pass.
     actor = _actor(flags, write=False)
-    mine = _identity.family(st, _identity.host_session(), actor)
-    unidentified = not mine
+    agent_session = _identity.host_session()
+    unidentified = not (actor or agent_session)
 
     # Carry WHERE each path came from. A path in HEAD is not a staged path, and
     # telling somebody to `git restore --staged` a file that is not in their
@@ -1563,7 +1585,7 @@ def _cmd_check_staged(flags: dict) -> int:
             canon = _canonical_relpath(target.resolve(), root.resolve())
         except (ValueError, OSError):
             canon = rel_text
-        conflicts = st.conflicts_outside(_scope.parse(canon), mine)
+        conflicts = _identity.foreign(st, _scope.parse(canon), agent_session, actor)
         if conflicts:
             blocked.append((canon, conflicts[0]))
 
@@ -1666,7 +1688,7 @@ def _cmd_check_inner(argv: list[str]) -> int:
     positional, flags = _parse_flags(argv)
     if "staged" in flags:
         return _cmd_check_staged(flags)
-    explicit = (flags.get("as") or os.environ.get("COMMS_ACTOR", "")).strip().lstrip("@")
+    explicit = (flags.get("as") or "").strip().lstrip("@")
 
     if "stdin-json" in flags:
         try:

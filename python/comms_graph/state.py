@@ -105,6 +105,9 @@ class Claim:
     auto: bool = False
     agent_id: str = ""
     agent_type: str = ""
+    # The host agent session that wrote it. Empty on claims older than 0.5.0
+    # and on CLI calls made outside an agent session.
+    agent_session: str = ""
 
 
 @dataclass
@@ -117,14 +120,8 @@ class SessionFamily:
 
     agent_session: str
     actors: set[str] = field(default_factory=set)
+    # Who an actor-less call in this session is, whatever names it used since.
     first_actor: str = ""
-    # Set only by a `hello --as` the caller typed. The latest one wins.
-    primary_actor: str = ""
-
-    @property
-    def own_actor(self) -> str:
-        """Who an actor-less call in this session is, whatever subagents did since."""
-        return self.primary_actor or self.first_actor
 
 
 @dataclass
@@ -303,8 +300,9 @@ class State:
         out.sort(key=lambda c: c.ts)
         return out
 
-    def auto_claims_of(self, actors: frozenset[str]) -> list[Claim]:
-        return sorted((c for c in self.claims.values() if c.auto and c.actor in actors),
+    def auto_claims_of(self, agent_session: str) -> list[Claim]:
+        return sorted((c for c in self.claims.values()
+                       if c.auto and agent_session and c.agent_session == agent_session),
                       key=lambda c: c.ts)
 
     def independence_of(self, verifier: str, doer: str) -> str:
@@ -502,8 +500,6 @@ def fold(events: Iterable[Any]) -> State:
                 family.actors.add(ev.actor)
                 if not family.first_actor:
                     family.first_actor = ev.actor
-                if _bool_of(ev.data, "primary"):
-                    family.primary_actor = ev.actor
             state.sessions[ev.actor] = Session(
                 actor=ev.actor,
                 ts=ev.ts,
@@ -783,6 +779,7 @@ def _claim_from_event(ev: _Event) -> Claim | None:
         auto=_bool_of(ev.data, "auto"),
         agent_id=_string_of(ev.data, "agent_id"),
         agent_type=_string_of(ev.data, "agent_type"),
+        agent_session=_string_of(ev.data, "agent_session"),
     )
 
 

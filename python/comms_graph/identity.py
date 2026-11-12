@@ -1,9 +1,9 @@
 """Who is calling: one resolver for every verb, and the liveness marker.
 
 Resolution order: ``--as``, ``COMMS_ACTOR``, the session's own actor (the first
-one tied to the host agent session in this repo's log, or the latest ``hello
---as``), an auto-name derived from that session, else a one-line error. "Mine" is a session family (see ``state.SessionFamily``), not
-a single name.
+one tied to the host agent session in this repo's log), an auto-name derived
+from that session, else a one-line error. On the edit path a claim is the
+caller's by the agent session recorded on it (see ``owns``), not by name.
 """
 
 from __future__ import annotations
@@ -35,10 +35,16 @@ def host_session() -> str:
     return os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
 
 
-def auto_name(agent_session: str) -> str:
+def auto_name(st, agent_session: str) -> str:
+    """``<vendor>-<first 6>``, lengthened while another session already uses it."""
     vendor = os.environ.get("COMMS_VENDOR", "").strip().lower()
     prefix = _VENDOR_PREFIX.get(vendor, vendor or "claude")
-    return f"{prefix}-{agent_session[:6]}"
+    for length in (6, 8, 10, 12, len(agent_session)):
+        name = f"{prefix}-{agent_session[:length]}"
+        users = st.agent_sessions_of(name) if st is not None else []
+        if all(s == agent_session for s in users):
+            return name
+    return name
 
 
 def is_generic(name: str) -> bool:
@@ -50,30 +56,68 @@ def _clean(name: str) -> str:
     return (name or "").strip().lstrip("@").strip()
 
 
-def resolve(explicit: str, st_for_session, agent_session: str) -> Resolved | None:
-    """``st_for_session`` is called only when the log has to be consulted."""
+def resolve(explicit: str, st_for_session, agent_session: str, *,
+            hook: bool = False) -> Resolved | None:
+    """``st_for_session`` is called only when the log has to be consulted.
+
+    On the hook path a generic ``COMMS_ACTOR`` is ignored: it would put every
+    session on the machine under one name the CLI refuses to write.
+    """
     if _clean(explicit):
         return Resolved(_clean(explicit), "flag")
     env = _clean(os.environ.get("COMMS_ACTOR", ""))
-    if env:
+    if env and not (hook and is_generic(env)):
         return Resolved(env, "env")
     if not agent_session:
         return None
     st = st_for_session()
     family = st.families.get(agent_session) if st is not None else None
-    if family is not None and family.own_actor:
-        return Resolved(family.own_actor, "session")
-    return Resolved(auto_name(agent_session), "auto")
+    if family is not None and family.first_actor:
+        return Resolved(family.first_actor, "session")
+    return Resolved(auto_name(st, agent_session), "auto")
 
 
-def family(st, agent_session: str, actor: str = "") -> frozenset[str]:
-    """Every name this caller answers to: its session's actors, its auto-name, ``actor``."""
-    names = set(st.family_of(agent_session))
+def owns(st, claim, agent_session: str, name: str = "") -> bool:
+    """Is ``claim`` the caller's own on the edit path?
+
+    By the agent session recorded on the claim. A claim with none (older logs,
+    a CLI call outside a session) is the caller's when a hello ties its holder
+    to the caller's session. Without a session of its own, the caller has only
+    its name to go by.
+    """
     if agent_session:
-        names.add(auto_name(agent_session))
-    if actor:
-        names.add(actor)
-    return frozenset(names)
+        if claim.agent_session:
+            return claim.agent_session == agent_session
+        return claim.actor in st.family_of(agent_session)
+    return bool(name) and claim.actor == name
+
+
+def foreign(st, scope, agent_session: str, name: str = "") -> list:
+    """Live claims overlapping ``scope`` that are not the caller's, oldest first."""
+    from .scope import overlaps
+
+    return sorted((c for c in st.claims.values()
+                   if overlaps(c.scope, scope) and not owns(st, c, agent_session, name)),
+                  key=lambda c: c.ts)
+
+
+def other_names_line(st, agent_session: str, me: str) -> str:
+    """One line naming the claims held under this session's other names, or ''.
+
+    Every view counts only ``me``, the name ``release`` frees, so the rest are
+    said out loud instead of being counted as yours or as somebody else's.
+    """
+    names = st.family_of(agent_session) - {me}
+    counts: dict[str, int] = {}
+    for claim in st.claims.values():
+        if claim.actor in names:
+            counts[claim.actor] = counts.get(claim.actor, 0) + 1
+    if not counts:
+        return ""
+    held = ", ".join(f"@{n} {k}" for n, k in sorted(counts.items()))
+    name = next(iter(counts)) if len(counts) == 1 else "<name>"
+    return (f"this session also holds claims under other names: {held} "
+            f"(`comms-graph release --as {name}` frees them)")
 
 
 def hello_data(agent_session: str, model: str = "") -> dict:

@@ -59,3 +59,13 @@ def test_a_repo_under_the_temp_dir_stores_under_the_temp_dir(tmp_path):
     assert (store / "log.jsonl").is_file()
     assert not (clog.user_data_home() / "comms").exists()
     assert "temporary directory" not in out
+
+
+def test_a_temp_dir_inside_slash_tmp_wins_over_slash_tmp(monkeypatch):
+    """Linux runners put the test temp dir under /tmp, so both bases match."""
+    import tempfile
+
+    monkeypatch.setattr(tempfile, "tempdir", "/tmp/comms-nested-tempdir")
+    nested = os.path.realpath("/tmp/comms-nested-tempdir")
+    root = os.path.join(nested, "repo")
+    assert clog._temp_store_base(root) == Path(nested) / "comms-stores"
