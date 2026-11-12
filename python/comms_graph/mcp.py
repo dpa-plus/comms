@@ -2,13 +2,11 @@
 
 WHY A SECOND SURFACE AT ALL. The CLI is only reached when something tells an
 agent to reach for it, and the always-on block that does the telling is one
-paragraph competing with the whole task. The evidence is in the log: across
-thousands of real claims almost none carried a task, because the skill that
-explains tasks does not auto-trigger. A command an agent must be *told* to run
+paragraph competing with the whole task. A command an agent must be *told* to run
 loses to a tool sitting in its tool list on every single turn. Same protocol,
 same log, same events: different door.
 
-NO CEREMONY. Six verbs that map one-to-one onto commands that already exist. No
+NO CEREMONY. Five verbs that map one-to-one onto commands that already exist. No
 registration, no inbox, no severity ladder. Anything an agent must learn before
 its first call is ceremony and does not belong here.
 
@@ -75,17 +73,6 @@ USAGE = """Usage: comms-graph mcp
   being per process. COMMS_ACTOR is still the default when it is omitted.
 
   Takes no arguments. Exit status: 0 clean shutdown, 2 bad usage."""
-
-#: The five categories `find` accepts, in the order the error message lists
-#: them. Imported rather than redefined would be better; cli.FINDING_CATEGORIES
-#: is a dict whose iteration order is already this, and the enum in the tool
-#: schema has to be a list, so this is the one place the order is written down.
-FIND_CATEGORIES = ("bug", "fix", "ship", "decision", "gotcha")
-
-#: A finding in one of these outlives the work that produced it, so it goes to
-#: the top of the "prior context" list a claim prints. A `bug` from six weeks
-#: ago may well be fixed; a `decision` is still the decision.
-_DURABLE = frozenset({"decision", "gotcha"})
 
 #: Free-text ceiling, in Unicode scalars rather than bytes. Matches the Go
 #: build's MCP limit exactly: the same body typed at either door must be
@@ -226,7 +213,6 @@ def tools() -> list[dict]:
                 "actor": actor_prop,
                 "path": _str_prop("repo-relative path, optionally #L10-40 or #symbolName"),
                 "intent": _str_prop("what you are about to do to it, one line"),
-                "task": _str_prop("slug of the task this claim carries out, if any"),
             }},
         },
         {
@@ -249,20 +235,6 @@ def tools() -> list[dict]:
             "inputSchema": {"type": "object", "required": ["body"], "properties": {
                 "actor": actor_prop,
                 "body": _str_prop("the note"),
-            }},
-        },
-        {
-            "name": "comms_find",
-            "description": "Record something worth keeping: a decision and its reason, or a trap "
-                           "the next agent should not fall into. Anchored to the file you hold, "
-                           "so it resurfaces when somebody claims that file.",
-            "inputSchema": {"type": "object", "required": ["category", "summary"], "properties": {
-                "actor": actor_prop,
-                "category": {"type": "string", "enum": list(FIND_CATEGORIES),
-                             "description": "bug=open problem, fix=resolved, ship=released, "
-                                            "decision=architectural choice, gotcha=persistent trap"},
-                "summary": _str_prop("one line, specific enough to act on"),
-                "ref": _str_prop("optional anchor, e.g. path:src/auth.ts"),
             }},
         },
     ]
@@ -300,13 +272,10 @@ def _call(params):
 
     handler = {
         "comms_check": lambda: _check(actor_arg, _arg(args, "path")),
-        "comms_claim": lambda: _claim(actor_arg, _arg(args, "path"), _arg(args, "intent"),
-                                      _arg(args, "task")),
+        "comms_claim": lambda: _claim(actor_arg, _arg(args, "path"), _arg(args, "intent")),
         "comms_release": lambda: _release(actor_arg, _arg(args, "result")),
         "comms_status": lambda: _status(actor_arg),
         "comms_note": lambda: _note(actor_arg, _arg(args, "body")),
-        "comms_find": lambda: _find(actor_arg, _arg(args, "category"), _arg(args, "summary"),
-                                    _arg(args, "ref")),
     }.get(name)
     if handler is None:
         raise _Failed(f"unknown tool {name}", code=-32602)
@@ -464,32 +433,6 @@ def _stamp_session(st, actor: str, data: dict) -> None:
     data.setdefault("comms_session_name", getattr(session, "session_name", ""))
 
 
-def _findings_on_scopes(st, scopes, limit: int) -> list:
-    """Prior findings anchored to a path that overlaps any of these scopes."""
-    matches = []
-    for finding in st.findings:
-        for ref in finding.refs:
-            if getattr(ref, "kind", "") != "path":
-                continue
-            parsed, _bad = _parse_scope(getattr(ref, "value", ""))
-            if parsed is None:
-                continue
-            if any(_scope.overlaps(parsed, sc) for sc in scopes):
-                matches.append(finding)
-                break
-    # Two stable passes rather than one composite key: durable first, newest
-    # within each group, and no arithmetic on timestamps that a year-1 event
-    # could make throw.
-    matches.sort(key=lambda f: f.ts, reverse=True)
-    matches.sort(key=lambda f: 0 if f.category in _DURABLE else 1)
-    return matches[:limit] if limit > 0 else matches
-
-
-# ---------------------------------------------------------------------------
-# comms_check: the one that runs constantly
-# ---------------------------------------------------------------------------
-
-
 def _check(actor_arg: str, path: str):
     """Read-only, and it must stay that way.
 
@@ -529,7 +472,7 @@ def _check(actor_arg: str, path: str):
 # ---------------------------------------------------------------------------
 
 
-def _claim(actor_arg: str, path: str, intent: str, task: str):
+def _claim(actor_arg: str, path: str, intent: str):
     if not path or not intent:
         return _text("path and intent are both required", True)
     scope, bad = _parse_scope(path)
@@ -558,21 +501,10 @@ def _claim(actor_arg: str, path: str, intent: str, task: str):
             return _text(f"the coordination lock is no longer exclusive: {broken}. "
                          "Nothing was claimed; try again.", True)
         data: dict = {"intent": intent}
-        if task:
-            data["task"] = task
         _stamp_session(st, actor, data)
         event = _append(log_file, st, actor, _log.TYPE_CLAIM, [str(scope)], data)
-        prior = _findings_on_scopes(st, [scope], 3)
 
-    out = f"claimed {scope} as @{actor} (id {event.id})"
-    if prior:
-        # The reason findings are anchored to a path at all: this is the moment
-        # somebody is about to touch that file, and the only moment a note left
-        # six weeks ago has any chance of being read.
-        out += "\n\nprior context on this path:"
-        for finding in prior:
-            out += f"\n  [{finding.category}] {finding.summary} (@{finding.actor})"
-    return _text(out, False)
+    return _text(f"claimed {scope} as @{actor} (id {event.id})", False)
 
 
 def _record_blocked(log_file: Path, st, actor: str, scope_str: str, intent: str, holder) -> None:
@@ -660,57 +592,6 @@ def _note(actor_arg: str, body: str):
         _stamp_session(st, actor, data)
         _append(log_file, st, actor, _log.TYPE_NOTE, None, data)
     return _text("noted", False)
-
-
-# ---------------------------------------------------------------------------
-# comms_find
-# ---------------------------------------------------------------------------
-
-
-def _parse_ref(raw: str):
-    """One ``kind:value`` pair, or a complaint.
-
-    Kind and value, never a bare string, because a bare string cannot say which
-    of the two it is and that is the useful half. Control characters are refused
-    on the same grounds as every other stored field: a ref value must not be
-    able to smuggle escape bytes into output that prints it raw.
-    """
-    kind, sep, value = raw.partition(":")
-    if not sep or not kind or not value:
-        return None, f"ref {_quote(raw)}: expected kind:value"
-    if _reject_control_text("ref", kind + value, 0):
-        return None, f"ref {_quote(raw)}: contains control character"
-    return {"kind": kind, "value": value}, ""
-
-
-def _find(actor_arg: str, category: str, summary: str, ref: str):
-    if category not in FIND_CATEGORIES:
-        return _text("category must be one of " + ", ".join(FIND_CATEGORIES), True)
-    if not summary:
-        return _text("summary is required", True)
-    complaint = _reject_control_text("finding summary", summary, MAX_TEXT_RUNES)
-    if complaint:
-        return _text(complaint, True)
-
-    refs: list[dict] = []
-    if ref:
-        parsed, bad = _parse_ref(ref)
-        if parsed is None:
-            return _text(bad, True)
-        refs.append(parsed)
-
-    with _writing(actor_arg) as (actor, log_file, _handle, st):
-        # ANCHORING IS NOT OPTIONAL. A finding with no path ref is never read
-        # again: nothing surfaces it, because the only thing that surfaces one
-        # is somebody claiming the file it is about. When the caller did not say
-        # which file, the files it currently holds are the honest answer.
-        if not any(r["kind"] == "path" for r in refs):
-            for claim in st.active_claims_by_actor(actor):
-                refs.append({"kind": "path", "value": claim.scope.path})
-        data = {"category": category, "summary": summary, "refs": refs}
-        _stamp_session(st, actor, data)
-        _append(log_file, st, actor, _log.TYPE_FINDING, None, data)
-    return _text(f"recorded [{category}] {summary}", False)
 
 
 # ---------------------------------------------------------------------------

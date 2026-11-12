@@ -10,7 +10,7 @@ THE MECHANIC, WHICH IS NOT AN EVENT TYPE. There is no ``session`` event. A
 session exists because the actor's most recent ``hello`` carries
 ``comms_session_id`` / ``comms_session_name``, and because every event that
 actor writes afterwards repeats those two keys in its ``data``. The fold in
-``state.py`` already reads them everywhere. Claim, Note, Finding, Blocked,
+``state.py`` already reads them everywhere. Claim, Note, Blocked,
 Release and the ended-session archive all have the pair, so this module only
 has to WRITE them: the hello here, and :func:`stamp` for every other verb.
 
@@ -183,7 +183,7 @@ def stamp(st, actor: str, data: dict) -> None:
     """Tag an outgoing event with the actor's named session, if it has one.
 
     This is the whole writing side of the mechanic, and it belongs on EVERY
-    verb that appends: claim, release, find, note, task. An event that skips it
+    verb that appends: claim, release, note. An event that skips it
     is invisible to the session: `end` will not release its claim, the archive
     will not count it, and a reader asking what that piece of work produced
     gets an answer that is quietly short.
@@ -372,8 +372,7 @@ def _session_hello(st, actor: str, session_id: str, session_name: str,
         data["agent_session"] = agent_session
     # Model identity, on the same terms as `_hello_if_unknown`: absent when
     # unset rather than guessed. Carried here because this hello supersedes the
-    # one that had it, and dropping it downgrades every later verification from
-    # "independent" to "unknown": a weaker claim than the truth.
+    # one that had it, and dropping it would blank the model on the board.
     vendor = os.environ.get("COMMS_VENDOR", "").strip()
     if vendor:
         data["vendor"] = vendor
@@ -591,7 +590,7 @@ def _retire(argv: list[str]) -> int:
 def _lead(argv: list[str]) -> int:
     """`session lead [<actor>]`: move leadership to one active actor.
 
-    The leader's only extra privilege is posting priority notes and findings, so
+    The leader's only extra privilege is posting priority notes, so
     this is a small decision; it is a command rather than an election because
     the alternative: inferring it from who greeted first: cannot be corrected
     when the first one to greet is the one who has gone quiet.

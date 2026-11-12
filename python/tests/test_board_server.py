@@ -25,6 +25,8 @@ from comms_graph import server as cserver
 
 
 @pytest.fixture()
+
+
 def board(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     (tmp_path / "home").mkdir()
@@ -285,16 +287,8 @@ def test_a_week_old_code_map_is_an_alert_not_a_blank_board(board):
     assert status == 200
     snap = json.loads(body)
     assert "error" not in snap, snap.get("error")
-    assert snap["code_map_available"] is True
     kinds = [a.get("kind") for a in snap["alerts"]]
     assert "stale-map" in kinds, f"no stale-map alert, only {kinds}"
-
-
-def test_the_task_frame_renders_with_no_tasks(board):
-    repo, log_file, base = board
-    status, body = _get(base + "/tasks.html")
-    assert status == 200
-    assert "Nothing declared yet" in body or "No tasks declared yet" in body
 
 
 def test_the_board_has_no_way_to_change_anything(board):
@@ -332,8 +326,8 @@ def test_concurrent_requests_never_serve_an_empty_page(board):
     """IF THIS FAILS: a frame goes blank with HTTP 200 and nothing in any log.
 
     Building a page is not side-effect free: it renders to a file and reads it
-    back. Two requests missing the cache together (a browser fetching both
-    frames, or a reload landing on top of a push) had both builders writing the
+    back. Two requests missing the cache together (two tabs opening the map,
+    or a reload landing on top of a push) had both builders writing the
     same path at once, and one read it half-written.
     """
     import threading
@@ -349,7 +343,7 @@ def test_concurrent_requests_never_serve_an_empty_page(board):
         except Exception as exc:  # noqa: BLE001 - recorded, asserted below
             results.append((path, type(exc).__name__, 0))
 
-    paths = ["/map.html", "/tasks.html"] * 4
+    paths = ["/map.html"] * 8
     threads = [threading.Thread(target=hit, args=(p,)) for p in paths]
     for t in threads:
         t.start()
@@ -407,63 +401,6 @@ def test_a_claim_is_quiet_because_its_HOLDER_went_silent(board, tmp_path):
     assert "quiet" in kinds, snap["alerts"]
     quiet = next(a for a in snap["alerts"] if a["kind"] == "quiet")
     assert "@bob" in quiet["text"] and "@alice" not in quiet["text"], quiet
-
-
-def test_the_board_names_a_dependency_loop(board):
-    """A cycle is the one state a plan cannot recover from on its own, and it
-    was computed inside the task-graph page's side panel, which the board
-    hides to give the drawing room. So it was invisible where people watch."""
-    from comms_graph import server as cserver
-
-    repo, log_file, base = board
-    log_file.parent.mkdir(parents=True, exist_ok=True)
-    events = [
-        _at(0, "task", "p", 5, {"task": "x", "title": "X"}),
-        _at(0, "task", "p", 5, {"task": "y", "title": "Y"}),
-        _at(0, "task_edge", "p", 4, {"from": "x", "to": "y", "kind": "interface"}),
-        _at(0, "task_edge", "p", 3, {"from": "y", "to": "x", "kind": "interface"}),
-        _at(0, "task_edge", "p", 2, {"from": "x", "to": "ghost", "kind": "sequence"}),
-    ]
-    events.sort(key=lambda e: e.ts)
-    with open(log_file, "wb") as fh:
-        for e in events:
-            fh.write(e.encode())
-
-    snap = cserver._snapshot(repo, log_file)
-    kinds = {a["kind"] for a in snap["alerts"]}
-    assert "cycle" in kinds, snap["alerts"]
-    assert "dangling" in kinds, snap["alerts"]
-    cyc = next(a for a in snap["alerts"] if a["kind"] == "cycle")
-    assert "x" in cyc["text"] and "y" in cyc["text"], cyc
-
-
-def test_snapshot_preserves_every_declared_task_edge_for_the_dashboard(board):
-    """The main graph needs the recorded plan, not only today's blockers.
-
-    ``blocked_by`` is derived from incomplete predecessors and therefore drops
-    an edge as soon as its predecessor closes.  The dashboard must still show
-    the edge that was actually declared, with its direction and explanation.
-    """
-    repo, log_file, _base = board
-    log_file.parent.mkdir(parents=True, exist_ok=True)
-    events = [
-        _at(0, "task", "planner", 5, {"task": "api", "title": "Build the API"}),
-        _at(0, "task", "planner", 4, {"task": "ui", "title": "Connect the interface"}),
-        _at(0, "task_edge", "planner", 3, {
-            "from": "api", "to": "ui", "kind": "consumes", "provides": "stable schema",
-        }),
-    ]
-    events.sort(key=lambda event: event.ts)
-    with open(log_file, "wb") as fh:
-        for event in events:
-            fh.write(event.encode())
-
-    snap = cserver._snapshot(repo, log_file)
-
-    assert snap["task_edges"] == [{
-        "from": "api", "to": "ui", "kind": "consumes", "provides": "stable schema",
-    }]
-    assert snap["code_map_available"] is False
 
 
 def test_a_quiet_board_says_so_rather_than_showing_nothing(board):
@@ -547,16 +484,13 @@ def test_the_page_script_actually_parses(board):
 def test_the_page_draws_every_array_the_snapshot_carries(board):
     """IF THIS FAILS: data is collected on every push and rendered nowhere.
 
-    Every one of these was in the payload and undrawn at some point: findings
-    for the whole life of the board, and the feed, the claim id and the
-    verification evidence until the page was rebuilt around them.
+    Every one of these was in the payload and undrawn at some point.
     """
     repo, log_file, base = board
     _, body = _get(base + "/")
-    for name in ("alerts", "claims", "roster", "tasks", "feed", "findings", "notes", "projects"):
+    for name in ("alerts", "claims", "roster", "feed", "notes", "projects"):
         assert "D." + name in body or "d." + name in body, f"the page never reads {name}"
-    # the reported checks reach the page on the EVENT that reported them
-    for token in ("quiet", "identified", "e.checks", "c.id", "band"):
+    for token in ("quiet", "identified", "c.auto", "c.id", "band", "who.model"):
         assert token in body, f"the page never reads {token}"
 
 
@@ -574,8 +508,8 @@ def test_the_graphs_cost_nothing_until_somebody_asks_for_them(board):
     assert body.count('id="dagFrame"') == 1
     frame = body[body.index('id="dagFrame"'):][:140]
     assert "src=" not in frame, ("a graph loads on every page view: " + frame)
-    assert "/tasks.html" in body and "/map.html" in body
-    assert 'id="gTasks"' in body and 'id="gMap"' in body
+    assert "/map.html" in body and "/tasks.html" not in body
+    assert 'id="gMap"' in body and 'id="gTasks"' not in body
 
 
 def _exercise_graph_clicks(board, initial_search, actions):
@@ -668,29 +602,25 @@ def test_graph_tabs_forward_only_the_encoded_selected_store_and_cache_reopens(bo
         [
             {"click": "dagBtn"},
             {"click": "dagClose"},
-            {"click": "gTasks"},
             {"click": "gMap"},
             {"click": "dagClose"},
-            {"click": "gMap"},
+            {"click": "dagBtn"},
         ],
     )
 
     assert result["before"] == [], "a graph navigated before it was opened"
-    assert result["loads"] == [
-        "/tasks.html?store=" + encoded,
-        "/map.html?store=" + encoded,
-    ]
+    assert result["loads"] == ["/map.html?store=" + encoded]
 
 
 def test_graph_tabs_keep_default_project_urls_when_no_store_is_selected(board):
     result = _exercise_graph_clicks(
         board,
         "?actor=viewer&panel=activity",
-        [{"click": "gTasks"}, {"click": "gMap"}],
+        [{"click": "dagBtn"}],
     )
 
     assert result["before"] == []
-    assert result["loads"] == ["/tasks.html", "/map.html"]
+    assert result["loads"] == ["/map.html"]
 
 
 def test_reopening_a_graph_after_store_changes_loads_the_new_project(board):
@@ -698,20 +628,19 @@ def test_reopening_a_graph_after_store_changes_loads_the_new_project(board):
         board,
         "?store=first-project&actor=alice",
         [
-            {"click": "gTasks"},
+            {"click": "dagBtn"},
             {"click": "dagClose"},
-            {"click": "gTasks"},
+            {"click": "dagBtn"},
             {"search": "?actor=bob&store=second-project"},
             {"click": "dagClose"},
-            {"click": "gTasks"},
+            {"click": "dagBtn"},
         ],
     )
 
     assert result["loads"] == [
-        "/tasks.html?store=first-project",
-        "/tasks.html?store=second-project",
+        "/map.html?store=first-project",
+        "/map.html?store=second-project",
     ]
-
 
 
 def test_an_agent_with_no_hello_is_not_declared_abandoned_while_it_works(board):
@@ -778,24 +707,16 @@ def test_the_working_now_band_is_actually_visible(board):
     )
 
 
-def test_a_findings_text_reaches_the_feed(board):
-    """IF THIS FAILS: every finding on the board renders as an empty quote line.
-
-    `find` writes a finding's text as data["summary"]: that is what the CLI
-    writes, what the Go build wrote before it, and what the findings panel
-    already reads. The feed builder read data["body"] alone, which only notes
-    carry. So the board showed 1532 findings in the real store with the category
-    badge, the actor and the time, and nothing where the sentence goes.
-
-    It is worth a test rather than a fix alone because nothing else notices: the
-    page still renders, the counts are still right, and the panel beside it is
-    still correct. Only a person reading a blank line would ever know.
-    """
+def test_old_findings_stay_out_of_the_feed(board):
+    """An old log still holds findings. The feed shows what comms does now, so
+    they are left out, and a note keeps its text."""
     repo, log_file, base = board
-    clog.append(log_file, clog.Event(
-        ts=_now(), id=clog.new_id(), actor="alice", type=clog.TYPE_FINDING,
-        data={"category": "ship", "summary": "v9 released and installed"},
-    ))
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(log_file, "ab") as fh:
+        fh.write(clog.Event(
+            ts=_now(), id=clog.new_id(), actor="alice", type=clog.TYPE_FINDING,
+            data={"category": "ship", "summary": "v9 released and installed"},
+        ).encode())
     clog.append(log_file, clog.Event(
         ts=_now(), id=clog.new_id(), actor="alice", type=clog.TYPE_NOTE,
         data={"body": "a note carries body, and must keep working"},
@@ -805,9 +726,7 @@ def test_a_findings_text_reaches_the_feed(board):
     feed = json.loads(raw).get("feed", [])
     by_type = {e["type"]: e for e in feed}
 
-    assert by_type["finding"]["body"] == "v9 released and installed", (
-        "the finding reached the feed without its text"
-    )
+    assert "finding" not in by_type
     assert by_type["note"]["body"] == "a note carries body, and must keep working"
 
 

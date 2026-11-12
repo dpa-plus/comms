@@ -556,18 +556,13 @@ def test_every_command_the_briefing_teaches_actually_exists():
     root = Path(__file__).resolve().parents[1]
     briefing = (root / "comms_graph" / "instructions.md").read_text(encoding="utf-8")
 
-    # Every "comms-graph <verb>" the briefing shows, plus any "task <sub>".
     verbs = set(re.findall(r"comms-graph ([a-z-]+)", briefing))
-    subs = set(re.findall(r"comms-graph task ([a-z-]+)", briefing))
     assert verbs, "the briefing should show at least one command"
 
     from comms_graph import verbs as cverbs
 
     missing = {v for v in verbs if cverbs.lookup(v) is None}
     assert not missing, f"briefing teaches {sorted(missing)}, which the CLI does not dispatch"
-    task_subs = {s.name for s in cverbs.lookup("task").subs}
-    missing_subs = subs - task_subs
-    assert not missing_subs, f"briefing teaches 'task {sorted(missing_subs)}', not dispatched"
 
 
 def test_the_briefing_names_the_flags_it_uses():

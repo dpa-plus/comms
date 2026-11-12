@@ -28,10 +28,8 @@ unbounded stretch of human time, so three things are arranged around that:
     edit of a brand-new slug leaves no file at all: an empty stub is worse than
     nothing, because it shows up in ``--list`` as if somebody had written it.
 
-The event log is shared with the Go build, so the finding recorded after a save
-uses the Go's keys exactly: category ``decision``, summary ``updated doc:<slug>``
-and a ``doc`` ref. A different key for the same fact would be dropped silently by
-the other reader, which is the failure mode that looks like nothing happening.
+A save is recorded in the event log as a note, ``updated doc:<slug>``, so the
+other agents see that the doc moved.
 """
 
 from __future__ import annotations
@@ -71,7 +69,7 @@ USAGE = """Usage: comms-graph doc [--list | <slug> [--edit]]
   doc <slug> --edit       open it in $EDITOR, then save it back
 
   Options:
-    --as <actor>    who you are. Only --edit needs it (it records a finding).
+    --as <actor>    who you are. Only --edit needs it (it records a note).
                     Or set COMMS_ACTOR.
     --root <path>   repo root (default: the git root above the cwd)
 
@@ -315,12 +313,7 @@ def _install(doc_path: Path, content: bytes) -> None:
 
 
 def _record(root: Path, slug: str, actor: str) -> None:
-    """Append the finding that says this doc moved. Never fails the save.
-
-    Keys are the Go build's, verbatim, because both builds read one log: a
-    ``decision`` finding summarised ``updated doc:<slug>`` with a ``doc`` ref.
-    Spelling the ref differently would hide every doc edit from the other build's
-    reader without any error to notice.
+    """Append the note that says this doc moved. Never fails the save.
 
     If the log cannot be written the doc is still on disk, and reporting failure
     would send somebody back to re-type an edit that was in fact saved. So the
@@ -328,16 +321,12 @@ def _record(root: Path, slug: str, actor: str) -> None:
     """
     log_file, lock_file = _store(root)
     _warn_if_ephemeral(log_file)
-    data = {
-        "category": "decision",
-        "summary": f"updated doc:{slug}",
-        "refs": [{"kind": "doc", "value": slug}],
-    }
+    data = {"body": f"updated doc:{slug}"}
     try:
         with _lock.file_lock(lock_file):
             st = _read_state(log_file)
             greeting = _hello_if_unknown(st, actor)
-            event = _event(actor, _log.TYPE_FINDING, None, data)
+            event = _event(actor, _log.TYPE_NOTE, None, data)
             if greeting is None:
                 _log.append(log_file, event)
             else:

@@ -67,7 +67,7 @@ jobs:
           /tmp/clean/bin/comms-graph doctor --help
           /tmp/clean/bin/comms-graph --version
           /tmp/clean/bin/comms-graph --help > /tmp/verbs.txt
-          for v in claim release check board status task tasks next brief \
-                   session doc find note log hello mcp ui version doctor hook guard whoami; do
+          for v in claim release check board status claims notes \
+                   session doc note log hello mcp ui version doctor hook guard whoami; do
             grep -qE "^  $v" /tmp/verbs.txt || { echo "wheel lost the '$v' verb"; exit 1; }
           done

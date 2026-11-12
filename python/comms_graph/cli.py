@@ -15,7 +15,7 @@ and they are not the same kind of thing:
   * A CONTACT WARNING is advisory. It is derived from the map, which is measured
     to flag more pairs than really change together and to miss between a third
     and a half of the ones that do. It never blocks, never sets a non-zero exit
-    status, and is never phrased as a verdict. See ``the README (the task graph and the code map)``.
+    status, and is never phrased as a verdict. See the README section on the code map.
 
 Mixing those two would destroy the value of both: an advisory that blocks gets
 switched off, and a hard conflict buried in advice gets skimmed past.
@@ -37,7 +37,6 @@ from __future__ import annotations
 import fcntl
 import json
 import os
-import re
 import socket
 import shlex
 import shutil
@@ -51,8 +50,6 @@ from . import hooks as _hooks
 from . import identity as _identity
 from . import lock as _lock
 from . import log as _log
-from . import task as _task
-from . import taskview as _taskview
 from . import resolve as _resolve
 from . import scope as _scope
 from . import guard as _guard
@@ -652,12 +649,9 @@ def _hello_if_unknown(st, actor: str) -> "object | None":
     label = os.environ.get("COMMS_LABEL", "").strip()
     if label:
         data["label"] = label
-    # Who made this agent. Read from the environment because nothing else can
-    # know it, and left ABSENT when unset rather than guessed: independence_of
-    # reports "unknown" for a missing vendor and that is the honest answer.
-    # Verified, and verified by another instance of the same model, are
-    # different claims: inferring the stronger one from a naming convention
-    # would be manufacturing evidence.
+    # Who made this agent, shown on the board. Read from the environment
+    # because nothing else can know it, and left ABSENT when unset rather than
+    # guessed from a naming convention.
     vendor = os.environ.get("COMMS_VENDOR", "").strip()
     if vendor:
         data["vendor"] = vendor
@@ -728,7 +722,7 @@ def _render_conflicts(conflicts: list, scope_str: str) -> str:
 def _cmd_claim_many(positional: list[str], flags: dict) -> int:
     """Claim several scopes atomically: all of them, or none of them.
 
-    A task boundary is usually more than one file: the route, the handler and
+    One change is usually more than one file: the route, the handler and
     its test, and taking them one at a time is not the same thing. Half a
     boundary is the bad state: you hold two of three, somebody else holds the
     third, and neither of you can finish without giving something back.
@@ -777,24 +771,6 @@ def _cmd_claim_many(positional: list[str], flags: dict) -> int:
 
     with _lock.file_lock(lock_file) as handle:
         st = _read_state(log_file)
-        task_tag = ""
-        if flags.get("task"):
-            task_tag = _slug_or_exit(flags["task"])
-            if task_tag not in st.tasks:
-                _no_such_task(st, task_tag, "to tag these claims with")
-                return EXIT_USAGE
-            # Same rule and same wording as the single-scope path: a task
-            # belongs to one agent at a time. Batching must not be a way round it.
-            on_it = sorted({c.actor for c in st.claims.values()
-                            if (getattr(c, "task", "") or "") == task_tag
-                            and c.actor != actor})
-            if on_it:
-                _err(f"error: {task_tag} is already being worked by "
-                     + ", ".join("@" + a for a in on_it))
-                _err("  A task belongs to one agent at a time. Take a different task,")
-                _err("  or split this one so you each have your own to be checked.")
-                return EXIT_CONFLICT
-
         # EVERY scope first. The whole point is that nothing is written until we
         # know all of them are free.
         blocked: list[tuple[str, object]] = []
@@ -832,8 +808,6 @@ def _cmd_claim_many(positional: list[str], flags: dict) -> int:
             return EXIT_ERROR
 
         claim_data: dict = {"intent": intent}
-        if task_tag:
-            claim_data["task"] = task_tag
         greeting = _hello_if_unknown(st, actor)
         batch = [greeting] if greeting is not None else []
         batch.extend(releases.values())
@@ -876,54 +850,12 @@ def _cmd_claim(argv: list[str]) -> int:
     # the collision this command exists to prevent.
     with _lock.file_lock(lock_file) as handle:
         st = _read_state(log_file)
-        task_tag = ""
-        if flags.get("task"):
-            task_tag = _slug_or_exit(flags["task"])
-            if task_tag not in st.tasks:
-                # Silently ignoring an unknown tag would put us back where we
-                # started: the claim records, the task never shows a doer, and
-                # nothing says why.
-                _no_such_task(st, task_tag, "to tag this claim with")
-                return EXIT_USAGE
-            # ONE TASK, ONE AGENT: enforced here rather than counted.
-            #
-            # Two agents sharing a task produced every severity-1 the task
-            # graph ever had: a review that covered half the work, a gate you
-            # could opt out of by never submitting, a rejection that un-did the
-            # bookkeeping, and a plain file release that silently closed a task
-            # somebody else was still writing. None of them were separately
-            # fixable: they were the same fact wearing different clothes.
-            #
-            # Nothing is lost. Two agents on one task still take DIFFERENT
-            # files, so the file lock already gives the parallelism; sharing a
-            # task label only added one review covering work that was not all
-            # there yet. Two tasks and an edge say the same thing and cannot
-            # go wrong this way.
-            #
-            # Sequential handoff is still fine: this only refuses while
-            # somebody else is HOLDING ground. When they release, or you free
-            # an abandoned claim with `release --force`: the task is yours.
-            on_it = sorted({c.actor for c in st.claims.values()
-                            if (getattr(c, "task", "") or "") == task_tag
-                            and c.actor != actor})
-            if on_it:
-                _err(f"error: {task_tag} is already being worked by "
-                     + ", ".join("@" + a for a in on_it))
-                _err("  A task belongs to one agent at a time. Take a different task,")
-                _err("  or split this one so you each have your own to be checked.")
-                holders = [c for c in st.claims.values()
-                           if (getattr(c, "task", "") or "") == task_tag and c.actor != actor]
-                for c in holders[:3]:
-                    _err(f"    @{c.actor} holds {c.scope}  [{c.id}]")
-                return EXIT_CONFLICT
         conflicts, gives_way = _claim_obstacles(
             st, root, scope, scope_str, actor, _identity.host_session())
         # Taking ground off somebody who is not coming back. The fold has always
         # understood this: a claim carrying `steals` displaces the named one
         # atomically, and nothing wrote it, so an abandoned claim could only be
-        # ended by the agent that left. That was already bad; once a task-tagged
-        # claim began holding its successors blocked, one crashed agent stalled
-        # the whole downstream graph with no command anybody else could run.
+        # ended by the agent that left.
         #
         # Deliberately blunt: it needs the exact claim id and a reason, both go
         # in the log under the taker's name, and it refuses anything it was not
@@ -992,29 +924,18 @@ def _cmd_claim(argv: list[str]) -> int:
             _err(f"error: the coordination lock is no longer exclusive: {broken}")
             _err(f"  Nothing was recorded. Check {lock_file} and try again.")
             return EXIT_ERROR
-        # --task is what makes task state DERIVED rather than a second set of
-        # books somebody has to remember to update: doers come from live claims
-        # tagged this way, so releasing the file empties them for free. It was
-        # accepted and then dropped on the floor: _parse_flags takes any flag,
-        # so `--task auth-api` exited 0 having recorded nothing, which left
-        # PHASE_DOING unreachable and the task never showing a doer.
         claim_data: dict = dict(claim_data_steal)
         if intent:
             claim_data["intent"] = intent
-        if task_tag:
-            claim_data["task"] = task_tag
         # Minted BEFORE the event it explains. fold() sorts by TIMESTAMP, so
         # putting the greeting first in the list is not enough: it has to be
         # first in time. It was created second, landed second, and every reader
-        # that needed the session (independence, the session half of the
-        # self-review gate) saw an actor with no hello on record yet.
+        # that needed the session saw an actor with no hello on record yet.
         greeting = _hello_if_unknown(st, actor)
         event = _tagged(st, actor, _log.TYPE_CLAIM, [str(scope)], claim_data)
         # Re-claiming ground you already hold REPLACES your claim on it; it does
         # not add a second. Two rows for one file made the board's claim count
-        # wrong, left it ambiguous which intent was current, and: since a claim
-        # carries a task tag: put one agent on two tasks from one file, which
-        # the phase derivation reads as two people still working.
+        # wrong and left it ambiguous which intent was current.
         #
         # Recorded as a release rather than dropped in the fold, so the audit
         # trail says what happened. Exact scope only: a file and a symbol inside
@@ -1197,14 +1118,11 @@ def _cmd_release(argv: list[str]) -> int:
         # It says whose it was and who took it, under the real name, with a
         # reason. The fold needed nothing: a release is popped by claim id and
         # has never cared who wrote it.
-        force = "force" in flags or "force" in _repeated(argv, "force")
+        force = "force" in flags
         if force:
             return _release_somebody_elses(
                 st, log_file, actor, target, flags.get("reason", "").strip())
         mine = sorted((c for c in st.claims.values() if c.actor == actor), key=lambda c: c.ts)
-        if flags.get("task"):
-            tagged = _slug_or_exit(flags["task"])
-            mine = [c for c in mine if c.task == tagged]
         targets = [p for p in positional if p]
         if not targets:
             if not mine:
@@ -1266,72 +1184,7 @@ def _cmd_release(argv: list[str]) -> int:
 
 
 
-# ---------------------------------------------------------------------------
-# tasks
-# ---------------------------------------------------------------------------
-
-_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
-
-
-def _slug_or_exit(raw: str, what: str = "task id") -> str:
-    """Task ids are human-speakable, because agents have to quote them.
-
-    Not the event ULID: measured on a real store, 99.5% of 11,049 event ids
-    shared their six-character prefix, so an agent asked to name one had nothing
-    short to say and nothing memorable to repeat. A slug is what somebody can
-    type into the next command without going back to look it up.
-
-    Case, spaces and underscores are normalized to hyphens rather than refused:
-    agents wrote `Fix_Login` and `fix login` and were told "not a slug".
-    """
-    slug = re.sub(r"[\s_]+", "-", (raw or "").strip().lower())
-    if not _SLUG_RE.match(slug):
-        _err(f"error: {what} {raw!r} cannot be turned into an id")
-        _err("  Letters, digits and hyphens, up to 64 characters, starting with a "
-             "letter or digit. For example: auth-api.")
-        sys.exit(EXIT_USAGE)
-    return slug
-
-
-def _no_such_task(st, slug: str, why: str = "") -> None:
-    """Say which tasks exist and the exact line that declares this one."""
-    import difflib
-
-    _err(f"error: no task called {slug!r}" + (f" {why}" if why else ""))
-    live = sorted(t.id for t in st.tasks.values() if t.phase != _task.PHASE_CLOSED)
-    close = difflib.get_close_matches(slug, sorted(st.tasks), n=1, cutoff=0.6)
-    if close:
-        _err(f"  Did you mean {close[0]}?")
-    if live:
-        more = f" (+{len(live) - 8} more)" if len(live) > 8 else ""
-        _err("  Open tasks: " + ", ".join(live[:8]) + more)
-    _err(f'  To declare it: comms-graph task add {slug} --title "..."')
-
-
-def _repeated(argv: list[str], name: str) -> list[str]:
-    """Every value given for a repeatable flag.
-
-    _parse_flags keeps one value per flag, which is right for --intent and wrong
-    for --check: a task with three required checks needs all three results, and
-    silently keeping the last one would let two failing checks vanish behind one
-    passing one.
-    """
-    out: list[str] = []
-    flag = "--" + name
-    i = 0
-    while i < len(argv):
-        if argv[i] == flag and i + 1 < len(argv):
-            out.append(argv[i + 1])
-            i += 2
-        elif argv[i].startswith(flag + "="):
-            out.append(argv[i][len(flag) + 1:])
-            i += 1
-        else:
-            i += 1
-    return out
-
-
-def _task_runtime(flags: dict) -> tuple[Path, Path, Path]:
+def _runtime(flags: dict) -> tuple[Path, Path, Path]:
     root = _repo_root(flags.get("root"))
     log_file, lock_file = _store(root)
     _warn_if_ephemeral(log_file)
@@ -1378,7 +1231,7 @@ def _repo_root_for_file(target: Path) -> Path | None:
 def _cmd_ui(argv: list[str]) -> int:
     """Serve the live board until interrupted."""
     _, flags = _parse_flags(argv)
-    root, log_file, _lockf = _task_runtime(flags)
+    root, log_file, _lockf = _runtime(flags)
     host = flags.get("host") or "127.0.0.1"
     try:
         port = int(flags.get("port") or 7878)
@@ -1723,484 +1576,11 @@ def _cmd_check_inner(argv: list[str]) -> int:
     return worst
 
 
-def _cmd_tasks(argv: list[str]) -> int:
-    """Draw the task graph to an HTML file."""
-    _, flags = _parse_flags(argv)
-    root, log_file, _lockf = _task_runtime(flags)
-    st = _read_state(log_file)
-    out = flags.get("out")
-    if not out:
-        out = _graph_path(root, flags.get("graph")).parent / _taskview.DEFAULT_FILENAME
-    generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    res = _taskview.render(st, out, generated=generated)
-    if res.task_count == 0:
-        print("no tasks declared yet: the page will say so")
-    print(f"wrote {res.output_path}")
-    print(f"  {res.task_count} task(s), {res.edge_count} edge(s)"
-          + (f", {res.blocked} blocked" if res.blocked else "")
-          + (f", {res.cycles} unreachable" if res.cycles else ""))
-    return EXIT_OK
-
-
-def _title_smells_technical(title: str) -> str:
-    """A reason the title reads like code, or "" if it looks fine.
-
-    A WARNING, never a refusal. The rule is "a non-technical reader understands
-    it", which no regex decides; refusing on a heuristic would block a correct
-    title that happens to mention a filename. Reported by an agent that used the
-    positional form, wrote something German and half-technical, and had nothing
-    push back on it.
-    """
-    if re.search(r"\S+\.(ts|tsx|js|jsx|py|go|json|md|css|sql|yml|yaml)\b", title):
-        return "it names a file"
-    if re.search(r"\b[a-z]+[A-Z][A-Za-z]*\b", title):
-        return "it contains a camelCase identifier"
-    if re.search(r"\b\w+\(\)", title):
-        return "it names a function"
-    if re.search(r"\b(refactor|impl|util|helper|wrapper|endpoint|hook)\b", title, re.I):
-        return "it is written in implementation words"
-    return ""
-
-
-def _task_add(argv: list[str]) -> int:
-    positional, flags = _parse_flags(argv)
-    if not positional:
-        _err("error: task add needs an id, e.g. comms-graph task add auth-api --title \"Auth API\"")
-        return EXIT_USAGE
-    slug = _slug_or_exit(positional[0])
-    actor = _actor(flags)
-    _, log_file, lock_file = _task_runtime(flags)
-
-    data: dict = {"task": slug}
-    for key in ("title", "size", "ref"):
-        if flags.get(key):
-            data[key] = flags[key]
-    checks = [c.strip() for c in _repeated(argv, "check") if c.strip()]
-    if checks:
-        data["checks"] = checks
-    # --review asks for a second pair of eyes; without it `task done` closes the
-    # task. Opt-in because an always-on gate that nobody serves is a queue, not a
-    # quality bar: measured on real work, four of eight tasks sat in `review`
-    # waiting for a reviewer who was never coming.
-    if "review" in flags:
-        data["review"] = True
-    # A probe is a task you made to find something out, not to change something.
-    # It stays claimable and auditable; it simply stops being evidence about
-    # where the real work meets.
-    if "probe" in flags:
-        data["probe"] = True
-
-    with _lock.file_lock(lock_file) as handle:
-        broken = handle.compromised()
-        if broken:
-            _err(f"error: the coordination lock is no longer exclusive: {broken}")
-            return EXIT_ERROR
-        st = _read_state(log_file)
-        greeting = _hello_if_unknown(st, actor)
-        events = [_tagged(st, actor, _log.TYPE_TASK, None, data)]
-        if greeting is not None:
-            events.insert(0, greeting)
-        _log.append_batch(log_file, events)
-    print(f"TASK {slug}" + (f"  {data.get('title')}" if data.get("title") else ""))
-    # Said once, after the fact, and never blocking. The title is the only line
-    # about this work a non-engineer will read, and the positional form accepts
-    # anything, so nothing pushed back on an agent that wrote something German
-    # and half-technical.
-    _title = str(data.get("title") or "")
-    _smell = _title_smells_technical(_title) if _title else ""
-    if _smell:
-        _err(f"  note: the title reads like code ({_smell}).")
-        _err("  It is what somebody outside the code sees on the board. Plain English,")
-        _err("  in English, no file or function names. Restate it with:")
-        _err(f"    comms-graph task add {shlex.quote(slug)} --title \"...\"")
-    if checks:
-        print(f"  must pass before done: {', '.join(checks)}")
-    if data.get("probe"):
-        print("  a probe: it will not show up as a neighbour of real work")
-    if data.get("review"):
-        print("  needs somebody else to check it before it closes")
-    return EXIT_OK
-
-
-def _task_edge(argv: list[str]) -> int:
-    positional, flags = _parse_flags(argv)
-    if len(positional) < 2:
-        _err("error: task edge needs two ids: comms-graph task edge <from> <to>")
-        _err("  Meaning: <to> comes AFTER <from>.")
-        return EXIT_USAGE
-    from_ = _slug_or_exit(positional[0], "from-id")
-    to = _slug_or_exit(positional[1], "to-id")
-    if from_ == to:
-        _err(f"error: {from_!r} cannot come after itself")
-        return EXIT_USAGE
-    actor = _actor(flags)
-    _, log_file, lock_file = _task_runtime(flags)
-
-    # Do NOT default the kind here when the edge may already exist. Writing
-    # "sequence" because the user did not retype --kind is how re-noting an edge
-    # erased the rework dependency on it: since the kind became load-bearing,
-    # that flipped a task a rejection had reopened straight back to closed, with
-    # nobody re-reviewing it, and printed "(sequence)" beside a provides note
-    # that only makes sense for an interface. The stored kind is looked up under
-    # the lock below; this is only the explicitly-given one.
-    kind = (flags.get("kind") or "").lower()
-    kind = _task._EDGE_ALIASES.get(kind, kind)
-    if kind and kind not in (_task.EDGE_CONSUMES, _task.EDGE_SEQUENCE):
-        _err(f"error: --kind {kind!r} is not one of consumes, sequence")
-        _err("  consumes: the later task uses something this one produces, so"
-             " reworking this flags it for a recheck.")
-        _err("  sequence: ordering only. (interface and artifact are accepted"
-             " and mean consumes.)")
-        return EXIT_USAGE
-
-    with _lock.file_lock(lock_file) as handle:
-        broken = handle.compromised()
-        if broken:
-            _err(f"error: the coordination lock is no longer exclusive: {broken}")
-            return EXIT_ERROR
-        st = _read_state(log_file)
-        for end in (from_, to):
-            if end not in st.tasks:
-                _no_such_task(st, end)
-                return EXIT_USAGE
-        # Refuse the edge that would close a loop rather than accept it and then
-        # describe the wreckage: the fold survives a cycle, but a graph
-        # reporting "cycle" is a graph nobody can act on.
-        if _task.would_cycle(st.task_edges, from_, to):
-            _err(f"error: {from_} -> {to} would close a dependency loop")
-            _err(f"  {to} already comes before {from_}, directly or through other tasks.")
-            return EXIT_USAGE
-        effective = kind
-        if not effective:
-            # Keep what is already recorded; only fall back to the weakest kind
-            # for an edge nobody has declared before. Guessing "interface" for a
-            # brand-new edge would invent a rework dependency nobody asked for.
-            for existing in st.task_edges:
-                if existing.from_ == from_ and existing.to == to:
-                    effective = existing.kind
-                    break
-            else:
-                effective = _task.EDGE_SEQUENCE
-        data = {"from": from_, "to": to, "kind": effective}
-        if flags.get("provides"):
-            data["provides"] = flags["provides"]
-        _log.append(log_file, _tagged(st, actor, _log.TYPE_TASK_EDGE, None, data))
-    kind = effective
-    print(f"EDGE {from_} -> {to}  ({kind})")
-    if flags.get("provides"):
-        print(f"  {to} consumes: {flags['provides']}")
-    return EXIT_OK
-
-
-def _task_done(argv: list[str]) -> int:
-    positional, flags = _parse_flags(argv)
-    if not positional:
-        _err("error: task done needs an id")
-        return EXIT_USAGE
-    slug = _slug_or_exit(positional[0])
-    actor = _actor(flags)
-    _, log_file, lock_file = _task_runtime(flags)
-
-    results: dict = {}
-    for raw in _repeated(argv, "check"):
-        name, _, verdict = raw.partition("=")
-        if not name.strip() or not verdict.strip():
-            _err(f"error: --check {raw!r} should read name=pass or name=fail")
-            return EXIT_USAGE
-        results[name.strip()] = verdict.strip()
-    notes = [n for n in _repeated(argv, "note") if n.strip()]
-
-    with _lock.file_lock(lock_file) as handle:
-        broken = handle.compromised()
-        if broken:
-            _err(f"error: the coordination lock is no longer exclusive: {broken}")
-            return EXIT_ERROR
-        st = _read_state(log_file)
-        t = st.tasks.get(slug)
-        if t is None:
-            _no_such_task(st, slug)
-            return EXIT_USAGE
-        # Say no here as well as in the fold. The fold is the authority: a
-        # second writer must not be able to sneak past a rule by not asking:
-        # but a refusal the user never sees is a command that silently did
-        # nothing, and exit 0 would be a lie.
-        missing = [c for c in t.checks
-                   if str(results.get(c, "")).strip().lower() != "pass"]
-        if missing:
-            # Write the refusal down, exactly as claim records a blocked event.
-            # The CLI declines before the fold ever sees this transition, so
-            # without a record the gate fired in complete silence, and a rule
-            # that leaves no trace when it works looks like a rule nobody wrote.
-            try:
-                _log.append(log_file, _tagged(st, actor, _log.TYPE_BLOCKED, None, {
-                    "task": slug, "attempted": "done",
-                    "reason": "checks did not pass: " + ", ".join(missing),
-                }))
-            except Exception:
-                # Recording a refusal must never turn a clean refusal into a
-                # crash. The refusal itself is the part that matters.
-                pass
-            _err(f"error: {slug} declares checks that have not passed: {', '.join(missing)}")
-            _err("  Report each one, e.g. --check " + missing[0] + "=pass")
-            return EXIT_CONFLICT
-        data: dict = {"task": slug, "state": "done"}
-        if results:
-            data["checks"] = results
-        if notes:
-            data["notes"] = notes
-        greeting = _hello_if_unknown(st, actor)
-        events = [_tagged(st, actor, _log.TYPE_TASK_STATE, None, data)]
-        if greeting is not None:
-            events.insert(0, greeting)
-        _log.append_batch(log_file, events)
-    # What actually happened depends on whether this task asked to be checked.
-    # Announcing "awaiting review" on a task that just closed is the kind of
-    # contradiction that makes people stop reading the output.
-    if getattr(st.tasks.get(slug), "needs_review", False):
-        print(f"DONE {slug} by @{actor}: awaiting review")
-        print("  Somebody else has to verify it before anything after it unblocks.")
-    else:
-        print(f"DONE {slug} by @{actor}: closed")
-    return EXIT_OK
-
-
-def _task_review(argv: list[str]) -> int:
-    positional, flags = _parse_flags(argv)
-    if not positional:
-        _err("error: task review needs an id")
-        return EXIT_USAGE
-    slug = _slug_or_exit(positional[0])
-    actor = _actor(flags)
-    passed = "pass" in flags
-    failed = "fail" in flags
-    if passed == failed:
-        _err("error: say --pass or --fail (exactly one)")
-        return EXIT_USAGE
-    _, log_file, lock_file = _task_runtime(flags)
-
-    with _lock.file_lock(lock_file) as handle:
-        broken = handle.compromised()
-        if broken:
-            _err(f"error: the coordination lock is no longer exclusive: {broken}")
-            return EXIT_ERROR
-        st = _read_state(log_file)
-        t = st.tasks.get(slug)
-        if t is None:
-            _no_such_task(st, slug)
-            return EXIT_USAGE
-        if not t.did:
-            _err(f"error: nothing is awaiting review on {slug}")
-            return EXIT_CONFLICT
-        # Compare against the environment directly as well as the log: this check
-        # runs before this actor's own hello is written, so at this moment the
-        # log does not yet know which process is asking.
-        here = os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
-        doer_session = getattr(st.sessions.get(t.did), "agent_session", "") or ""
-        # Only --pass is gated on authorship. Rejecting your own work is not the
-        # failure mode this protects against, and refusing it deadlocked any
-        # task two agents had both submitted: neither could verify (correct) and
-        # neither could reject, so nothing downstream could ever move.
-        acknowledged = "acknowledge-self-review" in flags
-        author = _task._authored_by(t, actor, st.sessions) if passed else None
-        # Remember whether this actor really IS an author, because the reducer
-        # decides from that and not from the flag. Printing SELF-SIGNED off the
-        # flag alone meant a genuine third party who passed it was told they had
-        # recorded a self-sign while the log recorded a full independent review:
-        # wrong in the exact direction the disclosure exists to prevent, on the
-        # one surface the acting agent definitely reads.
-        is_author = author is not None
-        if acknowledged:
-            author = None  # recorded below as self-acknowledged, not independent
-        if not acknowledged and (
-            author is not None or (passed and here and here == doer_session.strip())
-        ):
-            whom = author or t.did
-            try:
-                _log.append(log_file, _tagged(st, actor, _log.TYPE_BLOCKED, None, {
-                    "task": slug, "attempted": "verified" if passed else "rejected",
-                    "holder": whom, "reason": "self-review",
-                }))
-            except Exception:
-                pass
-            # Two different bars, two different sentences. Somebody who holds
-            # ground on the task but has never pressed `done` was told they
-            # "cannot verify work done by @themselves": work they had not
-            # submitted, which reads as a bug in the tool rather than a rule.
-            submitted = [x for x in ([t.did] if t.did else [])
-                         + list(getattr(t, "submitters", [])) if x]
-            worked = [x for x in getattr(t, "workers", []) if x]
-            # Pick the branch from the SAME comparison that produced the bar.
-            # Choosing it by name alone mislabelled every bar that came from the
-            # session match: an actor who had never claimed or submitted
-            # anything was told "you took ground tagged to it".
-            by_submission = any(_task.same_agent(actor, x, st.sessions) for x in submitted)
-            by_ground = any(_task.same_agent(actor, x, st.sessions) for x in worked)
-            if by_ground and not by_submission:
-                # Not "you hold ground": the bar is permanent and survives a
-                # release, so that sentence was false for anybody who had
-                # already let go, and the remedy it named (submit your half)
-                # would have made them a real co-author of work they had
-                # finished with.
-                _err(f"error: self-review: @{actor} has worked on this task")
-                _err("  You took ground tagged to it, so the check has to come from "
-                     "somebody who did not. Rejecting it with --fail is still yours to do.")
-            elif by_submission:
-                _err(f"error: self-review: @{actor} cannot verify work done by @{whom}")
-                _err("  Verification only means something from somebody with different "
-                     "blind spots.")
-            else:
-                # Neither name matched: the bar came from the session. Say that,
-                # rather than asserting work this name did not do.
-                _err(f"error: self-review: @{actor} is the same agent as @{whom}")
-                _err("  You are running in the session that did this work. A different "
-                     "name is not a different set of blind spots.")
-            # Everyone the gate bars, not just everyone who SUBMITTED. Holding
-            # ground on a task now bars you too, so a task can be unverifiable
-            # with a single submitter, and the actor was then refused, told to
-            # "let somebody who did not write it check", and never told the
-            # escape exists. On a two-agent project that advice cannot be
-            # followed and the task stops forever.
-            barred = {x for x in ([t.did] if t.did else [])
-                      + list(getattr(t, "submitters", []))
-                      + list(getattr(t, "workers", [])) if x}
-            if len(barred) > 1:
-                _err("  Everyone who has worked this task is barred, so it needs somebody "
-                     "who has not touched it, or reject it with --fail, which you may do.")
-                _err("  If there IS nobody else, --acknowledge-self-review records it as "
-                     "yours: the board will show it as self-acknowledged, never as verified.")
-            return EXIT_CONFLICT
-        data: dict = {"task": slug, "state": "verified" if passed else "rejected"}
-        if acknowledged and passed:
-            data["acknowledged_self_review"] = True
-        if flags.get("evidence"):
-            if passed:
-                data["notes"] = [flags["evidence"]]
-            else:
-                data["findings"] = [{"what": flags["evidence"]}]
-        # The greeting is what ties this actor to a process. Without it a
-        # reviewer has no session on record, so the fold's session comparison
-        # has nothing to compare and falls back to the name alone, which is
-        # exactly the hole a homoglyph walks through.
-        greeting = _hello_if_unknown(st, actor)
-        events = [_tagged(st, actor, _log.TYPE_TASK_STATE, None, data)]
-        if greeting is not None:
-            events.insert(0, greeting)
-        _log.append_batch(log_file, events)
-    # Report what the LOG says happened, not what we were about to do. The CLI's
-    # pre-check and the fold's are two implementations of one rule and they can
-    # disagree: the CLI reads sessions as they stand, the fold reads them after
-    # this actor's own hello has landed in the same batch. When they did, the
-    # banner said VERIFIED and exit 0 while the fold had refused the transition
-    # and recorded nothing: an agent reads its own output, believes the work is
-    # signed off, and moves on. Whatever the rule, the answer has to come from
-    # the one place that decides it.
-    after = _read_state(log_file).tasks.get(slug)
-    if after is not None:
-        landed = bool(after.verified_by) if passed else not after.did
-        if not landed:
-            why = ""
-            for r in reversed(_read_state(log_file).refused_task_states):
-                if getattr(r, "task", "") == slug:
-                    why = getattr(r, "reason", "") or ""
-                    break
-            _err(f"error: {slug} was NOT " + ("verified" if passed else "rejected")
-                 + ": the log refused it" + (f": {why}" if why else "."))
-            return EXIT_CONFLICT
-    if passed and acknowledged and is_author:
-        print(f"SELF-SIGNED {slug} by @{actor} (work by @{t.did})")
-        print("  Recorded as signed off by its own author, not as a review. That is")
-        print("  permanent and your name is on it.")
-    elif passed:
-        # Say what the check COUNTED AS, to the person who just made it. The
-        # fold decides this from the two hellos' vendors, and until now it was
-        # only visible later, in `brief`, to somebody else. A verifier who
-        # learns their review recorded as same-family can go and find a
-        # genuinely different agent; one who never sees it cannot.
-        landed = _read_state(log_file).tasks.get(slug)
-        indep = getattr(landed, "independence", "") if landed else ""
-        print(f"VERIFIED {slug} by @{actor} (work by @{t.did})"
-              + (f": {indep}" if indep else ""))
-        if indep == "same-family":
-            print("  Same model family as the author, so it shares their blind spots.")
-            print("  A different family checking this would be worth more.")
-        elif indep == "unknown":
-            print("  Recorded as unknown: no vendor on one of the two hellos, so")
-            print("  comms cannot tell whether this was an independent check.")
-        print("  Anything waiting on it is now unblocked.")
-    else:
-        print(f"REJECTED {slug} by @{actor} (work by @{t.did})")
-        print(f"  Back to @{t.did} to rework; the graph is unchanged.")
-    return EXIT_OK
-
-
-
 # ---------------------------------------------------------------------------
-# find / note: what an agent learned, for the person watching
+# note: a short FYI for the other agents and the person watching
 # ---------------------------------------------------------------------------
 
-#: The five that earn their own word. Not a taxonomy for its own sake: each one
-#: answers a different question a person asks the board, and a single "note"
-#: bucket collapses them into a wall the reader has to sort by hand.
-FINDING_CATEGORIES = {
-    "bug": "an open problem",
-    "fix": "a problem now resolved",
-    "ship": "released or deployed",
-    "decision": "an architectural choice and its reason",
-    "gotcha": "a trap the next agent would fall into",
-}
-
-
-def _cmd_find(argv: list[str]) -> int:
-    """Record something worth keeping. The fold has always stored these and
-    nothing in this build could write one, so `state.findings` was permanently
-    empty and the board's panel over it permanently blank."""
-    positional, flags = _parse_flags(argv)
-    if len(positional) < 2:
-        _err("error: find needs a category and a summary")
-        _err('  e.g. comms-graph find decision "uuid PKs, never cuid" --as me')
-        _err("  Categories: " + ", ".join(f"{k} ({v})" for k, v in FINDING_CATEGORIES.items()))
-        return EXIT_USAGE
-    category = positional[0].strip().lower()
-    if category not in FINDING_CATEGORIES:
-        _err(f"error: {category!r} is not a category")
-        _err("  Use one of: " + ", ".join(FINDING_CATEGORIES))
-        return EXIT_USAGE
-    summary = " ".join(positional[1:]).strip()
-    if not summary:
-        _err("error: find needs something to say")
-        return EXIT_USAGE
-    if len(summary) > NOTE_MAX:
-        return _too_long("finding", summary, NOTE_MAX)
-    actor = _actor(flags)
-    root, log_file, lock_file = _task_runtime(flags)
-
-    # `--ref path:src/auth.ts`, `--ref pr:#321`. Kind and value, because a bare
-    # string cannot say which it is and that is the useful half.
-    refs = []
-    for raw in _repeated(argv, "ref"):
-        kind, _, value = raw.partition(":")
-        if not value:
-            kind, value = "note", raw
-        refs.append({"kind": kind.strip(), "value": value.strip()})
-
-    data: dict = {"category": category, "summary": summary}
-    if refs:
-        data["refs"] = refs
-    with _lock.file_lock(lock_file):
-        st = _read_state(log_file)
-        greeting = _hello_if_unknown(st, actor)
-        event = _tagged(st, actor, _log.TYPE_FINDING, None, data)
-        if greeting is None:
-            _log.append(log_file, event)
-        else:
-            _log.append_batch(log_file, [greeting, event])
-    print(f"{category.upper()} recorded by @{actor}")
-    print(f"  {summary}")
-    return EXIT_OK
-
-
-
-#: Notes and findings are one line somebody reads later, not the writeup. Agents
+#: A note is one line somebody reads later, not the writeup. Agents
 #: hit the old 400 cap 48 times, so it is now 1000.
 NOTE_MAX = 1000
 
@@ -2225,7 +1605,7 @@ def _too_long(kind: str, text: str, cap: int) -> int:
     _err(f"    ⟨{over} more character{'s' if over != 1 else ''} after that⟩")
     # A version that FITS, cut at a word. Reported: an agent trimmed to 538, was
     # refused, trimmed again to 401, and was refused a second time for one
-    # character. Two round trips for one finding, when the answer was always
+    # character. Two round trips for one note, when the answer was always
     # computable here.
     fits = text[:cap].rsplit(" ", 1)[0] if " " in text[:cap] else text[:cap]
     if fits and len(fits) < len(text):
@@ -2239,9 +1619,7 @@ def _too_long(kind: str, text: str, cap: int) -> int:
 
 
 def _cmd_note(argv: list[str]) -> int:
-    """A short FYI. Deliberately separate from `find`: a note is something you
-    would say out loud and forget, a finding is something the next agent needs
-    six weeks from now, and mixing them buries the second in the first."""
+    """A short FYI, up to NOTE_MAX characters. Start with @name to address one agent."""
     positional, flags = _parse_flags(argv)
     body = " ".join(positional).strip()
     if not body:
@@ -2251,7 +1629,7 @@ def _cmd_note(argv: list[str]) -> int:
     if len(body) > NOTE_MAX:
         return _too_long("note", body, NOTE_MAX)
     actor = _actor(flags)
-    root, log_file, lock_file = _task_runtime(flags)
+    root, log_file, lock_file = _runtime(flags)
     with _lock.file_lock(lock_file):
         st = _read_state(log_file)
         greeting = _hello_if_unknown(st, actor)
@@ -2262,208 +1640,6 @@ def _cmd_note(argv: list[str]) -> int:
             _log.append_batch(log_file, [greeting, event])
     print(f"NOTED by @{actor}")
     print(f"  {body}")
-    return EXIT_OK
-
-
-def _cmd_next(argv: list[str]) -> int:
-    _, flags = _parse_flags(argv)
-    actor = _actor(flags, write=False)
-    _, log_file, _lockf = _task_runtime(flags)
-    st = _read_state(log_file)
-    if not st.tasks:
-        print("no tasks declared yet: add one with `comms-graph task add <id>`")
-        return EXIT_OK
-
-    ready = _task.ready_tasks(st.tasks)
-    mine_to_review = _task.awaiting_review(st.tasks, actor, st.sessions)
-    if not ready and not mine_to_review:
-        blocked = [t for t in st.tasks.values() if t.phase == _task.PHASE_BLOCKED]
-        cycles = [t for t in st.tasks.values() if t.phase == _task.PHASE_CYCLE]
-        if not blocked and not cycles and st.tasks and all(
-            t.phase == _task.PHASE_CLOSED for t in st.tasks.values()
-        ):
-            print(f"all {len(st.tasks)} task(s) are closed: the plan is finished.")
-            return EXIT_OK
-        print("nothing is startable by you right now.")
-        if blocked:
-            print(f"  {len(blocked)} task(s) waiting on something unverified:")
-            for t in sorted(blocked, key=lambda x: x.id)[:5]:
-                print(f"    {t.id} <- {', '.join(t.blocked_by)}")
-        if cycles:
-            print(f"  {len(cycles)} task(s) in a dependency loop and unreachable: "
-                  + ", ".join(sorted(t.id for t in cycles)))
-        return EXIT_OK
-
-    if mine_to_review:
-        # Review first, deliberately. A task sitting in review blocks everything
-        # after it, so an idle agent picking up new work instead of clearing a
-        # review is how a plan stalls with everybody busy.
-        print("WAITING ON YOUR REVIEW: these block whatever comes after them:")
-        for t in mine_to_review:
-            print(f"  {t.id}  {t.title}".rstrip())
-            print(f"    done by @{t.did}" + (f"; notes: {t.notes[-1]}" if t.notes else ""))
-            print(f"    comms-graph task review {t.id} --pass --as {actor or '<you>'}")
-    if ready:
-        print("READY: nothing upstream is outstanding:")
-        for t in ready:
-            held = ""
-            print(f"  {t.id}  {t.title}{held}".rstrip())
-            # "nothing outstanding" is true and can still be misleading: a
-            # predecessor may have been signed off by its own author. The agent
-            # about to build on it is exactly who needs telling.
-            selfsigned = [
-                e.from_ for e in _task.incoming(st.task_edges, t.id)
-                if (up := st.tasks.get(e.from_)) is not None
-                and up.independence == "self-acknowledged"
-            ]
-            if selfsigned:
-                print("      note: " + ", ".join(sorted(selfsigned))
-                      + " was signed off by its own author, not independently reviewed")
-    return EXIT_OK
-
-
-def _cmd_brief(argv: list[str]) -> int:
-    positional, flags = _parse_flags(argv)
-    if not positional:
-        _err("error: brief needs a task id")
-        return EXIT_USAGE
-    slug = _slug_or_exit(positional[0])
-    _, log_file, _lockf = _task_runtime(flags)
-    st = _read_state(log_file)
-    t = st.tasks.get(slug)
-    if t is None:
-        _no_such_task(st, slug)
-        return EXIT_USAGE
-
-    print(f"{t.id}  {t.title}".rstrip())
-    bits = [f"phase: {t.phase}"]
-    if t.size:
-        bits.append(f"size: {t.size}")
-    if t.doers:
-        bits.append("doing: " + ", ".join("@" + d for d in t.doers))
-    if t.did and not t.verified_by:
-        # Only while it really is awaiting one. Emitting this whenever a doer is
-        # recorded meant every CLOSED task announced it was awaiting review in
-        # the same breath as naming its verifier, and now that review is opt-in,
-        # a task that never asked for one is finished, not waiting.
-        bits.append(f"awaiting review of @{t.did}'s work"
-                    if getattr(t, "needs_review", False)
-                    else f"finished by @{t.did}")
-    if t.verified_by:
-        bits.append(f"verified by @{t.verified_by} ({t.independence})")
-    if t.rejections:
-        bits.append(f"rejected {t.rejections}x")
-    print("  " + " · ".join(bits))
-    if t.checks:
-        print("  must pass before done: " + ", ".join(t.checks))
-    if t.ref:
-        print(f"  ref: {t.ref}")
-
-    if t.blocked_by:
-        print("  BLOCKED until these are VERIFIED: " + ", ".join(t.blocked_by))
-        # And who to chase. "waiting on something unverified" is a fact with no
-        # action attached; a task held up by a named person who has not
-        # submitted is something the reader can actually do something about.
-        for dep in t.blocked_by:
-            up = st.tasks.get(dep)
-            if up is not None and up.doers:
-                print(f"    {dep} is being worked by "
-                      + ", ".join("@" + a for a in up.doers))
-
-    # The point of this verb: what the upstream work decided, delivered to
-    # whoever picks this up. Without it, a doer's decisions sit on their own
-    # node and never reach the next person.
-    incoming = _task.incoming(st.task_edges, slug)
-    if incoming:
-        print("  comes after:")
-        for e in incoming:
-            up = st.tasks.get(e.from_)
-            state = up.phase if up else "not declared"
-            # Say it HERE, not only on the task's own line. Whoever picks this
-            # up is building against that predecessor's interface, and is the
-            # one person who most needs to know it was approved by its author.
-            mark = ""
-            if up is not None and up.independence == "self-acknowledged":
-                mark = f": signed off by @{up.verified_by} themselves, not independently reviewed"
-            print(f"    {e.from_} ({state}) [{e.kind}]"
-                  + (f": provides: {e.provides}" if e.provides else "")
-                  + mark)
-            if up and up.notes:
-                for note in up.notes[-3:]:
-                    print(f"        decided: {note}")
-            # Kept separate from the author's notes above. Whoever picks this up
-            # is trusting that the thing they build against was checked; what
-            # the checker actually ran is the difference between trusting the
-            # gate and trusting a green tick.
-            if up and up.verification:
-                print(f"        verified by @{up.verified_by}: {up.verification}")
-    if t.findings:
-        print("  came back from review with:")
-        for f in t.findings:
-            print(f"    {f.what}" + (f"  ({f.where})" if f.where else ""))
-    if t.notes:
-        print("  decisions recorded here:")
-        for note in t.notes[-5:]:
-            print(f"    {note}")
-
-    # WHO ELSE IS IN THIS NEIGHBOURHOOD, from the code map rather than from
-    # anybody declaring it. This lived only on the board, and agents read CLI
-    # output, not browsers, so the one thing that could warn you about a peer
-    # before you collide with them was in a place nobody about to edit was
-    # looking. An agent found this out the useful way: the two tasks it meets
-    # here were exactly the two collisions that had already cost it an afternoon.
-    try:
-        root = _repo_root(flags.get("root"))
-        graph = _load_graph(root / "graphify-out" / "graph.json")
-        if graph is not None:
-            def _sof(d, k):
-                v = (d or {}).get(k)
-                return v if isinstance(v, str) else ""
-            from . import taskcode as _taskcode
-
-            files, actors = _taskcode.files_from_log(_log.read(log_file), _sof)
-            me = _actor(flags, write=False)
-            links = _taskcode.link(graph, st.tasks, files, root, actors, me)
-            rel = (links.get(slug) or {}).get("related") or []
-            if rel:
-                print("  meets in the code (nobody declared these):")
-                # Demote your own work, never DROP it. Sorting it last and
-                # then taking the top five deleted it, and the row deleted was
-                # the one that made the feature pay off: an agent found a peer's
-                # unclaimed task through a file shared with its OWN earlier task.
-                # It also made discovery depend on which end you opened, and the
-                # end you naturally open when investigating somebody else's work
-                # was the blind one.
-                strangers = [r for r in rel if not r.get("same_actor")]
-                own = [r for r in rel if r.get("same_actor")]
-                for r in strangers[:5] + own[:3]:
-                    mark = "  (your own earlier work)" if r.get("same_actor") else ""
-                    # NAME them. Three agents independently said the same thing:
-                    # "4 shared places" is a number without a noun, and you
-                    # cannot act on it: whether to go and knock on somebody's
-                    # door depends entirely on whether the four places are the
-                    # component you both edit or four barrels every file
-                    # imports. Naming them also lets the reader discount a god
-                    # file on sight, which is the other complaint.
-                    def _short(v):
-                        # The tail is what identifies a file to a reader; the
-                        # leading directories are the same for everything here.
-                        parts = str(v).split("/")
-                        return "/".join(parts[-2:]) if len(parts) > 2 else str(v)
-                    where = ", ".join(_short(v) for v in (r.get("via") or [])[:3])
-                    more = r["shared"] - len(r.get("via") or [])
-                    if more > 0:
-                        where += f", +{more} more"
-                    print(f"    {r['task']}: {r['shared']} shared "
-                          f"{'file' if r['shared'] == 1 else 'files'}{mark}")
-                    if where:
-                        print(f"        via {where}")
-                print("    These are not an ordering. They touch the same ground, so "
-                      "look or ask before you edit.")
-    except Exception:
-        # Advisory only. A missing, stale or unreadable map must never stop
-        # `brief` printing the part that comes from the log.
-        pass
     return EXIT_OK
 
 
@@ -2585,13 +1761,7 @@ def _cmd_board(argv: list[str]) -> int:
         when = claim.ts.isoformat().replace("+00:00", "Z")
         mark = " <- you" if me and claim.actor == me else ""
         intent = f'  "{claim.intent}"' if claim.intent else ""
-        # The task tag, because an agent cannot otherwise check its own work.
-        # The whole case for `--task` is that the board can then show a task's
-        # files, and the CLI printed everything about a claim EXCEPT whether it
-        # was tagged, so the one thing you would want to verify was the one
-        # thing you had to take on faith.
-        tag = f"  ({getattr(claim, 'task', '') or 'no task'})"
-        print(f"  {claim.scope}  @{claim.actor}  {when}  [{claim.id}]{tag}{intent}{mark}")
+        print(f"  {claim.scope}  @{claim.actor}  {when}  [{claim.id}]{intent}{mark}")
 
     # And what is actually changed on disk, which is a different question. A
     # claim is a statement of intent; this is the evidence.
@@ -2628,11 +1798,11 @@ def _mentions(body: str, actor: str) -> bool:
     """
     import re as _re
 
-    base = _task.base_actor((actor or "").lstrip("@")).casefold()
+    base = _identity.base_actor((actor or "").lstrip("@")).casefold()
     if not base:
         return False
     for m in _re.finditer(r"@([A-Za-z0-9._-]+)", body or ""):
-        if _task.base_actor(m.group(1)).casefold() == base:
+        if _identity.base_actor(m.group(1)).casefold() == base:
             return True
     return False
 
@@ -2689,10 +1859,10 @@ def _deliver_addressed_notes(root: Path, actor: str, restate: bool = False) -> N
 
     waiting = []
     for ev in events:
-        if ev.type not in (_log.TYPE_NOTE, _log.TYPE_FINDING):
+        if ev.type != _log.TYPE_NOTE:
             continue
-        if _task.base_actor((ev.actor or "").lstrip("@")).casefold() == \
-                _task.base_actor(actor.lstrip("@")).casefold():
+        if _identity.base_actor((ev.actor or "").lstrip("@")).casefold() == \
+                _identity.base_actor(actor.lstrip("@")).casefold():
             continue  # your own message is not a message to you
         recent = ((datetime.now(timezone.utc) - ev.ts).total_seconds()
                   <= RESTATE_WITHIN_SECONDS)
@@ -2761,6 +1931,9 @@ def _help_verb(argv: list[str]) -> int:
         for line in refusal.lines:
             _err(line)
         return refusal.code
+    if call.verb.retired:
+        _err(_verbs.RETIRED_NOTICE)
+        return EXIT_OK
     print(_verbs.verb_help(call.verb, call.path))
     return EXIT_OK
 
@@ -2791,14 +1964,6 @@ _HANDLERS = {
     "release": _cmd_release,
     "board": _cmd_board,
     "check": _cmd_check,
-    "task add": _task_add,
-    "task edge": _task_edge,
-    "task done": _task_done,
-    "task review": _task_review,
-    "next": _cmd_next,
-    "brief": _cmd_brief,
-    "tasks": _cmd_tasks,
-    "find": _cmd_find,
     "note": _cmd_note,
     "doc": _lazy("doc", "main"),
     "status": _lazy("status", "status_main"),
@@ -2843,6 +2008,11 @@ def _run(argv: list[str]) -> int:
         for line in refusal.lines:
             _err(line)
         return refusal.code
+    if call.verb.retired:
+        _err(_verbs.RETIRED_NOTICE)
+        return EXIT_OK
+    if call.retired:
+        _err(_verbs.RETIRED_FLAG_NOTICE)
     if call.root:
         _GLOBAL_ROOT = call.root
     if call.help:
@@ -2869,6 +2039,8 @@ def main(argv: list[str]) -> int:
     code = _run(argv)
     try:
         call = _verbs.prepare(argv)
+        if call.verb.retired:
+            return code
         flags = _parse_flags(list(call.argv))[1]
         verb = call.verb.name
         # Not on the hook path and not into machine-readable output. `check

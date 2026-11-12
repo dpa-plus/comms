@@ -450,7 +450,8 @@ _OLD_LOG = [
      "type": "hello", "data": {"agent_session": "old-s", "label": "Old Dev", "vendor": "anthropic",
                                 "hostname": "h"}},
     {"ts": "2026-10-01T09:01:00Z", "id": "01K6F0000000000000000000A2", "actor": "old-dev",
-     "type": "task", "data": {"task": "fix-auth", "title": "Fix the auth flow"}},
+     "type": "task", "data": {"task": "fix-auth", "title": "Fix the auth flow",
+                              "checks": ["test"], "review": True}},
     {"ts": "2026-10-01T09:02:00Z", "id": "01K6F0000000000000000000A3", "actor": "old-dev",
      "type": "task", "data": {"task": "ship-auth", "title": "Ship it"}},
     {"ts": "2026-10-01T09:03:00Z", "id": "01K6F0000000000000000000A4", "actor": "old-dev",
@@ -470,10 +471,28 @@ _OLD_LOG = [
      "type": "claim", "scope": ["src/b.py"], "data": {"intent": "next"}},
     {"ts": "2026-10-01T09:10:00Z", "id": "01K6F0000000000000000000AB", "actor": "old-dev",
      "type": "release", "data": {"refs": ["01K6F0000000000000000000AA"], "result": "done"}},
+    {"ts": "2026-10-01T09:11:00Z", "id": "01K6F0000000000000000000AC", "actor": "old-dev",
+     "type": "task_state", "data": {"task": "fix-auth", "state": "done",
+                                    "checks": {"test": "pass"}, "notes": ["cookie is httpOnly"]}},
+    {"ts": "2026-10-01T09:12:00Z", "id": "01K6F0000000000000000000AD", "actor": "peer",
+     "type": "task_state", "data": {"task": "fix-auth", "state": "rejected",
+                                    "findings": [{"what": "refresh returns 200 twice"}]}},
+    {"ts": "2026-10-01T09:13:00Z", "id": "01K6F0000000000000000000AE", "actor": "old-dev",
+     "type": "task_state", "data": {"task": "fix-auth", "state": "done",
+                                    "checks": {"test": "pass"}}},
+    {"ts": "2026-10-01T09:14:00Z", "id": "01K6F0000000000000000000AF", "actor": "peer",
+     "type": "task_state", "data": {"task": "fix-auth", "state": "verified",
+                                    "notes": ["ran the suite"]}},
+    {"ts": "2026-10-01T09:15:00Z", "id": "01K6F0000000000000000000AG", "actor": "peer",
+     "type": "blocked", "data": {"task": "ship-auth", "attempted": "verified",
+                                  "reason": "self-review"}},
 ]
 
 
 def test_a_log_with_every_old_event_type_still_folds_and_enforces(tmp_path):
+    """A 0.5.1 log: a task that asked for review, was done, rejected, done again
+    and verified, an edge, a finding and a claim tagged with a task. It folds,
+    the tagged claim still blocks, and `log` still lists the old events."""
     assert {e["type"] for e in _OLD_LOG} == set(clog.KNOWN_TYPES)
     repo = _repo(tmp_path)
     log_file = clog.log_path(repo)
@@ -484,13 +503,19 @@ def test_a_log_with_every_old_event_type_still_folds_and_enforces(tmp_path):
     assert {str(c.scope) for c in st.claims.values()} == {"src/a.py"}
     assert not st.claims["01K6F0000000000000000000A5"].auto
     assert st.families["old-s"].actors == {"old-dev"}
-    assert set(st.tasks) == {"fix-auth", "ship-auth"}
-    assert len(st.blocked) == 1 and len(st.notes) == 1 and len(st.findings) == 1
+    assert len(st.blocked) == 2 and len(st.notes) == 1
 
     assert _run(repo, ["status"])[0] == 0
     assert _edit(repo, "src/a.py", "old-s")[0] == 0, "the old hello still identifies its session"
     code, _, err = _edit(repo, "src/a.py", SESSION_B)
     assert code == 2 and "@old-dev" in err
+
+    code, out, _ = _run(repo, ["log", "--since", "3650d", "--type", "task,task_edge,task_state,finding"])
+    assert code == 0
+    for text in ("fix-auth", "ship-auth", "verified", "rejected", "token never refreshed"):
+        assert text in out, (text, out)
+    code, out, err = _run(repo, ["status", "--all"])
+    assert code == 0 and "task" not in out.lower() and "finding" not in out.lower(), out
 
 
 def _whoami_actor(repo: Path, session: str) -> str:

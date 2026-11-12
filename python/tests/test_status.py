@@ -103,10 +103,12 @@ def _log_file(repo) -> Path:
 
 
 def _write(repo, events):
-    """Append events straight to the store, exactly as the Go build would."""
+    """Write events straight to the store, the way an older build wrote them."""
     path = _log_file(repo)
-    for ev in events:
-        clog.append(path, ev)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("ab") as fh:
+        for ev in events:
+            fh.write(ev.encode())
     return path
 
 
@@ -248,10 +250,9 @@ def test_collisions_prevented_is_reported_all_time(tmp_path, monkeypatch):
     assert "@bob was stopped from editing a.py (held by @alice)" in out
 
 
-def test_a_task_refusal_is_not_rendered_as_an_editing_collision(tmp_path, monkeypatch):
-    """IF THIS FAILS: a refused self-review prints "stopped from editing  (held
-    by @)": an empty scope and an empty holder, which reads as a bug in comms
-    rather than as the review gate doing its job."""
+def test_an_old_task_refusal_is_not_rendered_as_an_editing_collision(tmp_path, monkeypatch):
+    """An old log holds refusals on tasks, which have no scope. They must not
+    print "stopped from editing  (held by @)", which reads as a bug."""
     repo = _repo(tmp_path, monkeypatch)
     _write(repo, [
         _ev("blocked", "solo", data={"task": "auth", "attempted": "verified",
@@ -262,10 +263,10 @@ def test_a_task_refusal_is_not_rendered_as_an_editing_collision(tmp_path, monkey
 
     assert code == 0, out
     assert "stopped from editing" not in out
-    assert "@solo was refused on task auth (self-review)" in out
+    assert "@solo was refused" in out
 
 
-def test_findings_and_notes_outside_the_window_are_not_shown(tmp_path, monkeypatch):
+def test_notes_outside_the_window_are_not_shown(tmp_path, monkeypatch):
     """IF THIS FAILS: --since means nothing on the feeds it exists for, and a
     week-old note reads as something somebody just said."""
     repo = _repo(tmp_path, monkeypatch)
@@ -296,7 +297,8 @@ def test_status_json_is_the_machine_shape_and_is_uncapped(tmp_path, monkeypatch)
 
     assert code == 0, err
     doc = json.loads(out)
-    assert {"sessions", "claims", "findings", "notes", "tasks"} <= set(doc)
+    assert {"sessions", "claims", "notes"} <= set(doc)
+    assert not {"findings", "tasks"} & set(doc)
     assert len(doc["claims"]) == 60, "the machine view must not hide live claims"
     assert doc["sessions"][0]["actor"] == "dev"
     assert "last_seen" in doc["sessions"][0]
@@ -402,38 +404,6 @@ def test_log_scope_filter_matches_a_finding_that_names_the_file_only_by_ref(
     assert code == 0, out
     assert "caches across requests" in out
     assert "unrelated" not in out
-
-
-def test_log_category_filter_excludes_everything_that_is_not_a_finding(
-    tmp_path, monkeypatch
-):
-    """IF THIS FAILS: asking for the decisions returns claims and notes too. A
-    category is a question about findings; letting other types through a filter
-    that cannot apply to them buries the answer."""
-    repo = _repo(tmp_path, monkeypatch)
-    _write(repo, [
-        _ev("note", "dev", data={"body": "chatter"}),
-        _ev("finding", "dev", data={"category": "decision", "summary": "uuid keys"}),
-        _ev("finding", "dev", data={"category": "bug", "summary": "leaky handle"}),
-    ])
-
-    code, out = _run(repo, "log", "--category", "decision")
-
-    assert code == 0, out
-    assert "uuid keys" in out
-    assert "leaky handle" not in out and "chatter" not in out
-
-
-def test_log_rejects_a_category_that_is_not_one_of_the_five(tmp_path, monkeypatch):
-    """IF THIS FAILS: `--category bugs` matches nothing and reads as "no bugs
-    recorded", which is the most dangerous possible wrong answer from a tool
-    whose job is remembering problems."""
-    repo = _repo(tmp_path, monkeypatch)
-
-    code, out = _run(repo, "log", "--category", "bugs")
-
-    assert code == 2, out
-    assert "unknown category" in out
 
 
 def test_log_actor_filter_narrows_to_one_agent(tmp_path, monkeypatch):

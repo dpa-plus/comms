@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/hero.png" alt="comms. Agents that do not collide. One append-only log: who holds which file, what work exists, and what it touches in the code." width="100%">
+<img src="assets/hero.png" alt="comms. Agents that do not collide. One append-only log of who holds which file." width="100%">
 
 [![CI](https://github.com/dpa-plus/comms/actions/workflows/ci.yml/badge.svg)](https://github.com/dpa-plus/comms/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/dpa-plus/comms?include_prereleases&logo=github&color=6ea2ff)](https://github.com/dpa-plus/comms/releases)
@@ -58,34 +58,20 @@ Codex has no hooks, so a Codex agent does all of it by hand, with `--as` on ever
 
 ## The board
 
-<p align="center">
-  <img src="assets/dashboard.png" alt="The comms board: the activity stream, who is holding which files, the task list with the files each task touches, and every project on the machine down the left." width="900">
-</p>
-
-The board is a page at `http://127.0.0.1:7878` for the person watching. It shows
-every project on the machine, the open tasks by their plain-English titles, who
-holds which files, and which changed files nobody claimed. comms reads `git status`
-for that last part and never guesses who made an unclaimed change.
+The board is a page at `http://127.0.0.1:7878` for the person watching. It opens
+on who holds which files. Each agent that holds something gets a group with its
+name, label and model, how long ago it was last active, and a mark when it has
+been silent for over an hour. Under the agent, each file it holds shows the
+agent's intent and how long the file has been held. Below that are the changed
+files nobody holds and the recent claims, releases, notes and refusals. comms
+reads `git status` for the changed files and never guesses who made an
+unclaimed change. Every project on the machine is listed on the left.
 
 It only reads, with one exception: **Release** frees a claim another agent holds.
 It asks for your name and a reason, and records both in the log. More in
 [`docs/DASHBOARD.md`](docs/DASHBOARD.md).
 
-## The task graph and the code map
-
-<p align="center">
-  <img src="assets/task-graph.png" alt="The task graph: rounding money is done and feeds the pricing work codex-dev is on; the cart summary waits behind that; two tasks nothing waits on sit as cards below." width="900">
-</p>
-
-A task is optional. It says what the work is, for the person reading the board.
-An agent adds one with `comms task add`, then claims files with `--task <id>`,
-and those claims become the task's file list. `comms task done` closes it. A
-solid arrow means one task uses what another produces. A dashed arrow means
-order only.
-
-comms never tells an agent to review, plan or record anything. Whoever runs the
-agents decides that. A thread that wants a second agent to check a task can add
-it with `--review`, and comms then records the verdict.
+## The code map
 
 <p align="center">
   <img src="assets/code-map.png" alt="The code map of this repository: 2,924 files and symbols, 7,169 edges, coloured by community, with the ones somebody is holding right now picked out in white." width="820">
@@ -106,7 +92,7 @@ reason to look, never as a verdict.
 comms is not a server. It is a command that appends one line to a file and exits.
 
 Each repository has one log, `log.jsonl`, outside the repository and outside
-iCloud. Every claim, release, note and task is one JSON line in it, and nothing
+iCloud. Every claim, release and note is one JSON line in it, and nothing
 is ever rewritten. Every view, the board included, is read back from that file.
 A write takes a file lock (`flock`) first, so two agents claiming at the same
 moment cannot both win.
@@ -124,9 +110,9 @@ repository share one store.
 ## Commands at a glance
 
 ```
-comms claim <path> [<path> ...] --intent "..." [--task <id>]
+comms claim <path> [<path> ...] --intent "..."
 comms claim <path> --steal <claim-id> --reason "..."    take a claim over, saying why
-comms release [<path> ...] [--all-mine] [--task <id>] --result "..."
+comms release [<path> ...] [--all-mine] --result "..."
 comms release <claim-id> --force --reason "..."         free a claim someone abandoned
 comms check <path> [<path> ...]                         would an edit here be refused?
 comms check --staged                                    would this commit be refused?
@@ -135,18 +121,9 @@ comms status [--all] [--json]                           your claims, who holds w
 comms board [--all]                                     the same, plus unclaimed changes on disk
 comms claims | whoami                                   what you hold, and who you are
 comms log [--actor <name>] [--since 2h] [--scope <path>] [--type note]
-comms findings | notes                                  the log, one kind at a time
+comms notes                                             the notes from the last 7 days
 
 comms note "@claude-billing ..."                        a message to another agent
-comms find <bug|fix|ship|decision|gotcha> "..." [--ref path:src/auth.ts]
-
-comms task add <id> --title "..." [--check test] [--review]
-comms task edge <from> <to> --kind consumes|sequence --provides "..."
-comms task done <id> [--check test=pass] [--note "..."]
-comms task review <id> --pass|--fail --evidence "..."
-comms task list | next                                  what you could pick up
-comms task show <id> | brief <id>                       what a task builds on
-comms tasks [--out tasks.html]                          draw the task graph
 
 comms hello [--label "..."]                             label your session for the board
 comms session start|join|end|retire|lead ...            named work windows

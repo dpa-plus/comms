@@ -14,39 +14,33 @@ time on macOS, see [Run it at login](#run-it-at-login-macos).
 
 ## What it shows
 
-It opens on **the work**: a graph of open tasks, labelled by their titles rather
-than their ids. **Show completed** adds finished work without hiding open tasks,
-and **List** shows the same tasks as a list. The **Team** panel shows who has
-reported recently and who holds files. The **Projects** rail scopes the view to one
-project. A last-reported time shows that an agent sent an update, not that it is
-still running.
+It opens on **who holds which files**. Each agent that holds something gets one
+group: its name, its label and model when its hello recorded them, and how long
+ago it was last active. An agent silent for over an hour is marked, and the board
+puts it first, because a silent holder is the one thing on the board that may
+need a person. Under each agent, every file it holds shows the agent's intent in
+its own words and how long the file has been held. A file the edit check claimed
+on first touch reads as "editing". Each file has a **Release** button.
 
-Click a node to focus its connections, then **Details** for its checks, files and
-history. Each node names its owner and how many files it holds. **History** opens
-the project timeline, and the history button next to an agent filters it to that
-agent. **Load earlier** fetches older events, including those of agents that have
-left the Team panel. Technical details stay collapsed until you open them.
+Below the holds are the changed files nobody holds and the **Recent activity**
+feed of claims, releases, notes and refusals. comms reads `git status` for the
+changed files and never guesses who made an unclaimed change, so an empty list of
+holds does not suggest that nobody is working.
 
-The board lists every comms project on the machine. It leaves out stores whose
-repository folder was deleted and stores that live in a temp folder, because those
-are not projects anyone is working on.
+**History** opens the project timeline, and the history button next to an agent
+filters it to that agent. **Load earlier** fetches older events. **Code map**
+opens the project's code map. Build it with `graphify extract . --code-only` in
+the repository.
 
-The **Team** panel includes agents that reported within the last hour, plus anyone
-holding a claim, however old. A quiet claim is only a hint, and nothing expires on its
-own. The panel also separates changed files nobody claimed from claimed work, so an
-empty list of claims does not suggest that nobody is working.
+The **Team** panel lists agents that reported within the last hour, plus anyone
+holding a file, however old. A last-reported time shows that an agent sent an
+update, not that it is still running, and nothing expires on its own.
 
-## Arrows and lines
+The **Projects** rail lists every comms project on the machine and scopes the
+view to one. It leaves out stores whose repository folder was deleted and stores
+that live in a temp folder, because nobody works in those.
 
-Solid arrows run from a task to the task it unlocks. Dashed lines connect tasks
-whose code is related in the code map, and say nothing about order. Code lines
-appear around the selected task, up to twelve at first, with an option to show
-more. Links to hidden completed tasks are counted separately. When there is no code
-map, the board says so instead of showing the tasks as unrelated.
-
-**Connections** opens the selected project's **Task graph** or **Code map** for a
-closer look. Build the code map with `graphify extract . --code-only` in the
-repository.
+Task and finding events in an old log stay out of the feed and out of History.
 
 ## It reads, with one exception
 
@@ -107,7 +101,7 @@ rm ~/Library/LaunchAgents/plus.dpa.comms-ui.plist
 
 ## Upgrades and running agents
 
-Upgrading never disturbs an agent's work. Claims, tasks and notes live in the log,
+Upgrading never disturbs an agent's work. Claims and notes live in the log,
 not in the program, and the log format does not change between versions. Each comms
 command starts fresh, so an agent uses the new version on its next command with no
 restart. The board is the one long-running process, and it refreshes itself as

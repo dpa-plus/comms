@@ -679,14 +679,9 @@ def test_the_session_hello_keeps_the_identity_the_pre_edit_hook_matches_on(
         "and the session must survive the next command"
 
 
-def test_a_session_hello_carries_the_vendor_so_reviews_stay_independent(
-        tmp_path, monkeypatch):
-    """IF THIS FAILS: joining a session downgrades every later verification.
-
-    Independence is read off the verifier's hello. This one supersedes the one
-    that had the vendor, so dropping it turns "verified by a different family of
-    model" into "unknown": a weaker claim than the truth, made silently.
-    """
+def test_a_session_hello_carries_the_vendor(tmp_path, monkeypatch):
+    """IF THIS FAILS: joining a session blanks the vendor on the board, because
+    the session hello supersedes the one that had it."""
     repo = _repo(tmp_path, monkeypatch)
     monkeypatch.setenv("COMMS_VENDOR", "anthropic")
     _cli(repo, "session", "start", "auth-refactor", "--as", "claude-dev", session="agent-A")
@@ -695,7 +690,7 @@ def test_a_session_hello_carries_the_vendor_so_reviews_stay_independent(
 
     st = _state(repo)
     assert st.sessions["claude-dev"].vendor == "anthropic"
-    assert st.independence_of("codex-dev", "claude-dev") == "independent"
+    assert st.sessions["codex-dev"].vendor == "openai"
 
 
 # ---------------------------------------------------------------------------

@@ -9,12 +9,14 @@ and the ones 0.5.0 made after measuring how agents really use the tool.
 comms keeps agents off each other's files. That is the whole job, and it has to
 stay light: a few commands, short output, nothing an agent must remember.
 
-It does not decide how the work is done. It does not tell an agent to review,
-plan, write findings or report. Those decisions belong to the thread the agents
-work in. An earlier version made review a required step of every task. Agents
-stalled on it and it was pulled back, so review is now something a thread opts
-into per task with `--review`, and nothing in the skill, the briefing or the
-command output suggests it.
+It does not decide how the work is done. Planning, checking and reporting belong
+to the thread the agents work in.
+
+Up to 0.5, comms also had tasks, a review gate and findings. They were a second
+product. A required review stalled agents and was made optional, the task view
+on the board stopped being read, and task bookkeeping was about one in five of
+all comms calls. 0.6.0 removed all three. Old logs still hold their events, and
+the fold skips them.
 
 A change that makes comms ask agents for anything beyond claiming and releasing
 files needs a reason this strong: without it, two agents edit one file.
@@ -31,7 +33,7 @@ record, and drops the ceremony.
 ## The log is the whole system
 
 Every fact comms knows is one line in one file per repository, `log.jsonl`. A claim,
-a release, a note and a task change are each an event appended to it. Nothing is
+a release and a note are each an event appended to it. Nothing is
 ever edited or deleted. Every view, from `comms status` to the board, replays the log
 from the start.
 
@@ -138,7 +140,7 @@ which is why the skill asks for `--as <name>` when subagents work in parallel.
 Claiming before the first edit stayed at about 65% across model generations, and
 67% of the subagents that edited files in the busiest project used comms not at all.
 Agents that did start using comms handled the rest well. Releasing at the end rose
-from 30% to 68%, and tagging claims with a task from 22% to 73%. The weak point was
+from 30% to 68%. The weak point was
 the first step, so comms now takes it for them. The pre-edit hook claims a free file
 the first time a session edits it.
 
@@ -160,12 +162,11 @@ unchanged.
 ### Commands that accept what agents type
 
 Agents lost many calls to the command line itself: 279 full usage dumps after a bad
-call since 15 October, 48 notes over the length limit, 44 task ids refused as "not
-a slug", 49 "no task called X", and 1,574 help lookups. They also guessed verbs that
-did not exist, such as `task show`, `task list`, `claims` and `whoami`. Those
+call since 15 October, 48 notes over the length limit, and 1,574 help lookups.
+They also guessed verbs that did not exist, such as `claims` and `whoami`. Those
 guesses now work. A mistake is answered in at most three lines that name the valid
-form. Global flags work before or after the verb. Notes take up to 1000 characters,
-and task ids up to 64, in any case. An unknown flag is refused, because silently
+form. Global flags work before or after the verb. Notes take up to 1000 characters.
+An unknown flag is refused, because silently
 dropping it, as `claim x --reason y` used to, is worse than an error.
 
 ### What was cut
@@ -176,23 +177,13 @@ data home, and 251 of the 258 store folders on the author's machine were test
 leftovers. Tests now point `COMMS_HOME` at a temporary folder,
 and any repository under the system temp folder keeps its store there.
 
-## Tasks are written for people
-
-A claim says who is on a file. A task says what the work is, and tagging claims
-with `--task <id>` is what lets the board answer "which files did this touch". The
-`--title` is the one line about a task that a person outside the code reads, so it
-is plain English with no file or function names: "Round money the same way
-everywhere", not "money-rounding refactor in toCents". Tasks are optional, and
-`task done` closes one. A task added with `--review` closes only when a different
-agent checks it. That is a choice of the thread that added it, never of comms.
-
 ## The MCP server came back
 
 The MCP server was cut along with the rest of the earlier server's ceremony, and
 later brought back. The ceremony was the problem, not the transport. A tool that
 sits in an agent's tool list every turn gets used more than a command the agent has
-to be told about. `comms mcp` serves six tools that map one to one onto `check`,
-`claim`, `release`, `status`, `note` and `find`, with no registration and no inbox.
+to be told about. `comms mcp` serves five tools that map one to one onto `check`,
+`claim`, `release`, `status` and `note`, with no registration and no inbox.
 It speaks JSON-RPC over stdio without an SDK, and every tool takes an `actor`
 argument because one server process may act for several agents.
 
