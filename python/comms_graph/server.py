@@ -1733,6 +1733,18 @@ function renderAll(d) {
   renderChips(); renderStream(); renderRoster(); renderSession();
 }
 
+// Run as a login service, the board's own folder is not a project and its view
+// is always empty. With no project chosen, open the most recently active one,
+// so the page never says nobody holds a file while a project on the rail has
+// holders. The key goes in the URL, so every panel reads the same project.
+function landingStore(d) {
+  if (currentStore() || d.claims.length || d.feed.length) return "";
+  var ps = (d.projects || []).filter(function (p) { return p.exists; });
+  if (!ps.length || ps.some(function (p) { return p.current; })) return "";
+  ps.sort(function (a, b) { return a.idle_seconds - b.idle_seconds; });
+  return ps[0].key;
+}
+
 function acceptSnapshot(d) {
   if (!d || typeof d !== "object" || d.error ||
       !Array.isArray(d.claims) || !Array.isArray(d.feed)) {
@@ -1743,6 +1755,15 @@ function acceptSnapshot(d) {
       RELOAD_REQUESTED = true;
       es.close();
       location.reload();
+    }
+    return;
+  }
+  var landing = landingStore(d);
+  if (landing) {
+    if (!RELOAD_REQUESTED) {
+      RELOAD_REQUESTED = true;
+      es.close();
+      location.replace("?store=" + encodeURIComponent(landing));
     }
     return;
   }
