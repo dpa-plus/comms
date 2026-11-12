@@ -740,8 +740,6 @@ def test_an_over_long_note_says_where_it_would_cut_and_what_to_use(tmp_path, mon
     err = capsys.readouterr().err
     assert "1100 characters, 100 over" in err, "it should say how far over"
     assert "It would end here" in err, "it should show where it cuts"
-    # Every route it offers must accept a long body. `doc --edit` hands control
-    # to $EDITOR, which an agent cannot drive, so it must not be one of them.
-    assert "task done" in err and ".comms/docs/" in err
-    assert "--edit" not in err, "offered a route an agent cannot use"
+    assert "task done" not in err and "find decision" not in err, \
+        "a refusal is not the place to hand an agent other work"
     assert "Do not split" in err, "the failure mode it caused must be named"

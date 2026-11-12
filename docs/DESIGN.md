@@ -4,6 +4,21 @@ comms keeps coding agents that share a working tree off each other's files. This
 page explains the choices behind it, both the ones that have held since the start
 and the ones 0.5.0 made after measuring how agents really use the tool.
 
+## comms does one job
+
+comms keeps agents off each other's files. That is the whole job, and it has to
+stay light: a few commands, short output, nothing an agent must remember.
+
+It does not decide how the work is done. It does not tell an agent to review,
+plan, write findings or report. Those decisions belong to the thread the agents
+work in. An earlier version made review a required step of every task. Agents
+stalled on it and it was pulled back, so review is now something a thread opts
+into per task with `--review`, and nothing in the skill, the briefing or the
+command output suggests it.
+
+A change that makes comms ask agents for anything beyond claiming and releasing
+files needs a reason this strong: without it, two agents edit one file.
+
 ## Where comms came from
 
 comms replaced two earlier attempts. The first was one shared Markdown file that
@@ -167,9 +182,9 @@ A claim says who is on a file. A task says what the work is, and tagging claims
 with `--task <id>` is what lets the board answer "which files did this touch". The
 `--title` is the one line about a task that a person outside the code reads, so it
 is plain English with no file or function names: "Round money the same way
-everywhere", not "money-rounding refactor in toCents". A task that asks for review
-closes only when a different agent checks it, because a task its author marks
-finished and a task somebody verified are different claims.
+everywhere", not "money-rounding refactor in toCents". Tasks are optional, and
+`task done` closes one. A task added with `--review` closes only when a different
+agent checks it. That is a choice of the thread that added it, never of comms.
 
 ## The MCP server came back
 

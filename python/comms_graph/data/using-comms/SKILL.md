@@ -1,11 +1,13 @@
 ---
 name: using-comms
-description: Coordinate with other agents editing the same repository through comms (file claims, tasks, notes). Use when the session briefing says comms is on in this repository, or when the user asks to use, join, check, claim with, or release through comms.
+description: Keep off other agents' files in a shared repository through comms (file claims and notes). Use when the session briefing says comms is on in this repository, or when the user asks to use, join, check, claim with, or release through comms.
 ---
 
 # Using comms
 
-comms keeps agents that share one working tree off each other's files. Each repository has one append-only log. `comms` and `comms-graph` are the same command.
+comms does one thing. It keeps agents that share one working tree off each other's files. It does not ask you to plan, review, record or report anything. How the work is planned and checked is decided by you and whoever you work for.
+
+`comms` and `comms-graph` are the same command.
 
 ## What happens without you
 
@@ -24,9 +26,9 @@ You do not need to say hello, and you do not need `--as` on every call. Your ses
    comms claim src/auth.ts src/login.ts --intent "rework the session cookie"
    ```
 
-   Several paths in one call are taken together or not at all. Use the same call to reserve a set of files before a change that spans them.
+   Several paths in one call are taken together or not at all.
 
-2. **Give subagents their own names and files.** A subagent shares your session, so the edit check cannot tell it from you or from its siblings. When you send out implementers in parallel, give each one a name and a file list, and tell it to pass `--as <name>` on every comms call and to claim before writing.
+2. **Give parallel subagents their own names.** A subagent shares your session, so the edit check cannot tell it from you or from its siblings. When you send out subagents that write files in parallel, give each one a name, and tell it to pass `--as <name>` on every comms call and to claim before writing. A claim under one name blocks a claim under another.
 
 3. **Release when the work is committed.**
 
@@ -42,68 +44,35 @@ You do not need to say hello, and you do not need `--as` on every call. Your ses
 
    A note that names an actor is shown to that actor on its next comms command.
 
-5. **Say what comms cannot see.** It tracks files. It does not track migration numbers, ports, dev servers or a GPU. If you take one of those, say so in a note.
+comms tracks files only. It cannot see a migration number, a port, a dev server or a GPU. If another agent could collide with you on one of those, a note is the way to say so.
 
-## Choosing a name
+## Names
 
-Your session is named for you, for example `claude-4f9a1c`, and a call with no `--as` uses that name. Give it a label so the person watching can tell what you are doing:
-
-```bash
-comms hello --label "Billing fixes"
-```
-
-To work under a role name, pass `--as claude-billing` on each call. A name holds only the claims made under it, so release with the same name you claimed with. Pick a name that tells two agents apart. `claude`, `codex`, `agent` and `user` are refused.
+Your session is named for you, for example `claude-4f9a1c`, and a call with no `--as` uses that name. To work under a role name, pass `--as claude-billing` on each call. A name holds only the claims made under it, so release with the name you claimed with. `claude`, `codex`, `agent` and `user` are refused, because they do not tell two agents apart.
 
 ## Looking around
 
 ```bash
-comms status                 # your claims, who else holds what, notes to you
-comms board                  # the same, plus what is changed on disk and unclaimed
+comms status                    # your claims, who else holds what, notes to you
+comms board                     # the same, plus what is changed on disk and unclaimed
 comms check src/a.ts src/b.ts   # would an edit here be refused?
-comms log --since 2h --type note
 ```
 
-Each prints a short view by default. Add `--all` for everything, or `--json` for a script.
+Each prints a short view. Add `--all` for everything.
 
 A file that is changed on disk with no claim on it belongs to nobody on record. Ask in a note before you edit it.
 
-## Tasks
+## Tasks are optional
 
-Use a task when the work is more than one edit, because the person watching reads the board, and the board shows tasks.
+comms never requires a task. If the user or your lead wants the work to show on the board under a title, add one and tag your claims with it:
 
 ```bash
-comms task add stay-signed-in --title "Let people stay signed in after a restart" --check test --review
+comms task add stay-signed-in --title "Let people stay signed in after a restart"
 comms claim src/auth/session.ts --task stay-signed-in --intent "server-side sessions"
-comms task done stay-signed-in --check test=pass --note "Cookie is httpOnly, because the security review asks about XSS."
+comms task done stay-signed-in
 ```
 
-- The title is the one line a person outside the code reads. Write it in plain English, say what changes for the user, and leave out file names, function names and abbreviations. The id is only what you type.
-- `--note` on `done` records a decision and its reason. The next agent reads it in `comms brief <id>`.
-- Add `--review` to `task add` when someone else must check the work. Then `done` does not close the task, and a different agent does:
-
-  ```bash
-  comms task review stay-signed-in --pass --evidence "ran the suite, 14 pass; restarted and the session survived"
-  comms task review stay-signed-in --fail --evidence "a spent refresh token still works: POST /session/refresh twice returns 200 both times"
-  ```
-
-  You cannot review your own work. Give one verdict and say how you checked. Do not negotiate with the author. If you disagree, bring in a third agent or the user.
-- `comms next` lists what you could pick up. `comms brief <id>` shows what a task builds on.
-- `comms task edge <from> <to> --kind consumes --provides "sessions table, uuid keys"` records that one task uses what another produces. Use `--kind sequence` for order alone.
-
-## Findings
-
-Record a fact that the next session will need, in one line:
-
-```bash
-comms find gotcha "META_TOKEN_ENC_KEY cannot change after the first deploy" --ref path:src/crypto.ts
-comms find decision "the tracker is the source of truth for leads"
-```
-
-The categories are `bug`, `fix`, `ship`, `decision` and `gotcha`. A note is for a message to someone now. A finding is for a fact that stays true.
-
-## The person watching
-
-The user does not run these commands. They read the board in a browser at `http://127.0.0.1:7878`. It shows task titles, who holds which files, and what is changed on disk with no claim. They can release a claim from there. Tell them your actor name once so they can find you on it.
+Write the title in plain English for a person who does not read code.
 
 ## When something is off
 

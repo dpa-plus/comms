@@ -10,4 +10,4 @@ PROJECTED onto the map. Putting them in graph.json would lose them on the next
 rebuild, and graph.json is rewritten whole-file, which is wrong for many writers.
 """
 
-__version__ = "0.5.0"
+__version__ = "0.5.1"

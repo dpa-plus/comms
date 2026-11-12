@@ -6,6 +6,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-12
+
+comms does one job: it keeps agents off each other's files. This release removes
+what told agents to do anything else.
+
+### Changed
+
+- The skill covers claiming, releasing, names and refusals, and nothing more. It
+  no longer tells agents to add reviews, record findings, label their session or
+  report their name. It says in its first lines that planning and checking are
+  decided by the thread the agents work in. Tasks are described as optional.
+- `task add` no longer suggests `--review`, and `task done` no longer explains
+  that no review was asked for. A note that is too long is answered with one
+  line instead of a list of other commands to use.
+- `docs/DESIGN.md` states the rule, so a later change does not add the
+  prescriptions back.
+
+`task review`, `--review` and `find` still work for a thread that chooses them.
+
 ## [0.5.0] - 2026-11-11
 
 comms is one build now, and it no longer depends on an agent remembering to
