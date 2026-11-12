@@ -37,10 +37,15 @@ on the board had stopped being read. This release removes all three.
 
 ### Kept for one release
 
-`task` with any subcommand, `next`, `brief`, `tasks`, and `--task` on `claim`
-and `release` still run. They do nothing, print one line saying comms no longer
-has tasks, and exit 0, so a claim never fails on a retired flag. The next
-release removes them.
+`task` with any subcommand, `next`, `brief` and `tasks` still run. They do
+nothing, print one line saying comms no longer has tasks, and exit 0.
+
+`--task` on `claim` and `release` is ignored with one line saying so, and the
+rest of the command runs, so a claim never fails on a retired flag. `release
+--task <id>` with no path therefore releases everything you hold, as `release`
+with no path always has.
+
+The next release removes all of these.
 
 ### Upgrading
 

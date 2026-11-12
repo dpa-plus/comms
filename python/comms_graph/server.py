@@ -120,7 +120,9 @@ def _snapshot(root: Path, log_file: Path, graph_path: Path | None = None) -> dic
     # read from the same map now, so they cannot disagree again.
     last_by_actor: dict[str, datetime] = {}
     for ev in events:
-        if not ev.actor:
+        # The same events the fold counts, so the board and `status` agree on
+        # who has gone silent.
+        if not ev.actor or ev.type not in _log.WRITTEN_TYPES:
             continue
         prev = last_by_actor.get(ev.actor)
         if prev is None or ev.ts > prev:

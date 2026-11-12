@@ -76,12 +76,14 @@ def test_the_retired_task_flag_never_stops_a_claim_or_a_release(tmp_path):
     env = {"CLAUDE_CODE_SESSION_ID": SESSION_A}
     code, out, err = _run(repo, ["claim", "src/a.py", "--task", "no-such-task",
                                  "--intent", "x", "--as", "dev"], env=env)
-    assert code == 0 and err.strip() == verbs.RETIRED_NOTICE, out + err
+    assert code == 0 and err.strip() == verbs.RETIRED_FLAG_NOTICE, out + err
     held = cstate.fold(clog.read(clog.log_path(repo))).claims.values()
     assert [str(c.scope) for c in held] == ["src/a.py"]
     code, out, err = _run(repo, ["release", "--task", "demo", "--result", "done",
                                  "--as", "dev"], env=env)
     assert code == 0 and "RELEASED src/a.py" in out, out + err
+    assert err.strip() == verbs.RETIRED_FLAG_NOTICE, err
+    assert len(verbs.RETIRED_FLAG_NOTICE) < 100
     assert not cstate.fold(clog.read(clog.log_path(repo))).claims
     for path in ("claim", "release"):
         assert "--task" not in verbs.verb_help(verbs.lookup(path))

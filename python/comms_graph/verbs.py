@@ -80,10 +80,12 @@ _GLOBAL_ALIASES = {a: f for f in GLOBAL_FLAGS for a in f.aliases}
 
 _ACTOR = "who you are; else COMMS_ACTOR, else this session's own name"
 
-# Grace for one release. A verb or flag marked `retired` is accepted, does
-# nothing and prints this line on stderr. The next release deletes the marks,
-# the retired entries and this notice together.
-RETIRED_NOTICE = "comms no longer has tasks; this command or flag does nothing and can be dropped."
+# Grace for one release. A verb marked `retired` is accepted, does nothing and
+# prints the first line on stderr. A retired flag is dropped with the second,
+# and the rest of the command runs. The next release deletes the marks, the
+# retired entries and both notices together.
+RETIRED_NOTICE = "comms no longer has tasks; this command does nothing and can be dropped."
+RETIRED_FLAG_NOTICE = "comms no longer has tasks; --task was ignored and can be dropped."
 
 VERBS: tuple[Verb, ...] = (
     Verb("claim", "take ground before you edit it", writes=True,

@@ -2008,10 +2008,11 @@ def _run(argv: list[str]) -> int:
         for line in refusal.lines:
             _err(line)
         return refusal.code
-    if call.retired:
+    if call.verb.retired:
         _err(_verbs.RETIRED_NOTICE)
-        if call.verb.retired:
-            return EXIT_OK
+        return EXIT_OK
+    if call.retired:
+        _err(_verbs.RETIRED_FLAG_NOTICE)
     if call.root:
         _GLOBAL_ROOT = call.root
     if call.help:
