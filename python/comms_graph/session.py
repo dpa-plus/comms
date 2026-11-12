@@ -183,7 +183,7 @@ def stamp(st, actor: str, data: dict) -> None:
     """Tag an outgoing event with the actor's named session, if it has one.
 
     This is the whole writing side of the mechanic, and it belongs on EVERY
-    verb that appends: claim, release, find, note, task. An event that skips it
+    verb that appends: claim, release, note. An event that skips it
     is invisible to the session: `end` will not release its claim, the archive
     will not count it, and a reader asking what that piece of work produced
     gets an answer that is quietly short.
@@ -372,8 +372,7 @@ def _session_hello(st, actor: str, session_id: str, session_name: str,
         data["agent_session"] = agent_session
     # Model identity, on the same terms as `_hello_if_unknown`: absent when
     # unset rather than guessed. Carried here because this hello supersedes the
-    # one that had it, and dropping it downgrades every later verification from
-    # "independent" to "unknown": a weaker claim than the truth.
+    # one that had it, and dropping it would blank the model on the board.
     vendor = os.environ.get("COMMS_VENDOR", "").strip()
     if vendor:
         data["vendor"] = vendor

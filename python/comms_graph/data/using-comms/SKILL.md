@@ -62,18 +62,6 @@ Each prints a short view. Add `--all` for everything.
 
 A file that is changed on disk with no claim on it belongs to nobody on record. Ask in a note before you edit it.
 
-## Tasks are optional
-
-comms never requires a task. If the user or your lead wants the work to show on the board under a title, add one and tag your claims with it:
-
-```bash
-comms task add stay-signed-in --title "Let people stay signed in after a restart"
-comms claim src/auth/session.ts --task stay-signed-in --intent "server-side sessions"
-comms task done stay-signed-in
-```
-
-Write the title in plain English for a person who does not read code.
-
 ## When something is off
 
 - `operation not permitted` on the working directory: macOS withdrew access to a Desktop or Documents folder. Run from another directory and name the repository: `comms --repo /abs/path status`. Never change `HOME`.

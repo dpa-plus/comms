@@ -2,13 +2,11 @@
 
 WHY A SECOND SURFACE AT ALL. The CLI is only reached when something tells an
 agent to reach for it, and the always-on block that does the telling is one
-paragraph competing with the whole task. The evidence is in the log: across
-thousands of real claims almost none carried a task, because the skill that
-explains tasks does not auto-trigger. A command an agent must be *told* to run
+paragraph competing with the whole task. A command an agent must be *told* to run
 loses to a tool sitting in its tool list on every single turn. Same protocol,
 same log, same events: different door.
 
-NO CEREMONY. Six verbs that map one-to-one onto commands that already exist. No
+NO CEREMONY. Five verbs that map one-to-one onto commands that already exist. No
 registration, no inbox, no severity ladder. Anything an agent must learn before
 its first call is ceremony and does not belong here.
 
@@ -215,7 +213,6 @@ def tools() -> list[dict]:
                 "actor": actor_prop,
                 "path": _str_prop("repo-relative path, optionally #L10-40 or #symbolName"),
                 "intent": _str_prop("what you are about to do to it, one line"),
-                "task": _str_prop("slug of the task this claim carries out, if any"),
             }},
         },
         {
@@ -275,8 +272,7 @@ def _call(params):
 
     handler = {
         "comms_check": lambda: _check(actor_arg, _arg(args, "path")),
-        "comms_claim": lambda: _claim(actor_arg, _arg(args, "path"), _arg(args, "intent"),
-                                      _arg(args, "task")),
+        "comms_claim": lambda: _claim(actor_arg, _arg(args, "path"), _arg(args, "intent")),
         "comms_release": lambda: _release(actor_arg, _arg(args, "result")),
         "comms_status": lambda: _status(actor_arg),
         "comms_note": lambda: _note(actor_arg, _arg(args, "body")),
@@ -476,7 +472,7 @@ def _check(actor_arg: str, path: str):
 # ---------------------------------------------------------------------------
 
 
-def _claim(actor_arg: str, path: str, intent: str, task: str):
+def _claim(actor_arg: str, path: str, intent: str):
     if not path or not intent:
         return _text("path and intent are both required", True)
     scope, bad = _parse_scope(path)
@@ -505,8 +501,6 @@ def _claim(actor_arg: str, path: str, intent: str, task: str):
             return _text(f"the coordination lock is no longer exclusive: {broken}. "
                          "Nothing was claimed; try again.", True)
         data: dict = {"intent": intent}
-        if task:
-            data["task"] = task
         _stamp_session(st, actor, data)
         event = _append(log_file, st, actor, _log.TYPE_CLAIM, [str(scope)], data)
 

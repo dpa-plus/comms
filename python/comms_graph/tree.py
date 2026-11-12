@@ -37,8 +37,8 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
+from . import identity as _identity
 from . import scope as _scope
-from . import task as _task
 
 #: git can be slow on a huge tree, and every caller here is on an interactive
 #: path (the board, a pre-commit hook, a dashboard refresh). Better to report
@@ -416,14 +416,14 @@ def foreign_staged_deletions(report: TreeReport, actor: str) -> list[Attributed]
     new files, generated files and anything edited through a shell heredoc,
     which is most of them, and a guard that cries wolf gets disabled.
     """
-    mine = _task.base_actor(actor.lstrip("@")) if actor else ""
+    mine = _identity.base_actor(actor.lstrip("@")) if actor else ""
     out = []
     for a in report.staged:
         if not a.change.deleted or not a.known:
             continue
         # base_actor so a role suffix does not make you a stranger to your own
         # ground: claude-dev/review staging claude-dev's deletion is one agent.
-        if _task.base_actor(a.actor.lstrip("@")) != mine:
+        if _identity.base_actor(a.actor.lstrip("@")) != mine:
             out.append(a)
     return out
 

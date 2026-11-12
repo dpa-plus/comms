@@ -23,8 +23,8 @@ precisely because it only fires when the pairing is unknown.
 THE PAYLOAD IS THE SAME PAYLOAD. Both paths write the same keys with the same
 spellings, so a reader cannot tell an explicit hello from an implicit one and
 does not have to care. See :func:`_identity_data`; the test suite pins the two
-against each other, because a key that drifts here is a key the hook, the review
-gate and the independence label all stop seeing.
+against each other, because a key that drifts here is a key the hook and the
+board stop seeing.
 """
 
 from __future__ import annotations
@@ -58,7 +58,7 @@ from . import log as _log
 _MAX_LABEL_CHARS = 120
 
 #: Shorter cap for --model / --vendor: these are identifiers, not prose, and the
-#: independence label prints them inline.
+#: board prints them inline.
 _MAX_IDENT_CHARS = 60
 
 
@@ -99,10 +99,9 @@ def _identity_data(label: str, model: str, vendor: str) -> dict:
     strangers. Unknown keys are dropped by the reader, so an EXTRA key costs
     nothing; a different key for the same fact costs everything.
 
-    Absent, not guessed, is the rule for every optional value here.
-    ``independence_of`` reports "unknown" for a missing vendor, and that is the
-    honest answer: inferring anthropic from a name that starts with "claude"
-    would manufacture the evidence that a verification was independent.
+    Absent, not guessed, is the rule for every optional value here: a vendor
+    inferred from a name that starts with "claude" would be a guess shown as a
+    fact on the board.
     """
     data: dict = {}
     agent_session = os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
@@ -147,9 +146,7 @@ def cmd_hello(argv: list[str]) -> int:
 
     label = (flags.get("label") or os.environ.get("COMMS_LABEL", "")).strip()
     model = (flags.get("model") or os.environ.get("COMMS_MODEL", "")).strip()
-    # Lowercased so `Anthropic` and `anthropic` are one vendor. independence_of
-    # compares these strings, and two spellings of one vendor would read as two
-    # different vendors: i.e. as independent verification that is not.
+    # Lowercased so `Anthropic` and `anthropic` are one vendor on the board.
     vendor = (flags.get("vendor") or os.environ.get("COMMS_VENDOR", "")).strip().lower()
     for what, value, limit in (
         ("--label", label, _MAX_LABEL_CHARS),
@@ -161,7 +158,7 @@ def cmd_hello(argv: list[str]) -> int:
             _cli._err(f"error: {complaint}")
             return _cli.EXIT_USAGE
 
-    root, log_file, lock_file = _cli._task_runtime(flags)
+    root, log_file, lock_file = _cli._runtime(flags)
     with _lock.file_lock(lock_file):
         st = _cli._read_state(log_file)
         # Unconditional, unlike the implicit path: somebody typing `hello` is

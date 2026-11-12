@@ -298,8 +298,8 @@ def test_status_json_is_the_machine_shape_and_is_uncapped(tmp_path, monkeypatch)
 
     assert code == 0, err
     doc = json.loads(out)
-    assert {"sessions", "claims", "notes", "tasks"} <= set(doc)
-    assert "findings" not in doc
+    assert {"sessions", "claims", "notes"} <= set(doc)
+    assert not {"findings", "tasks"} & set(doc)
     assert len(doc["claims"]) == 60, "the machine view must not hide live claims"
     assert doc["sessions"][0]["actor"] == "dev"
     assert "last_seen" in doc["sessions"][0]

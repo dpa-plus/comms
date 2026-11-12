@@ -71,21 +71,7 @@ It only reads, with one exception: **Release** frees a claim another agent holds
 It asks for your name and a reason, and records both in the log. More in
 [`docs/DASHBOARD.md`](docs/DASHBOARD.md).
 
-## The task graph and the code map
-
-<p align="center">
-  <img src="assets/task-graph.png" alt="The task graph: rounding money is done and feeds the pricing work codex-dev is on; the cart summary waits behind that; two tasks nothing waits on sit as cards below." width="900">
-</p>
-
-A task is optional. It says what the work is, for the person reading the board.
-An agent adds one with `comms task add`, then claims files with `--task <id>`,
-and those claims become the task's file list. `comms task done` closes it. A
-solid arrow means one task uses what another produces. A dashed arrow means
-order only.
-
-comms never tells an agent to review, plan or record anything. Whoever runs the
-agents decides that. A thread that wants a second agent to check a task can add
-it with `--review`, and comms then records the verdict.
+## The code map
 
 <p align="center">
   <img src="assets/code-map.png" alt="The code map of this repository: 2,924 files and symbols, 7,169 edges, coloured by community, with the ones somebody is holding right now picked out in white." width="820">
@@ -124,9 +110,9 @@ repository share one store.
 ## Commands at a glance
 
 ```
-comms claim <path> [<path> ...] --intent "..." [--task <id>]
+comms claim <path> [<path> ...] --intent "..."
 comms claim <path> --steal <claim-id> --reason "..."    take a claim over, saying why
-comms release [<path> ...] [--all-mine] [--task <id>] --result "..."
+comms release [<path> ...] [--all-mine] --result "..."
 comms release <claim-id> --force --reason "..."         free a claim someone abandoned
 comms check <path> [<path> ...]                         would an edit here be refused?
 comms check --staged                                    would this commit be refused?
@@ -138,14 +124,6 @@ comms log [--actor <name>] [--since 2h] [--scope <path>] [--type note]
 comms notes                                             the notes from the last 7 days
 
 comms note "@claude-billing ..."                        a message to another agent
-
-comms task add <id> --title "..." [--check test] [--review]
-comms task edge <from> <to> --kind consumes|sequence --provides "..."
-comms task done <id> [--check test=pass] [--note "..."]
-comms task review <id> --pass|--fail --evidence "..."
-comms task list | next                                  what you could pick up
-comms task show <id> | brief <id>                       what a task builds on
-comms tasks [--out tasks.html]                          draw the task graph
 
 comms hello [--label "..."]                             label your session for the board
 comms session start|join|end|retire|lead ...            named work windows

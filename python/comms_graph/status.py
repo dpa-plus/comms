@@ -36,7 +36,6 @@ from . import identity as _identity
 from . import log as _log
 from . import scope as _scope
 from . import state as _state
-from . import task as _task
 from .cli import (
     EXIT_ERROR,
     EXIT_OK,
@@ -362,11 +361,6 @@ def _claims_held(st: _state.State, actor: str) -> int:
     return sum(1 for c in st.claims.values() if c.actor == actor)
 
 
-def _sorted_tasks(st: _state.State) -> list:
-    _epoch = datetime(1, 1, 1, tzinfo=timezone.utc)
-    return sorted(st.tasks.values(), key=lambda t: (t.ts or _epoch, t.id))
-
-
 def _markdown_slugs(directory: Path) -> list[str]:
     """The ``.md`` basenames in a directory, sorted. Missing dir -> nothing."""
     try:
@@ -451,9 +445,6 @@ def _emit_status_compact(st: _state.State, root: Path, flags: dict, now: datetim
 
     lines = _compact.view(st, _log.log_path(root).parent, _actor(flags, write=False),
                           now=now, stale_after=stale_after)
-    if st.tasks:
-        closed = sum(1 for t in st.tasks.values() if t.phase == _task.PHASE_CLOSED)
-        lines.append(f"tasks: {len(st.tasks) - closed} open, {closed} closed (`comms-graph next`)")
     lines.append(_compact.all_hint("status"))
     print("\n".join(lines))
 
@@ -530,7 +521,6 @@ def _emit_status_human(
     for note in notes:
         print(f"  @{note.actor:<14} {note.body}")
 
-    _emit_task_summary(st)
     _emit_blocked_summary(st, cutoff, since_raw)
 
     if docs:
@@ -539,47 +529,6 @@ def _emit_status_human(
     if omitted:
         print()
         print(f"... {omitted} more; run `comms-graph log --since {since_raw}` for details")
-
-
-def _emit_task_summary(st: _state.State) -> None:
-    """The work graph, but only the parts somebody could act on.
-
-    A wall of blocked tasks is not status, it is noise: blocked work is a count,
-    and the things that need a person are named.
-    """
-    if not st.tasks:
-        return
-    buckets: dict[str, list] = {
-        _task.PHASE_REVIEW: [],
-        _task.PHASE_READY: [],
-        _task.PHASE_DOING: [],
-        _task.PHASE_BLOCKED: [],
-        _task.PHASE_CLOSED: [],
-        _task.PHASE_CYCLE: [],
-    }
-    for t in _sorted_tasks(st):
-        if t.phase in buckets:
-            buckets[t.phase].append(t)
-    closed = buckets[_task.PHASE_CLOSED]
-    open_count = sum(len(v) for k, v in buckets.items() if k != _task.PHASE_CLOSED)
-
-    print()
-    print(f"TASKS ({open_count} open, {len(closed)} closed)")
-    for t in buckets[_task.PHASE_REVIEW]:
-        print(f"  VERIFY  {t.id:<16} {t.title}")
-        print(f"          done by @{t.did}: needs someone else")
-    for t in buckets[_task.PHASE_READY]:
-        print(f"  READY   {t.id:<16} {t.title}")
-    for t in buckets[_task.PHASE_DOING]:
-        who = ", @".join(t.doers)
-        print(f"  DOING   {t.id:<16} {t.title}  (@{who})")
-    if buckets[_task.PHASE_BLOCKED]:
-        print(f"  {len(buckets[_task.PHASE_BLOCKED])} waiting on work that has not been verified yet")
-    for t in buckets[_task.PHASE_CYCLE]:
-        print(f"  CYCLE   {t.id:<16} depends on itself: the plan needs fixing")
-    if st.refused_task_states:
-        n = len(st.refused_task_states)
-        print(f"  {n} refused transition{_plural(n)}: see `comms-graph brief <task>`")
 
 
 def _emit_blocked_summary(st: _state.State, cutoff: datetime, since_raw: str) -> None:
@@ -625,7 +574,6 @@ def _emit_status_json(
         "claims": [],
         "notes": [],
         "docs": _list_docs(root),
-        "tasks": [],
     }
     for s in _roster(st, now - ACTIVE_WINDOW):
         row = {
@@ -654,8 +602,6 @@ def _emit_status_json(
         }
         if c.stolen_from_id:
             row["stole_id"] = c.stolen_from_id
-        if c.task:
-            row["task"] = c.task
         if c.session_id:
             row["session_id"] = c.session_id
         if c.session_name:
@@ -668,25 +614,6 @@ def _emit_status_json(
         if n.session_name:
             row["session_name"] = n.session_name
         out["notes"].append(row)
-    for t in _sorted_tasks(st):
-        row = {"id": t.id, "title": t.title, "phase": t.phase}
-        if t.size:
-            row["size"] = t.size
-        if t.doers:
-            row["doers"] = list(t.doers)
-        if t.did:
-            row["done_by"] = t.did
-        if t.verified_by:
-            row["verified_by"] = t.verified_by
-        if t.independence:
-            row["independence"] = t.independence
-        if t.rejections:
-            row["rejections"] = t.rejections
-        if t.blocked_by:
-            row["blocked_by"] = list(t.blocked_by)
-        if t.ref:
-            row["ref"] = t.ref
-        out["tasks"].append(row)
     print(json.dumps(out, indent=2))
 
 

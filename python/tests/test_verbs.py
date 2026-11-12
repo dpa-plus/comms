@@ -28,6 +28,9 @@ def test_help_names_every_flag_the_verb_accepts(path, verb):
     text = _help_for(path)
     assert text.startswith("Usage: comms-graph ")
     for flag in verb.flags:
+        if flag.retired:
+            assert f"--{flag.name} " not in text, f"{path} --help names the retired --{flag.name}"
+            continue
         assert f"--{flag.name}" in text, f"{path} --help does not name --{flag.name}"
         for alias in flag.aliases:
             assert f"--{alias}" in text
@@ -41,11 +44,14 @@ def test_every_flag_alias_resolves_to_its_flag(path, verb):
     for flag in verb.flags:
         for alias in flag.aliases:
             args = [f"--{alias}", "v"] if flag.arg else [f"--{alias}"]
-            assert verbs.check_flags(path, verb, args)[0] == f"--{flag.name}"
+            assert verbs.check_flags(path, verb, args)[0][0] == f"--{flag.name}"
 
 
 def test_every_verb_alias_resolves():
     for verb in verbs.VERBS:
+        if verb.retired:
+            assert verbs.lookup(verb.name) is None
+            continue
         assert verbs.lookup(verb.name) is verb
         for alias in verb.aliases:
             assert verbs.lookup(alias) is verb
@@ -62,7 +68,7 @@ def test_global_flags_are_accepted_by_every_verb():
     for path, verb in LEAVES:
         if verb.raw:
             continue
-        out = verbs.check_flags(path, verb, ["--as", "x", "--json", "--root", "r", "--graph", "g"])
+        out, _ = verbs.check_flags(path, verb, ["--as", "x", "--json", "--root", "r", "--graph", "g"])
         assert out == ["--as", "x", "--json", "--root", "r", "--graph", "g"]
 
 
@@ -90,8 +96,8 @@ def test_an_unknown_verb_is_three_lines_at_most_and_guesses():
         verbs.prepare(["claimm"])
     assert len(caught.value.lines) <= 3 and "claim" in caught.value.lines[1]
     with pytest.raises(verbs.Refusal) as caught:
-        verbs.prepare(["task", "shw"])
-    assert "task show" in caught.value.lines[1]
+        verbs.prepare(["guard", "instal"])
+    assert "guard install" in caught.value.lines[1]
 
 
 def test_a_boolean_flag_does_not_swallow_the_positional_after_it():
@@ -152,8 +158,7 @@ def test_a_flag_that_needs_a_value_and_has_none_is_refused(tmp_path, monkeypatch
 
 
 @pytest.mark.parametrize("argv", [["status", "extra"], ["board", "x"], ["whoami", "me"],
-                                  ["claims", "a"], ["next", "x"], ["log", "x"],
-                                  ["tasks", "list"]])
+                                  ["claims", "a"], ["log", "x"]])
 def test_a_verb_without_positionals_refuses_stray_words(tmp_path, monkeypatch, capsys, argv):
     code, out, err, repo = _main(tmp_path, monkeypatch, capsys, *argv)
     assert code == 2, out + err
@@ -161,6 +166,3 @@ def test_a_verb_without_positionals_refuses_stray_words(tmp_path, monkeypatch, c
     assert not list(repo.glob("*.html")), "nothing is written into the repository"
 
 
-def test_tasks_list_points_at_task_list(tmp_path, monkeypatch, capsys):
-    code, out, err, _repo = _main(tmp_path, monkeypatch, capsys, "tasks", "list")
-    assert "`comms-graph task list`" in err, err

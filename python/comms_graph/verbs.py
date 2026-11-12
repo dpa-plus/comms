@@ -28,6 +28,7 @@ class Flag:
     aliases: tuple[str, ...] = ()
     needs: str = ""
     hint: str = ""
+    retired: bool = False
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,7 @@ class Verb:
     default_sub: str = ""
     # False for a verb that reads no positional words, so a stray one is refused.
     words: bool = True
+    retired: bool = False
 
 
 class Refusal(Exception):
@@ -64,6 +66,7 @@ class Call:
     argv: list[str]
     root: str = ""
     help: bool = False
+    retired: bool = False
 
 
 GLOBAL_FLAGS = (
@@ -77,69 +80,32 @@ _GLOBAL_ALIASES = {a: f for f in GLOBAL_FLAGS for a in f.aliases}
 
 _ACTOR = "who you are; else COMMS_ACTOR, else this session's own name"
 
-_TASK_ADD = Verb(
-    "add", "declare a task", writes=True,
-    usage=('task add <id> --title "..." [--size S|M|L] [--review] [--probe]',
-           '    [--check <name>]... [--ref "tracker:PROJ-1"]',
-           "  --title is what people read on the board: plain English, no file or",
-           "  function names, short enough to say out loud. The id is what you type."),
-    flags=(
-        Flag("title", "<text>", "what people read on the board"),
-        Flag("size", "S|M|L", "a rough scale, not a gate"),
-        Flag("check", "<name>", "a check that must pass before done (repeatable)"),
-        Flag("ref", "<ref>", 'a tracker reference, e.g. "tracker:PROJ-1234"'),
-        Flag("review", "", "somebody else must check it to close"),
-        Flag("probe", "", "a diagnostic; kept out of derived neighbours"),
-    ))
-_TASK_EDGE = Verb(
-    "edge", "say that <to> comes after <from>", writes=True,
-    usage=("task edge <from> <to> [--kind consumes|sequence] [--provides \"...\"]",),
-    flags=(
-        Flag("kind", "consumes|sequence", "consumes: <to> uses what <from> makes"),
-        Flag("provides", "<text>", "what <to> consumes from <from>"),
-    ))
-_TASK_DONE = Verb(
-    "done", "say the work is finished", writes=True,
-    usage=('task done <id> [--check name=pass]... [--note "..."]...',),
-    flags=(
-        Flag("check", "name=pass", "result of a declared check (repeatable)"),
-        Flag("note", "<text>", "a decision worth carrying forward (repeatable)",
-             aliases=("summary", "result")),
-    ))
-_TASK_REVIEW = Verb(
-    "review", "verify or reject somebody else's finished task", writes=True,
-    usage=('task review <id> --pass|--fail [--evidence "..."]',
-           "  A task unblocks what follows it when it is VERIFIED, not when it is done,",
-           "  and you cannot verify your own work."),
-    flags=(
-        Flag("pass", "", "the work holds up"),
-        Flag("fail", "", "send it back to its author"),
-        Flag("evidence", "<text>", "what you checked", aliases=("finding",)),
-        Flag("acknowledge-self-review", "",
-             "last resort: sign off your own work, recorded as self-acknowledged"),
-    ))
+# Grace for one release. A verb or flag marked `retired` is accepted, does
+# nothing and prints this line on stderr. The next release deletes the marks,
+# the retired entries and this notice together.
+RETIRED_NOTICE = "comms no longer has tasks; this command or flag does nothing and can be dropped."
 
 VERBS: tuple[Verb, ...] = (
     Verb("claim", "take ground before you edit it", writes=True,
-         usage=('claim <scope>... [--intent "..."] [--task <id>]',
+         usage=('claim <scope>... [--intent "..."]',
                 '  claim <scope> --steal <claim-id> --reason "..."   take it off a holder who is gone',
                 "  <scope> is a path, optionally anchored: src/foo.py  src/foo.py#parse  src/foo.py#L20-48"),
          flags=(
              Flag("intent", "<text>", "one line on what you are about to do", aliases=("why",)),
-             Flag("task", "<id>", "tag the claim with a task"),
+             Flag("task", "<id>", retired=True),
              Flag("steal", "<claim-id>", "displace the holder of this claim"),
              Flag("reason", "<text>", "why the holder is not coming back", needs="steal",
                   hint='To say why you are claiming, use --intent "...".'),
              Flag("map", "", "also print how this ground sits on the code map"),
          )),
     Verb("release", "give ground back", writes=True,
-         usage=('release [<scope|claim-id>...] [--task <id>] [--result "..."]   no scope: everything you hold',
+         usage=('release [<scope|claim-id>...] [--result "..."]   no scope: everything you hold',
                 '  release <claim-id> --force --reason "..."   free ground somebody else abandoned'),
          flags=(
              Flag("result", "<text>", "one line on how it went"),
              Flag("all-mine", "", "release everything you hold (the default with no scope)"),
              Flag("latest", "", "release only your most recent claim"),
-             Flag("task", "<id>", "release only your claims tagged to this task"),
+             Flag("task", "<id>", retired=True),
              Flag("force", "", "end a claim that is not yours (needs a claim id)"),
              Flag("reason", "<text>", "why it is not theirs to hold", needs="force",
                   hint='To say how it went, use --result "...".'),
@@ -155,16 +121,6 @@ VERBS: tuple[Verb, ...] = (
              Flag("staged", "", "check the git index instead of paths"),
              Flag("stdin-json", "", "read a Claude Code hook payload on stdin"),
          )),
-    Verb("task", "declare and move work",
-         usage=("task add|edge|done|review|list|show ...",),
-         subs=(_TASK_ADD, _TASK_EDGE, _TASK_DONE, _TASK_REVIEW,
-               Verb("list", "what you could start now (same as next)", expands=("next",)),
-               Verb("show", "what a task is and what came before (same as brief)",
-                    expands=("brief",)))),
-    Verb("next", "what you could start now", usage=("next",), words=False),
-    Verb("brief", "what a task is, and what came before", usage=("brief <task-id>",)),
-    Verb("tasks", "draw the task graph to an HTML file", words=False, usage=("tasks [--out <file.html>]",),
-         flags=(Flag("out", "<file>", "where to write the page"),)),
     Verb("note", "a short FYI, up to 1000 characters", writes=True,
          usage=('note "..."                     start with @name to address one agent',)),
     Verb("doc", "the repo's own wiki", usage=("doc [--list | <slug> [--edit]]",),
@@ -188,10 +144,10 @@ VERBS: tuple[Verb, ...] = (
                   usage=('session lead [<actor>] [--reason "..."]',),
                   flags=(Flag("reason", "<text>", "why, in the log, under your name"),)),
          )),
-    Verb("status", "your claims, who else holds what, notes to you, open tasks", words=False,
+    Verb("status", "your claims, who else holds what, notes to you", words=False,
          usage=("status [--all] [--since 24h]",),
          flags=(
-             Flag("all", "", "everything: roster, every claim, notes, tasks"),
+             Flag("all", "", "everything: roster, every claim, notes"),
              Flag("since", "<dur>", "lookback for notes (default 24h; 30m, 6h, 7d)"),
              Flag("stale-after", "<dur>", "age past which a held claim is STALE (default 1h)"),
          )),
@@ -243,6 +199,10 @@ VERBS: tuple[Verb, ...] = (
          )),
     Verb("version", "print the version", usage=("version",)),
     Verb("help", "this list, or one command's flags", usage=("help [<command>]",)),
+    Verb("task", "", retired=True),
+    Verb("next", "", retired=True),
+    Verb("brief", "", retired=True),
+    Verb("tasks", "", retired=True),
 )
 
 _BY_NAME: dict[str, Verb] = {}
@@ -252,25 +212,25 @@ for _v in VERBS:
         _BY_NAME[_a] = _v
 
 _GUESSES = {
-    "inbox": "notes", "messages": "notes", "list": "next", "show": "brief",
+    "inbox": "notes", "messages": "notes",
     "unclaim": "release", "lock": "claim", "unlock": "release", "free": "release",
     "register": "hello", "join": "hello", "who": "whoami", "me": "whoami",
-    "mine-all": "claims", "open": "claim", "tasks-list": "next",
+    "mine-all": "claims", "open": "claim",
 }
 
 
-def names() -> list[str]:
-    return sorted({v.name for v in VERBS})
-
-
 def lookup(name: str) -> Verb | None:
-    return _BY_NAME.get(name)
+    """The verb a name dispatches to. A retired verb is not one."""
+    verb = _BY_NAME.get(name)
+    return None if verb is None or verb.retired else verb
 
 
 def leaves() -> list[tuple[str, Verb]]:
-    """Every dispatchable (path, verb): ``task add`` is one, ``task`` alone is not."""
+    """Every dispatchable (path, verb): ``guard install`` is one, ``guard`` alone is not."""
     out: list[tuple[str, Verb]] = []
     for v in VERBS:
+        if v.retired:
+            continue
         if v.subs:
             out.extend((f"{v.name} {s.name}", s) for s in v.subs)
         else:
@@ -298,6 +258,10 @@ def booleans(verb: Verb) -> frozenset[str]:
 # ---------------------------------------------------------------------------
 
 
+def _shown_flags(verb: Verb) -> list[Flag]:
+    return [f for f in verb.flags if not f.retired]
+
+
 def _flag_line(f: Flag) -> str:
     head = f"--{f.name}" + (f" {f.arg}" if f.arg else "")
     also = f"  (also {', '.join('--' + a for a in f.aliases)})" if f.aliases else ""
@@ -307,6 +271,8 @@ def _flag_line(f: Flag) -> str:
 def global_usage() -> str:
     lines = ["Usage: comms-graph <command> [options]      (`comms` is the same program)", ""]
     for v in VERBS:
+        if v.retired:
+            continue
         also = f"  (also {', '.join(v.aliases)})" if v.aliases else ""
         lines.append(f"  {v.name:<10}{v.summary}{also}")
     lines += [
@@ -340,9 +306,9 @@ def verb_help(verb: Verb, path: str | None = None) -> str:
     lines.append(f"Usage: comms-graph {first}")
     lines.extend(f"  {u}" for u in more)
     lines.append(f"  {verb.summary}.")
-    if verb.flags:
+    if _shown_flags(verb):
         lines.append("  Options:")
-        lines.extend(_flag_line(f) for f in verb.flags)
+        lines.extend(_flag_line(f) for f in _shown_flags(verb))
     if not verb.raw:
         lines.append("  Also on every command: " + "  ".join(
             f"--{f.name}" + (f" {f.arg}" if f.arg else "") for f in GLOBAL_FLAGS))
@@ -358,7 +324,7 @@ def verb_help(verb: Verb, path: str | None = None) -> str:
 def _unknown_verb(name: str) -> Refusal:
     guess = _GUESSES.get(name)
     if not guess:
-        close = difflib.get_close_matches(name, list(_BY_NAME), n=1, cutoff=0.6)
+        close = difflib.get_close_matches(name, [n for n in _BY_NAME if lookup(n)], n=1, cutoff=0.6)
         guess = close[0] if close else ""
     lines = [f"error: unknown comms command {name!r}"]
     if guess:
@@ -378,9 +344,9 @@ def _unknown_sub(verb: Verb, name: str) -> Refusal:
 
 
 def _unknown_flag(path: str, verb: Verb, name: str) -> Refusal:
-    own = [f.name for f in verb.flags]
+    own = [f.name for f in _shown_flags(verb)]
     pool = own + [g.name for g in GLOBAL_FLAGS]
-    pool += [a for f in (*verb.flags, *GLOBAL_FLAGS) for a in f.aliases]
+    pool += [a for f in (*_shown_flags(verb), *GLOBAL_FLAGS) for a in f.aliases]
     close = difflib.get_close_matches(name, pool, n=1, cutoff=0.6)
     lines = [f"error: {path} has no flag --{name}"]
     taken = " ".join(f"--{n}" for n in own) if own else "no flags of its own"
@@ -391,17 +357,16 @@ def _unknown_flag(path: str, verb: Verb, name: str) -> Refusal:
 
 def _stray_word(path: str, word: str) -> Refusal:
     lines = [f"error: {path} takes no arguments, got {word!r}"]
-    task = _BY_NAME["task"]
-    if path == "tasks" and any(s.name == word for s in task.subs):
-        lines.append(f"  Did you mean `comms-graph task {word}`?")
     lines.append(f"  `comms-graph {path} --help` shows its flags.")
     return Refusal(lines)
 
 
-def check_flags(path: str, verb: Verb, args: list[str]) -> list[str]:
-    """``args`` with aliases spelled canonically, or a Refusal for an unknown flag."""
+def check_flags(path: str, verb: Verb, args: list[str]) -> tuple[list[str], bool]:
+    """``args`` with aliases spelled canonically and retired flags dropped, and
+    whether a retired flag was dropped. Raises Refusal for an unknown flag."""
     out: list[str] = []
     seen: set[str] = set()
+    retired = False
     i = 0
     while i < len(args):
         tok = args[i]
@@ -415,6 +380,11 @@ def check_flags(path: str, verb: Verb, args: list[str]) -> list[str]:
         flag = _flag_lookup(verb, m.group(1))
         if flag is None:
             raise _unknown_flag(path, verb, m.group(1))
+        if flag.retired:
+            retired = True
+            if flag.arg and m.group(2) is None and i < len(args) and not _FLAG.match(args[i]):
+                i += 1
+            continue
         seen.add(flag.name)
         out.append(f"--{flag.name}{m.group(2) or ''}")
         if flag.arg and m.group(2) is None:
@@ -430,7 +400,7 @@ def check_flags(path: str, verb: Verb, args: list[str]) -> list[str]:
                 lines.append(f"  {f.hint}")
             lines.append(f"  `comms-graph {path} --help` shows each flag.")
             raise Refusal(lines)
-    return out
+    return out, retired
 
 
 def _split_globals(argv: list[str]) -> tuple[list[str], list[str], str]:
@@ -477,6 +447,8 @@ def prepare(argv: list[str]) -> Call:
     verb = _BY_NAME.get(name)
     if verb is None:
         raise _unknown_verb(name)
+    if verb.retired:
+        return Call(verb, verb.name, [], root=root, retired=True)
     path = verb.name
     for _ in range(3):
         if verb.expands:
@@ -507,7 +479,7 @@ def prepare(argv: list[str]) -> Call:
         break
     if any(a in _HELP for a in rest):
         return Call(verb, path, [], root=root, help=True)
-    rest = check_flags(path, verb, rest)
+    rest, retired = check_flags(path, verb, rest)
     if verb.raw:
         lead = []
-    return Call(verb, path, [*rest, *lead], root=root)
+    return Call(verb, path, [*rest, *lead], root=root, retired=retired)
