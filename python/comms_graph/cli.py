@@ -1819,8 +1819,6 @@ def _task_add(argv: list[str]) -> int:
         print("  a probe: it will not show up as a neighbour of real work")
     if data.get("review"):
         print("  needs somebody else to check it before it closes")
-    else:
-        print("  closes when you run `task done`: add --review if it needs checking")
     return EXIT_OK
 
 
@@ -1963,8 +1961,6 @@ def _task_done(argv: list[str]) -> int:
         print("  Somebody else has to verify it before anything after it unblocks.")
     else:
         print(f"DONE {slug} by @{actor}: closed")
-        print("  It did not ask for a review, so this finishes it. Anything "
-              "waiting on it is now free.")
     return EXIT_OK
 
 
@@ -2235,15 +2231,8 @@ def _too_long(kind: str, text: str, cap: int) -> int:
     if fits and len(fits) < len(text):
         _err(f"  This fits ({len(fits)} characters), if it still says what you meant:")
         _err(f"    {fits}")
-    _err(f"  A {kind} is the one line somebody reads later, not the writeup. If it "
-         "is longer than that, it is probably one of:")
-    # Every route here is checked to actually accept a long body. `doc --edit`
-    # is NOT one of them: it hands control to $EDITOR, which an agent cannot
-    # drive, so the file is named instead: docs are plain repo files and writing
-    # one directly is how an agent gets a long thing written down.
-    _err('    why a task ended the way it did   →  comms-graph task done <id> --note "…"')
-    _err("    something the repo should keep     →  write .comms/docs/<slug>.md")
-    _err('    a decision, in ONE line            →  comms-graph find decision "…"')
+    _err(f"  A {kind} is one line somebody reads later. Put anything longer in a "
+         "file in the repo and name the file here.")
     _err("  Do not split it into two notes. The feed is ordered by time, so they "
          "will not read in the order you wrote them.")
     return EXIT_USAGE

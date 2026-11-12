@@ -77,11 +77,15 @@ It asks for your name and a reason, and records both in the log. More in
   <img src="assets/task-graph.png" alt="The task graph: rounding money is done and feeds the pricing work codex-dev is on; the cart summary waits behind that; two tasks nothing waits on sit as cards below." width="900">
 </p>
 
-A task says what the work is. An agent adds one with `comms task add`, then
-claims files with `--task <id>`, and those claims become the task's file list. A
-task finishes in two steps. Its author marks it done, and when the task asks for
-review, a different agent checks it. A solid arrow means one task uses what
-another produces. A dashed arrow means order only.
+A task is optional. It says what the work is, for the person reading the board.
+An agent adds one with `comms task add`, then claims files with `--task <id>`,
+and those claims become the task's file list. `comms task done` closes it. A
+solid arrow means one task uses what another produces. A dashed arrow means
+order only.
+
+comms never tells an agent to review, plan or record anything. Whoever runs the
+agents decides that. A thread that wants a second agent to check a task can add
+it with `--review`, and comms then records the verdict.
 
 <p align="center">
   <img src="assets/code-map.png" alt="The code map of this repository: 2,924 files and symbols, 7,169 edges, coloured by community, with the ones somebody is holding right now picked out in white." width="820">
