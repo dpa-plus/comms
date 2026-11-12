@@ -29,6 +29,7 @@ CLEAN_RELEASE_REASON = "auto-claim: file is clean in git"
 SAME_SESSION_REASON = "auto-claim: superseded by a claim from the same session"
 SESSION_END_RESULT = "session ended"
 SILENT_AFTER = timedelta(hours=1)
+AUTO_GRACE = timedelta(minutes=5)
 BRIEFING_CAP = 900
 FOLDER_WINDOW = timedelta(days=14)
 FOLDER_REPOS_SHOWN = 8
@@ -271,17 +272,21 @@ def give_way(st, root: Path, conflicts: list, actor: str,
     """The conflicts that still stand, and the releases of auto-claims that give way.
 
     An auto-claim gives way when it belongs to the caller's own agent session,
-    or when its file has nothing uncommitted. Writes nothing.
+    or when it is older than ``AUTO_GRACE`` and its file has nothing
+    uncommitted. The grace covers the moment between the claim and the edit it
+    was made for, when the file is still clean. Writes nothing.
     """
     from . import cli as _cli
 
+    now = datetime.now(timezone.utc)
     remaining, releases = [], []
     for claim in conflicts:
         reason = ""
         if claim.auto and claim.id in st.claims:
             if agent_session and _identity.owns(st, claim, agent_session):
                 reason = SAME_SESSION_REASON
-            elif _clean_in_git(root, str(claim.scope).split("#", 1)[0]):
+            elif (now - claim.ts >= AUTO_GRACE
+                  and _clean_in_git(root, str(claim.scope).split("#", 1)[0])):
                 reason = CLEAN_RELEASE_REASON
         if not reason:
             remaining.append(claim)

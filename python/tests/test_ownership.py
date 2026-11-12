@@ -379,3 +379,34 @@ def test_a_worktree_that_cannot_be_asked_keeps_the_auto_claim(tmp_path):
     code, _, err = _edit(repo, "src/a.py", SESSION_B)
     assert code == 2, "a missing worktree might hold the holder's change"
     assert claim_id in err
+
+
+# ---------------------------------------------------------------------------
+# finding 3: a fresh auto-claim's file is still clean
+# ---------------------------------------------------------------------------
+
+
+def test_a_fresh_auto_claim_on_a_clean_file_does_not_give_way(tmp_path):
+    repo = _repo(tmp_path)
+    _start_store(repo)
+    assert _edit(repo, "src/a.py", SESSION_A)[0] == 0
+
+    code, _, err = _edit(repo, "src/a.py", SESSION_B)
+    assert code == 2, "A's edit has not landed yet, so the clean file is no sign it is done"
+    assert "BLOCKED" in err
+    assert _claims(repo)["src/a.py"].agent_session == SESSION_A
+
+
+@pytest.mark.parametrize("minutes, gives_way", [(4, False), (6, True)])
+def test_an_auto_claim_yields_to_the_clean_rule_after_its_grace(tmp_path, minutes, gives_way):
+    from comms_graph import hooks as chooks
+
+    assert chooks.AUTO_GRACE == timedelta(minutes=5)
+    repo = _repo(tmp_path)
+    _start_store(repo)
+    _old_auto_claim(repo, SESSION_A, "src/a.py", ago=timedelta(minutes=minutes))
+
+    code, _, _ = _edit(repo, "src/a.py", SESSION_B)
+    assert (code == 0) is gives_way
+    winner = SESSION_B if gives_way else SESSION_A
+    assert _claims(repo)["src/a.py"].agent_session == winner

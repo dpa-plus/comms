@@ -299,11 +299,17 @@ def test_session_end_releases_auto_claims_and_keeps_explicit_ones(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+def _settled_auto_claim(repo: Path, session: str, name: str) -> str:
+    """An auto-claim past its grace period whose file was left as committed."""
+    return _append(repo, _auto_name(session), "claim",
+                   {"intent": "auto: edited", "auto": True, "agent_session": session},
+                   ago=timedelta(minutes=10), scope=[name])
+
+
 def test_an_auto_claim_on_a_clean_file_gives_way_and_says_so(tmp_path):
     repo = _repo(tmp_path)
     _start_store(repo)
-    assert _edit(repo, "src/a.py", SESSION_A)[0] == 0
-    # Session A touched the file but left it as committed.
+    _settled_auto_claim(repo, SESSION_A, "src/a.py")
 
     code, _, err = _edit(repo, "src/a.py", SESSION_B)
     assert code == 0, err
@@ -316,7 +322,7 @@ def test_an_auto_claim_on_a_clean_file_gives_way_and_says_so(tmp_path):
 def test_a_cli_claim_also_gets_past_a_clean_auto_claim(tmp_path):
     repo = _repo(tmp_path)
     _start_store(repo)
-    assert _edit(repo, "src/a.py", SESSION_A)[0] == 0
+    _settled_auto_claim(repo, SESSION_A, "src/a.py")
     code, out, err = _run(repo, ["claim", "src/a.py", "--as", "claude-reviewer"],
                           env=_as_session(SESSION_B))
     assert code == 0, out + err
