@@ -30,7 +30,8 @@ events. Upgrading has one step, `sh install.sh`, described in
   blocks were an agent blocked by itself.
 - **The first edit claims the file.** `hook pre-edit` records a claim the first
   time a session edits a free file through Edit, Write or NotebookEdit. Claims
-  made this way are released at session end, when the same session claims the
+  made this way are released at session end in every repository the session
+  edited, when the same session claims the
   file by hand, or when someone else wants the file, the claim is more than
   five minutes old, and the file has nothing uncommitted in any worktree. When
   two sessions edit one free file at the same moment, one gets the claim and
@@ -84,6 +85,8 @@ events. Upgrading has one step, `sh install.sh`, described in
   exit 0.
 - `check --staged` no longer leaks a git usage error when the coordination
   root is not a git repository.
+- On Linux the edit check no longer lists every directory on the path. It cost
+  3 ms per edit in a 4000-entry directory.
 - Tests can no longer write the real data home. 251 of the 258 store folders
   on the author's machine were test leftovers.
 - Live graph updates preserve search text, keyboard focus, selection and scroll.
