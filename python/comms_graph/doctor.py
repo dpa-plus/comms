@@ -15,6 +15,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -438,7 +439,17 @@ def _fix_board(write_plist: bool) -> list[str]:
         done = _run(["launchctl", "bootstrap", domain, str(plist)])
         out.append("loaded the board job" if done and done.returncode == 0
                    else "launchctl bootstrap failed")
+    _wait_for_board()
     return out
+
+
+def _wait_for_board(seconds: float = 8.0) -> None:
+    """A restarted board takes a moment to listen; the next check must not race it."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if _board_version()[0]:
+            return
+        time.sleep(0.25)
 
 
 # ---------------------------------------------------------------------------
