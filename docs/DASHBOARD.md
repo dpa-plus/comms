@@ -37,7 +37,8 @@ holding a file, however old. A last-reported time shows that an agent sent an
 update, not that it is still running, and nothing expires on its own.
 
 The **Projects** rail lists every comms project on the machine and scopes the
-view to one. It leaves out stores whose repository folder was deleted and stores
+view to one. Run as a login service, the board has no project of its
+own, so it opens the most recently active one. It leaves out stores whose repository folder was deleted and stores
 that live in a temp folder, because nobody works in those.
 
 Task and finding events in an old log stay out of the feed and out of History.
